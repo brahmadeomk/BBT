@@ -1,0 +1,26 @@
+{
+  "config_domain_versions": {
+    "alarms": 1
+  },
+  "profiles": {
+    "default": {
+      "description": "Migrated from legacy busbartherm_system_config",
+      "deltaT": {
+        "watch": 15,
+        "warning": 25,
+        "critical": 35
+      },
+      "ror": {
+        "watch": 15,
+        "warning": 30,
+        "critical": 60,
+        "timeWindowMin": 20
+      },
+      "persistence": {
+        "watchMin": 5,
+        "warningMin": 2,
+        "criticalMin": 1
+      }
+    }
+  }
+}

@@ -79,3 +79,58 @@ companion project chat and recorded in the workplan/design docs there).
   **This changes a file the design chat ratified — flag it there** so
   the companion project's copy of the schema stays in sync with this
   repo's.
+
+- **2026-07-10** — Corrected the R10 worst-case-scan-time formula in
+  `validate-modbus-joints.js` after validating against a real exported
+  production panel (`context.zip`, 21 slaves on one RTU bus at 9600
+  baud, 1s timeout, 2 retries, `Polling`/inter-frame ~10ms). The
+  original formula summed `timeout * retries` into *every* slave's
+  worst case, i.e. assumed all slaves time out on every scan cycle —
+  that real, working, deployed config would have failed R10 at any
+  sane poll interval (~42.6s worst-case for a 30s interval). Changed to
+  sum the normal (successful-response) frame time for every slave, plus
+  **one** `timeout * retries` straggler allowance for the whole bus
+  (at most one non-responding slave per cycle) — still pessimistic
+  enough to be a meaningful check, but no longer rejects reality. Added
+  the real 21-slave config as a regression fixture in
+  `validate-modbus-joints.test.js` so this can't silently regress.
+
+- **2026-07-10** — Built `tools/migrate-legacy-config.js` against the
+  real exported legacy Node-RED context (`SlaveIDList`,
+  `joint_master_zone_A`, `zone_master`, `busbartherm_system_config`,
+  flat bus-timing globals). Findings from the real data, beyond the
+  R10 fix above:
+  - **Legacy hardware is one Modbus slave = one channel** (each
+    `SlaveIDList` entry has exactly one register, `dataBits: 1`) —
+    confirms `channels: 1` per migrated slave is a fact, not a
+    guess. One slave (`slaveID 101`, `"AmbientT"`) is a dedicated
+    ambient probe referenced by every joint's `ambientSlaveID` today
+    (no zone actually differs yet in production — the AC/open-air
+    split this repo now supports is provisioned for, not yet used).
+  - **Function code is always 3** (holding registers) in the migrated
+    output — confirmed from the firmware, not assumed; see the
+    Nano job protocol section in `CLAUDE.md` for the related
+    schema/firmware gap (`function_code: 4` is unimplementable as-is).
+  - **Real persistence data violated A2**: legacy
+    `{watchMin:1, warningMin:1, criticalMin:5}` means CRITICAL alarms
+    took *longer* to raise than WATCH/WARNING. Confirmed with the user
+    and replaced with `{watchMin:5, warningMin:2, criticalMin:1}` via
+    `migrateLegacyConfig`'s `persistenceOverride` option — the tool
+    never silently invents this fix; it's opt-in and logged as a
+    warning either way.
+  - **Real data contained personal information** (`MobileNo`,
+    `EmailID`, `Esettings.RecipDetails` — real names/phones/emails).
+    None of it went into any fixture, migrated output, or commit. The
+    migration tool omits `alarms.notifications` entirely and warns
+    that recipients must be configured directly on the live system,
+    not via a version-controlled file. `IP_Address`/`Mac`/`LocalMac`/
+    `project_config` were also excluded — they belong to the edge node
+    config identity domain, out of scope here, and weren't needed.
+  - Model name, per-slave `poll_interval_s`, `temp_scale`, and bus
+    `retries` have no legacy equivalent and are placeholder/default
+    values flagged in the tool's `warnings` output — real values (part
+    number, scan interval, sensor datasheet scaling) need commissioning
+    review before this config is applied to the actual panel.
+  - Output committed to `config/examples/migrated_modbus_joints.json`
+    and `migrated_alarms.json` — both pass `validateModbusJoints`/
+    `validateAlarms` with zero errors.

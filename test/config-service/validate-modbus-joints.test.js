@@ -268,20 +268,37 @@ describe('R10 - worst-case bus scan time must fit poll interval', () => {
     assert.equal(errorsFor('R10', result).length, 0);
   });
 
-  test('rejects an overloaded bus at a tight poll interval', () => {
+  test('accepts a real 21-slave deployment (9600 baud, 1s timeout, 2 retries, 30s poll)', () => {
+    // Regression fixture from an actual production panel: this worst-case
+    // formula must not reject a config that's deployed and working.
     const doc = validModbusJointsDoc();
-    for (const slave of doc.modbus.slaves) slave.poll_interval_s = 5;
-    for (let i = 3; i <= 5; i++) {
+    doc.modbus.buses[0].baud = 9600;
+    doc.modbus.buses[0].timeout_ms = 1000;
+    doc.modbus.buses[0].retries = 2;
+    doc.modbus.buses[0].inter_frame_ms = 10;
+    doc.modbus.slaves = [];
+    for (let i = 1; i <= 21; i++) {
       doc.modbus.slaves.push({
-        slave_id: `sl0${i}`,
+        slave_id: `sl${String(i).padStart(2, '0')}`,
         bus_id: 'bus1',
         unit_address: i,
-        model: 'BT-SCM-4',
-        channels: 4,
-        poll_interval_s: 5,
-        registers: { function_code: 4, temp_base_addr: 100, temp_word_count: 1, temp_scale: 0.1 },
+        model: 'LEGACY-1CH',
+        channels: 1,
+        poll_interval_s: 30,
+        registers: { function_code: 3, temp_base_addr: 3, temp_word_count: 1, temp_scale: 0.1 },
       });
     }
+    doc.joints = [{ joint_id: 'J01', slave_id: 'sl01', channel: 1, zone_id: 'z1' }];
+    doc.modbus.ambient_sensor = { slave_id: 'sl21', channel: 1 };
+    const result = validateModbusJoints(doc);
+    assert.equal(errorsFor('R10', result).length, 0);
+  });
+
+  test('rejects a bus whose single straggler allowance alone exceeds the poll interval', () => {
+    const doc = validModbusJointsDoc();
+    doc.modbus.buses[0].timeout_ms = 5000; // schema max
+    doc.modbus.buses[0].retries = 5; // schema max
+    for (const slave of doc.modbus.slaves) slave.poll_interval_s = 5; // schema min
     const result = validateModbusJoints(doc);
     assert.equal(result.valid, false);
     assert.equal(errorsFor('R10', result).length, 1);

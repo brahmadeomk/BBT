@@ -16,20 +16,15 @@ function err(rule, message) {
 }
 
 /**
- * Worst-case per-slave transaction time on an RTU bus: frame time at the
- * configured baud plus a full timeout*retries in case the slave never
- * answers. This is deliberately pessimistic (R10 asks for worst case, not
- * average case).
+ * Normal (successful-response) transaction time for one slave: frame
+ * time at the configured baud, no timeout. This is what every slave
+ * costs on every scan cycle in steady state.
  */
-function worstCaseSlaveMs(bus, slave) {
-  const timeoutMs = bus.timeout_ms ?? DEFAULTS.timeout_ms;
-  const retries = bus.retries ?? DEFAULTS.retries;
+function normalFrameMs(bus, slave) {
   const interFrameMs = bus.inter_frame_ms ?? DEFAULTS.inter_frame_ms;
 
   if (bus.type !== 'rtu' || !bus.baud) {
-    // TCP buses aren't subject to RS-485 half-duplex bus-sharing timing;
-    // still bound worst case by timeout*retries per slave.
-    return interFrameMs + timeoutMs * retries;
+    return interFrameMs;
   }
 
   const channels = slave.channels ?? DEFAULTS.channels;
@@ -40,7 +35,27 @@ function worstCaseSlaveMs(bus, slave) {
   const respBytes = 5 + 2 * registerCount; // addr(1) + func(1) + bytecount(1) + data(2*n) + crc(2)
   const charTimeMs = (11 / bus.baud) * 1000; // 11 bits/char worst case (8N1 + framing margin)
 
-  return interFrameMs + (reqBytes + respBytes) * charTimeMs + timeoutMs * retries;
+  return interFrameMs + (reqBytes + respBytes) * charTimeMs;
+}
+
+/**
+ * Worst-case allowance for a single non-responding slave on this bus:
+ * a full timeout*retries. Added once per bus (not once per slave) -
+ * assuming every slave times out on every cycle is unrealistic and was
+ * shown to be wrong against real deployed data: a working 21-slave
+ * panel (9600 baud, 1s timeout, 2 retries) would fail that check at
+ * any sane poll interval. One straggler per cycle is still a
+ * meaningfully pessimistic bound without being absurd.
+ */
+function stragglerMs(bus) {
+  const timeoutMs = bus.timeout_ms ?? DEFAULTS.timeout_ms;
+  const retries = bus.retries ?? DEFAULTS.retries;
+  return timeoutMs * retries;
+}
+
+/** Worst-case total transaction time for one slave, straggler allowance included - kept for external/API convenience. */
+function worstCaseSlaveMs(bus, slave) {
+  return normalFrameMs(bus, slave) + stragglerMs(bus);
 }
 
 /**
@@ -276,7 +291,7 @@ function validateModbusJoints(doc, context = {}) {
     const busById = new Map(buses.map((b) => [b.bus_id, b]));
     for (const [busId, busSlaves] of slavesByBus) {
       const bus = busById.get(busId);
-      const totalMs = busSlaves.reduce((sum, s) => sum + worstCaseSlaveMs(bus, s), 0);
+      const totalMs = busSlaves.reduce((sum, s) => sum + normalFrameMs(bus, s), 0) + stragglerMs(bus);
       const minPollMs = Math.min(...busSlaves.map((s) => (s.poll_interval_s ?? DEFAULTS.poll_interval_s) * 1000));
       if (totalMs > minPollMs) {
         errors.push(
@@ -310,4 +325,4 @@ function validateModbusJoints(doc, context = {}) {
   return { valid: errors.length === 0, errors };
 }
 
-module.exports = { validateModbusJoints, worstCaseSlaveMs, DEFAULTS };
+module.exports = { validateModbusJoints, worstCaseSlaveMs, normalFrameMs, stragglerMs, DEFAULTS };

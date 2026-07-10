@@ -1,0 +1,497 @@
+{
+  "config_domain_versions": {
+    "modbus": 1,
+    "joints": 1
+  },
+  "modbus": {
+    "buses": [
+      {
+        "bus_id": "bus1",
+        "type": "rtu",
+        "port": "/dev/ttyUSB0",
+        "baud": 9600,
+        "parity": "N",
+        "stop_bits": 2,
+        "timeout_ms": 1000,
+        "retries": 2,
+        "inter_frame_ms": 10
+      }
+    ],
+    "slaves": [
+      {
+        "slave_id": "sl01",
+        "bus_id": "bus1",
+        "unit_address": 1,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl02",
+        "bus_id": "bus1",
+        "unit_address": 2,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl03",
+        "bus_id": "bus1",
+        "unit_address": 3,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl04",
+        "bus_id": "bus1",
+        "unit_address": 4,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl05",
+        "bus_id": "bus1",
+        "unit_address": 5,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl06",
+        "bus_id": "bus1",
+        "unit_address": 6,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl07",
+        "bus_id": "bus1",
+        "unit_address": 7,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl08",
+        "bus_id": "bus1",
+        "unit_address": 8,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl09",
+        "bus_id": "bus1",
+        "unit_address": 9,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl10",
+        "bus_id": "bus1",
+        "unit_address": 10,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl11",
+        "bus_id": "bus1",
+        "unit_address": 11,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl12",
+        "bus_id": "bus1",
+        "unit_address": 12,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl13",
+        "bus_id": "bus1",
+        "unit_address": 13,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl14",
+        "bus_id": "bus1",
+        "unit_address": 14,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl15",
+        "bus_id": "bus1",
+        "unit_address": 15,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl16",
+        "bus_id": "bus1",
+        "unit_address": 16,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl17",
+        "bus_id": "bus1",
+        "unit_address": 17,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl18",
+        "bus_id": "bus1",
+        "unit_address": 18,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl19",
+        "bus_id": "bus1",
+        "unit_address": 19,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl20",
+        "bus_id": "bus1",
+        "unit_address": 20,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      },
+      {
+        "slave_id": "sl21",
+        "bus_id": "bus1",
+        "unit_address": 101,
+        "model": "LEGACY-1CH",
+        "channels": 1,
+        "poll_interval_s": 30,
+        "registers": {
+          "function_code": 3,
+          "temp_base_addr": 3,
+          "temp_word_count": 1,
+          "temp_scale": 0.1
+        }
+      }
+    ],
+    "ambient_sensor": {
+      "slave_id": "sl21",
+      "channel": 1
+    }
+  },
+  "joints": [
+    {
+      "joint_id": "J01",
+      "slave_id": "sl01",
+      "channel": 1,
+      "zone_id": "z2",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J02",
+      "slave_id": "sl02",
+      "channel": 1,
+      "zone_id": "z1",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J03",
+      "slave_id": "sl03",
+      "channel": 1,
+      "zone_id": "z1",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J04",
+      "slave_id": "sl04",
+      "channel": 1,
+      "zone_id": "z1",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J05",
+      "slave_id": "sl05",
+      "channel": 1,
+      "zone_id": "z1",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J06",
+      "slave_id": "sl06",
+      "channel": 1,
+      "zone_id": "z1",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J07",
+      "slave_id": "sl07",
+      "channel": 1,
+      "zone_id": "z2",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J08",
+      "slave_id": "sl08",
+      "channel": 1,
+      "zone_id": "z2",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J09",
+      "slave_id": "sl09",
+      "channel": 1,
+      "zone_id": "z2",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J10",
+      "slave_id": "sl10",
+      "channel": 1,
+      "zone_id": "z2",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J11",
+      "slave_id": "sl11",
+      "channel": 1,
+      "zone_id": "z2",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J12",
+      "slave_id": "sl12",
+      "channel": 1,
+      "zone_id": "z2",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J13",
+      "slave_id": "sl13",
+      "channel": 1,
+      "zone_id": "z3",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J14",
+      "slave_id": "sl14",
+      "channel": 1,
+      "zone_id": "z3",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J15",
+      "slave_id": "sl15",
+      "channel": 1,
+      "zone_id": "z3",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J16",
+      "slave_id": "sl16",
+      "channel": 1,
+      "zone_id": "z3",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J17",
+      "slave_id": "sl17",
+      "channel": 1,
+      "zone_id": "z3",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J18",
+      "slave_id": "sl18",
+      "channel": 1,
+      "zone_id": "z3",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J19",
+      "slave_id": "sl19",
+      "channel": 1,
+      "zone_id": "z3",
+      "enabled": true,
+      "threshold_profile": "default"
+    },
+    {
+      "joint_id": "J20",
+      "slave_id": "sl20",
+      "channel": 1,
+      "zone_id": "z3",
+      "enabled": true,
+      "threshold_profile": "default"
+    }
+  ],
+  "zones": [
+    {
+      "zone_id": "z1",
+      "name": "Zone1"
+    },
+    {
+      "zone_id": "z2",
+      "name": "Zone2"
+    },
+    {
+      "zone_id": "z3",
+      "name": "Zone3"
+    }
+  ]
+}
