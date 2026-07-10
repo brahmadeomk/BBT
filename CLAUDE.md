@@ -31,21 +31,42 @@ deployed.
 
 ## Reference documents
 
-The following design artifacts are the source of truth for intent and
-should be dropped into this repo (see paths below) before implementation
-work starts on the phase that needs them:
+| Artifact | Path | Status | Used by |
+|---|---|---|---|
+| `busduct_edge_config.yaml` | `config/busduct_edge_config.yaml` | missing | Config validator |
+| Modbus/joint JSON schema (R1–R13) | `schemas/modbus_joint.schema.json` | missing | Config validator |
+| Workplan (docx or markdown extract) | `docs/workplan.md` | missing | All phases |
+| Existing Node-RED flow | `flows/flows_BBT.json` | present | Nano job compiler, Cloud Gateway |
+| Arduino Nano firmware | `firmware/Nano_IOT.ino` | present | Nano job compiler (target device) |
 
-| Artifact | Expected path | Used by |
-|---|---|---|
-| `busduct_edge_config.yaml` | `config/busduct_edge_config.yaml` | Config validator |
-| Modbus/joint JSON schema (R1–R13) | `schemas/modbus_joint.schema.json` | Config validator |
-| Workplan (docx or markdown extract) | `docs/workplan.md` | All phases |
-| `flows_BBT.json` (existing Node-RED flow) | `flows/flows_BBT.json` | Nano job compiler |
-| Nano config-compiler sketch | `docs/nano_compiler_sketch.md` | Nano job compiler |
+If a "missing" artifact is needed when you start a phase, ask for it
+rather than inventing the schema/config shape from scratch — the design
+intent lives in those documents, not in this file.
 
-If any of these are missing when you start a phase, ask for them rather
-than inventing the schema/config shape from scratch — the design intent
-lives in those documents, not in this file.
+### Nano job protocol (from `firmware/Nano_IOT.ino`)
+
+The Nano job compiler must emit JSON the firmware already parses. Do not
+change this wire format without updating the firmware in lockstep:
+
+- Serial command is a single JSON object, terminated by `}` (the
+  firmware buffers raw bytes until it sees the closing brace — keep
+  payloads under `BUFFER_SIZE`, currently 12288 bytes, and do not embed
+  a literal `}` inside string/number fields).
+- `read`: array where `read[0]` is the packet count, followed by
+  `[slaveID, startAddr, length]` tuples.
+- `write`: array where `write[0]` is the packet count, followed by
+  `[slaveID, startAddr, [data...]]` tuples.
+- `transfer`: array where `transfer[0]` is the packet count, followed by
+  `[sourceSlaveID, sourceStartAddr, length, destinationSlaveID,
+  destinationStartAddr]` tuples (register-to-register copy between two
+  slaves, no intermediate storage on the Pi).
+- `comm`: `[pollingMicroseconds, baudRate, timeoutMs]` — required every
+  time (the firmware re-inits `Serial1` and the Modbus timeout from it
+  on every job update).
+- Firmware emits one JSON line per processed packet on Serial:
+  `{"t":"r"|"w"|"x", ...}` with `"st":"ok"|"err"` (`"err_read"`/
+  `"err_write"` for transfers). The Cloud Gateway / Node-RED side needs
+  to parse this framing, not assume a single batched response.
 
 ## Working agreements
 
