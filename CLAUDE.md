@@ -125,7 +125,7 @@ rule above. **This requires a `functionGlobalContext` entry in the
 Pi's Node-RED `settings.js`** — see
 `src/config-service/node-red/settings.js.example` for the exact
 snippet; function nodes can't `require()` a local (non-npm) repo path
-without it.
+without it. **Full step-by-step Pi setup: `docs/pi-deployment.md`.**
 
 **Deployment target: Node-RED 4.x on Raspberry Pi, Node.js 18+** (this
 repo's own `package.json` targets the same — nothing here is
