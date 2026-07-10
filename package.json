@@ -1,0 +1,18 @@
+{
+  "name": "busduct-edge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BusductTherMo edge stack: config service, Nano job compiler, cloud gateway.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check:cloud-agnostic": "bash tools/check-no-aws-sdk.sh",
+    "ci": "npm run check:cloud-agnostic && npm test"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
+  }
+}
