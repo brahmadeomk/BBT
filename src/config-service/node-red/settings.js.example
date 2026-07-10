@@ -5,8 +5,24 @@
 // Function nodes can't require() a local (non-npm-installed) repo path
 // directly - functionGlobalContext is the standard Node-RED mechanism for
 // sharing a local library across function nodes without installing it as
-// an npm package. Replace the path below with wherever this repo is
-// actually cloned on the Pi.
+// an npm package. This works the same way on Node-RED 4.x as earlier
+// versions - nothing NR4-specific needed here. Replace the path below with
+// wherever this repo is actually cloned on the Pi.
+//
+// Requirements: Node-RED 4.x needs Node.js 18.x/20.x/22.x on the Pi - this
+// repo's own package.json targets the same (engines.node >= 18), so if
+// Node-RED 4 runs at all, `npm ci` in this repo will too. No native
+// dependencies (ajv/ajv-formats are pure JS), so there's nothing
+// ARM-build-specific to worry about on a Raspberry Pi.
+//
+// IMPORTANT - after `git pull`ing a change to anything under
+// src/config-service/, a Node-RED "Deploy" in the editor is NOT enough.
+// functionGlobalContext entries are require()'d once when settings.js is
+// loaded at Node-RED *startup*; Node's module cache means Deploy re-runs
+// the flows but does not re-require this library. Restart the Node-RED
+// service itself (e.g. `sudo systemctl restart nodered`, or
+// `node-red-stop && node-red-start` depending on how it's installed) to
+// pick up library changes.
 
 module.exports = {
   // ...existing settings...

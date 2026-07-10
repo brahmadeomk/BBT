@@ -127,6 +127,16 @@ Pi's Node-RED `settings.js`** — see
 snippet; function nodes can't `require()` a local (non-npm) repo path
 without it.
 
+**Deployment target: Node-RED 4.x on Raspberry Pi, Node.js 18+** (this
+repo's own `package.json` targets the same — nothing here is
+version-specific to Node-RED 4 vs earlier, and there are no native
+dependencies to worry about on ARM). One real operational gotcha this
+setup does have: `functionGlobalContext` entries are `require()`'d once
+when `settings.js` loads at Node-RED **startup** — a plain "Deploy" in
+the editor re-runs the flows but does **not** re-require this library.
+After pulling a change to anything under `src/config-service/`,
+**restart the Node-RED service** (not just Deploy) before testing.
+
 `add`/`add_below`/`edit`/`delete`/`save` (single-row draft edits) keep
 operating on the legacy draft shape in `global` context exactly as
 before — those are UI-side bookkeeping on an intentionally-incomplete
@@ -142,16 +152,18 @@ rejects with a clear error — this refactor doesn't add a way to
 commission new slaves from the dashboard; that's still a separate,
 untouched flow.
 
-**Tested so far: unit tests only** (120 tests, mocking Node-RED's
-`msg`/`global` shape but not running inside actual Node-RED). **Not
-yet verified against a live Node-RED instance** — do that before
-treating Slice 2 as done. Concretely, once Node-RED is available:
-wire the `settings.js` entry, deploy the updated flow, and check the
-existing dashboard save/apply/restore/load paths all still work
-end-to-end (this is Slice 2's own "Done when": *"UI save/apply paths
-work unchanged"*), plus that a rejected push (e.g. an A1/A2 threshold
-ordering violation, or an unprovisioned slave) surfaces the same way
-the dashboard already expects errors to show up.
+**Tested so far: unit tests only** (123 tests, mocking Node-RED's
+`msg`/`global` shape but not running inside actual Node-RED). Live
+testing on the real Node-RED 4 / Pi deployment has started and already
+caught two real bugs (dropped `msg` properties breaking dashboard
+routing; `add`/`edit`/`delete` silently suppressing their table-refresh
+output) — both fixed and covered by new tests, see the decision log.
+**Full live verification is still pending** — do that before treating
+Slice 2 as done: check the existing dashboard save/apply/restore/load
+paths all still work end-to-end (Slice 2's own "Done when": *"UI
+save/apply paths work unchanged"*), plus that a rejected push (e.g. an
+A1/A2 threshold ordering violation, or an unprovisioned slave) surfaces
+the same way the dashboard already expects errors to show up.
 
 ## Nano job protocol (from `firmware/Nano_IOT.ino`)
 

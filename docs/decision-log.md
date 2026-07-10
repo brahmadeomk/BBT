@@ -205,3 +205,24 @@ companion project chat and recorded in the workplan/design docs there).
   edit/delete now expected to produce table-refreshing output) and added
   an explicit msg-property-preservation test to each handler so this
   class of bug can't regress silently. 123 tests total.
+
+- **2026-07-10** — Confirmed deployment target: Node-RED 4.x on
+  Raspberry Pi. Did a proactive compatibility pass rather than react to
+  a specific error - found nothing actually incompatible: no native
+  dependencies (`ajv`/`ajv-formats` are pure JS, fine on ARM), no
+  ESM/CommonJS conflict (`package.json` has no `"type"` field, defaults
+  to CommonJS, matching how `settings.js`/function nodes `require()`
+  things), and Node.js 18+ (this repo's own `engines.node`) is already
+  Node-RED 4's own minimum, so if Node-RED 4 runs at all, this repo
+  runs too. `functionGlobalContext` (used for `busductConfigService`)
+  is unchanged behavior across Node-RED versions - not something NR4's
+  newer per-function-node "external modules" Setup tab replaces, since
+  that feature is for npm-installed packages, not local repo paths.
+  Documented one real, concrete operational gotcha this setup does
+  have, surfaced by the back-and-forth fixing bugs in the previous
+  entry: `functionGlobalContext` entries are `require()`'d once at
+  Node-RED **startup** (when `settings.js` loads), so a plain "Deploy"
+  in the editor does not pick up library changes - the Node-RED service
+  needs an actual restart after `git pull`ing anything under
+  `src/config-service/`. Added this to `settings.js.example` and
+  `CLAUDE.md`'s Node-RED integration section.
