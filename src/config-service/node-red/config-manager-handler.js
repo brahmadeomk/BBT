@@ -8,6 +8,11 @@ const DEFAULT_PROFILE = {
   persistence: { watchMin: 30, warningMin: 15, criticalMin: 5 },
 };
 
+/** Preserves the incoming msg's other properties (topic, req/res, socketid, _msgid, ...) - only payload changes. */
+function withPayload(msg, payload) {
+  return { ...msg, payload };
+}
+
 /**
  * Thin Node-RED handler replacing the "BusbarTherm Config Manager"
  * function node. Keeps the exact msg contract the dashboard already
@@ -33,11 +38,11 @@ function handleConfigManagerMessage(msg, store) {
   const { doc: currentModbusJoints } = store.readDomain('modbus_joints');
 
   if (action === 'save' && msg.payload.config) {
-    return applyDefaultProfile(store, currentAlarms, currentModbusJoints, msg.payload.config, user, 'Configuration saved successfully');
+    return applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, msg.payload.config, user, 'Configuration saved successfully');
   }
 
   if (action === 'restore') {
-    return applyDefaultProfile(store, currentAlarms, currentModbusJoints, DEFAULT_PROFILE, user, 'Default configuration restored');
+    return applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, DEFAULT_PROFILE, user, 'Default configuration restored');
   }
 
   // LOAD (no action): reflect the currently applied default profile, or the
@@ -49,10 +54,10 @@ function handleConfigManagerMessage(msg, store) {
         persistence: currentAlarms.profiles.default.persistence,
       }
     : DEFAULT_PROFILE;
-  return { payload: { config } };
+  return withPayload(msg, { config });
 }
 
-function applyDefaultProfile(store, currentAlarms, currentModbusJoints, flatProfile, user, successMessage) {
+function applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, flatProfile, user, successMessage) {
   const newDoc = {
     config_domain_versions: {
       alarms: (currentAlarms?.config_domain_versions?.alarms ?? 0) + 1,
@@ -81,15 +86,13 @@ function applyDefaultProfile(store, currentAlarms, currentModbusJoints, flatProf
     const currentFlat = currentAlarms?.profiles?.default
       ? { deltaT: currentAlarms.profiles.default.deltaT, ror: currentAlarms.profiles.default.ror, persistence: currentAlarms.profiles.default.persistence }
       : DEFAULT_PROFILE;
-    return {
-      payload: {
-        config: currentFlat,
-        error: result.errors.map((e) => `${e.rule}: ${e.message}`).join('; '),
-      },
-    };
+    return withPayload(msg, {
+      config: currentFlat,
+      error: result.errors.map((e) => `${e.rule}: ${e.message}`).join('; '),
+    });
   }
 
-  return { payload: { config: flatProfile, success: successMessage } };
+  return withPayload(msg, { config: flatProfile, success: successMessage });
 }
 
 module.exports = { handleConfigManagerMessage, DEFAULT_PROFILE };

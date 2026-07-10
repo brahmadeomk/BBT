@@ -16,6 +16,23 @@ function freshStore() {
   return new ConfigStore({ root, validators: { modbus_joints: validateModbusJoints, alarms: validateAlarms } });
 }
 
+describe('handleConfigManagerMessage - msg preservation', () => {
+  test('preserves other msg properties (topic, req/res, socketid) the dashboard needs for routing', () => {
+    const store = freshStore();
+    const fakeReq = {};
+    const fakeRes = {};
+    const result = handleConfigManagerMessage(
+      { topic: 'config', socketid: 'abc123', req: fakeReq, res: fakeRes, _msgid: 'xyz', payload: {} },
+      store
+    );
+    assert.equal(result.topic, 'config');
+    assert.equal(result.socketid, 'abc123');
+    assert.equal(result.req, fakeReq);
+    assert.equal(result.res, fakeRes);
+    assert.equal(result._msgid, 'xyz');
+  });
+});
+
 describe('handleConfigManagerMessage - load', () => {
   test('returns the built-in default when nothing has been applied yet', () => {
     const store = freshStore();

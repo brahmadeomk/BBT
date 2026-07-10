@@ -171,3 +171,37 @@ companion project chat and recorded in the workplan/design docs there).
     shape) but not yet run inside an actual Node-RED instance.** Do
     that once Node-RED is available, per the checklist in `CLAUDE.md`'s
     "Node-RED integration" section, before marking Slice 2 fully done.
+
+- **2026-07-10** — First live Node-RED test found 2 real bugs in the
+  refactor above (both from restructuring control flow instead of
+  mirroring the legacy nodes' exactly):
+  1. **Both handlers constructed a brand-new `msg` object
+     (`{ payload: {...} }`) instead of preserving the incoming `msg`'s
+     other properties** (`topic`, `req`/`res`, `socketid`, `_msgid`).
+     The legacy nodes' fallthrough/load path does `msg.payload = ...;
+     return msg;` - mutating and returning the *same* object, so
+     Node-RED's dashboard routing metadata survived. Reported as "Joint
+     configuration table not showing old data" and "Busbar alarm config
+     table blank" - the load path's reply likely wasn't reaching the
+     right dashboard widget without that metadata. Fixed with a
+     `withPayload(msg, payload)` helper (`{...msg, payload}`) used on
+     every return path in both handlers.
+  2. **`joint-master-handler.js` suppressed output (`msg: null`) for
+     `add`/`add_below`/`edit`/`delete`**, on the assumption those were
+     silent draft mutations. They're not: the legacy node's `if` blocks
+     for those actions don't return early at all - they fall through to
+     the same final `msg.payload = {joints, zones}; return msg;` as a
+     plain load, so the dashboard table repaints immediately after
+     every draft edit. Reported as "add joint pressed, no record
+     added" - the row *was* being added to the draft, but the message
+     carrying it back to the table was being thrown away. Fixed by
+     removing the early returns for those four actions and letting them
+     fall through like the original, persisting the mutated array via
+     `draft` (explicit `global.set`, replacing the original's reliance
+     on Node-RED's default context store returning the same object
+     reference on every `global.get`).
+
+  Rewrote both handlers' tests to assert on the corrected behavior (add/
+  edit/delete now expected to produce table-refreshing output) and added
+  an explicit msg-property-preservation test to each handler so this
+  class of bug can't regress silently. 123 tests total.

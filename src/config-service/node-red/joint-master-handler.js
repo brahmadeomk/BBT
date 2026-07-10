@@ -13,6 +13,11 @@ function findZone(zones, id) {
 
 const EMPTY_ROW = () => ({ joint_name: '', joint_id: '', slaveID: '', ambientSlaveID: '', zone_id: '', editing: true });
 
+/** Preserves the incoming msg's other properties (topic, req/res, socketid, _msgid, ...) - only payload changes. */
+function withPayload(msg, payload) {
+  return { ...msg, payload };
+}
+
 /**
  * Thin Node-RED handler replacing "JointMasterBackEndNode". add/edit/
  * delete/save-one-row keep operating on the legacy draft shape exactly
@@ -22,6 +27,13 @@ const EMPTY_ROW = () => ({ joint_name: '', joint_id: '', slaveID: '', ambientSla
  * check plus a raw global.set, it transforms the completed draft into
  * the new cfg/modbus+joints shape and pushes it through the real
  * validator + ConfigStore, so R1-R14/R11/R12/R13 all apply for real.
+ *
+ * Mirrors the legacy node's control flow exactly: add/add_below/edit/
+ * delete all fall through to the same final "send {joints, zones}"
+ * output (the dashboard table repaints after every draft edit, not
+ * just after save/apply) - only the "no action, something mid-edit"
+ * case suppresses output, to avoid clobbering an in-progress edit on a
+ * plain refresh poll.
  *
  * The caller (the actual Node-RED function node) owns all global
  * context access - this function is pure: given the current draft,
@@ -42,61 +54,54 @@ const EMPTY_ROW = () => ({ joint_name: '', joint_id: '', slaveID: '', ambientSla
  */
 function handleJointMasterMessage(msg, deps) {
   const { slaveList, zones, store, user = 'UI' } = deps;
-  const joints = Array.isArray(msg.payload?.joints) ? msg.payload.joints : deps.joints;
   const action = msg.payload?.action;
   const index = msg.payload?.index;
 
+  if (action === 'apply') {
+    const original = Array.isArray(msg.payload?.joints) ? msg.payload.joints : deps.joints;
+    return applyJoints(msg, original, zones, slaveList, store, user);
+  }
+
+  let joints = [...(Array.isArray(msg.payload?.joints) ? msg.payload.joints : deps.joints)];
+
   if (action === 'add') {
-    const next = [...joints, EMPTY_ROW()];
-    return { msg: null, draft: next };
+    joints.push(EMPTY_ROW());
   }
 
   if (action === 'add_below' && joints[index]) {
-    const next = [...joints];
-    next.splice(index + 1, 0, EMPTY_ROW());
-    return { msg: null, draft: next };
+    joints.splice(index + 1, 0, EMPTY_ROW());
   }
 
   if (action === 'edit' && joints[index]) {
-    const next = [...joints];
-    next[index] = { ...next[index], editing: true };
-    return { msg: null, draft: next };
+    joints[index] = { ...joints[index], editing: true };
   }
 
   if (action === 'save' && joints[index]) {
-    const next = [...joints];
-    const j = { ...next[index] };
-
+    const j = { ...joints[index] };
     const s = findSlave(slaveList, j.slaveID);
     const z = findZone(zones, j.zone_id);
 
     if (!j.joint_name || !j.joint_id || j.slaveID === '') {
-      return { msg: { payload: { joints, zones, error: 'Missing fields', action: 'save' } }, draft: null };
+      return { msg: withPayload(msg, { joints, zones, error: 'Missing fields', action: 'save' }), draft: null };
     }
     if (!s) {
-      return { msg: { payload: { joints, zones, error: 'Invalid Slave', action: 'save' } }, draft: null };
+      return { msg: withPayload(msg, { joints, zones, error: 'Invalid Slave', action: 'save' }), draft: null };
     }
     if (!z) {
-      return { msg: { payload: { joints, zones, error: 'Invalid Zone', action: 'save' } }, draft: null };
+      return { msg: withPayload(msg, { joints, zones, error: 'Invalid Zone', action: 'save' }), draft: null };
     }
 
     j.slaveName = s.parameterName;
     j.slaveTooltip = `Slave ${s.slaveID}\n${s.parameterName}`;
     j.zone_name = z.zone_name;
     j.editing = false;
-    next[index] = j;
+    joints[index] = j;
 
-    return { msg: { payload: { joints: next, zones, success: 'Saved', action: 'save' } }, draft: next };
+    return { msg: withPayload(msg, { joints, zones, success: 'Saved', action: 'save' }), draft: joints };
   }
 
   if (action === 'delete' && joints[index]) {
-    const next = [...joints];
-    next.splice(index, 1);
-    return { msg: null, draft: next };
-  }
-
-  if (action === 'apply') {
-    return applyJoints(joints, zones, slaveList, store, user);
+    joints.splice(index, 1);
   }
 
   const anyEditing = joints.some((j) => j.editing === true);
@@ -104,10 +109,11 @@ function handleJointMasterMessage(msg, deps) {
     return { msg: null, draft: null }; // safe refresh: suppress output, don't clobber an in-progress edit
   }
 
-  return { msg: { payload: { joints, zones } }, draft: null };
+  const mutatingActions = new Set(['add', 'add_below', 'edit', 'delete']);
+  return { msg: withPayload(msg, { joints, zones }), draft: mutatingActions.has(action) ? joints : null };
 }
 
-function applyJoints(joints, zones, slaveList, store, user) {
+function applyJoints(msg, joints, zones, slaveList, store, user) {
   // Legacy-shape pre-checks first, for the same friendly per-row errors the dashboard already shows.
   const usedJoint = new Set();
   const usedSlave = new Set();
@@ -116,15 +122,15 @@ function applyJoints(joints, zones, slaveList, store, user) {
     const z = findZone(zones, j.zone_id);
 
     if (!j.joint_name || !j.joint_id || j.slaveID === '') {
-      return { msg: { payload: { joints, zones, error: 'Incomplete rows', action: 'apply' } }, draft: null };
+      return { msg: withPayload(msg, { joints, zones, error: 'Incomplete rows', action: 'apply' }), draft: null };
     }
-    if (!s) return { msg: { payload: { joints, zones, error: 'Invalid Slave', action: 'apply' } }, draft: null };
-    if (!z) return { msg: { payload: { joints, zones, error: 'Invalid Zone', action: 'apply' } }, draft: null };
+    if (!s) return { msg: withPayload(msg, { joints, zones, error: 'Invalid Slave', action: 'apply' }), draft: null };
+    if (!z) return { msg: withPayload(msg, { joints, zones, error: 'Invalid Zone', action: 'apply' }), draft: null };
     if (usedJoint.has(j.joint_id)) {
-      return { msg: { payload: { joints, zones, error: 'Duplicate Joint ID', action: 'apply' } }, draft: null };
+      return { msg: withPayload(msg, { joints, zones, error: 'Duplicate Joint ID', action: 'apply' }), draft: null };
     }
     if (usedSlave.has(j.slaveID)) {
-      return { msg: { payload: { joints, zones, error: 'Duplicate Slave ID', action: 'apply' } }, draft: null };
+      return { msg: withPayload(msg, { joints, zones, error: 'Duplicate Slave ID', action: 'apply' }), draft: null };
     }
     usedJoint.add(j.joint_id);
     usedSlave.add(j.slaveID);
@@ -134,7 +140,7 @@ function applyJoints(joints, zones, slaveList, store, user) {
   const { doc: currentAlarms } = store.readDomain('alarms');
   if (!currentModbusJoints) {
     return {
-      msg: { payload: { joints, zones, error: 'No cfg/modbus applied yet - run the migration/commissioning step first', action: 'apply' } },
+      msg: withPayload(msg, { joints, zones, error: 'No cfg/modbus applied yet - run the migration/commissioning step first', action: 'apply' }),
       draft: null,
     };
   }
@@ -143,14 +149,12 @@ function applyJoints(joints, zones, slaveList, store, user) {
   const missingSlave = joints.find((j) => !unitAddressToNewSlaveId.has(Number(j.slaveID)));
   if (missingSlave) {
     return {
-      msg: {
-        payload: {
-          joints,
-          zones,
-          error: `Slave ${missingSlave.slaveID} is not yet provisioned in cfg/modbus - commission it first`,
-          action: 'apply',
-        },
-      },
+      msg: withPayload(msg, {
+        joints,
+        zones,
+        error: `Slave ${missingSlave.slaveID} is not yet provisioned in cfg/modbus - commission it first`,
+        action: 'apply',
+      }),
       draft: null,
     };
   }
@@ -194,20 +198,18 @@ function applyJoints(joints, zones, slaveList, store, user) {
 
   if (!result.applied) {
     return {
-      msg: {
-        payload: {
-          joints,
-          zones,
-          error: result.errors.map((e) => `${e.rule}: ${e.message}`).join('; '),
-          action: 'apply',
-        },
-      },
+      msg: withPayload(msg, {
+        joints,
+        zones,
+        error: result.errors.map((e) => `${e.rule}: ${e.message}`).join('; '),
+        action: 'apply',
+      }),
       draft: null,
     };
   }
 
   const savedJoints = joints.map((j) => ({ ...j, editing: false }));
-  return { msg: { payload: { joints: savedJoints, zones, success: 'Configuration saved', action: 'apply' } }, draft: savedJoints };
+  return { msg: withPayload(msg, { joints: savedJoints, zones, success: 'Configuration saved', action: 'apply' }), draft: savedJoints };
 }
 
 module.exports = { handleJointMasterMessage };

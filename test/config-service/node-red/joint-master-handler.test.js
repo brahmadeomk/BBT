@@ -46,18 +46,20 @@ const legacySlaveList = () => [
 const legacyZones = () => [{ zone_id: 'Z1', zone_name: 'Zone1' }];
 
 describe('handleJointMasterMessage - draft bookkeeping (add/edit/delete/save)', () => {
-  test('add appends an empty editable row and suppresses output', () => {
+  test('add appends an empty editable row, persists it, and sends the updated table', () => {
     const store = freshStore();
     const result = handleJointMasterMessage(
       { payload: { action: 'add' } },
       { joints: [], slaveList: legacySlaveList(), zones: legacyZones(), store }
     );
-    assert.equal(result.msg, null);
     assert.equal(result.draft.length, 1);
     assert.equal(result.draft[0].editing, true);
+    // the dashboard table repaints immediately after add, showing the new blank row
+    assert.equal(result.msg.payload.joints.length, 1);
+    assert.equal(result.msg.payload.joints[0].editing, true);
   });
 
-  test('add_below inserts after the given index', () => {
+  test('add_below inserts after the given index and sends the updated table', () => {
     const store = freshStore();
     const joints = [{ joint_id: 'J01', slaveID: 1, zone_id: 'Z1', editing: false }];
     const result = handleJointMasterMessage(
@@ -66,6 +68,18 @@ describe('handleJointMasterMessage - draft bookkeeping (add/edit/delete/save)', 
     );
     assert.equal(result.draft.length, 2);
     assert.equal(result.draft[1].editing, true);
+    assert.equal(result.msg.payload.joints.length, 2);
+  });
+
+  test('edit marks the row editable and sends the updated table', () => {
+    const store = freshStore();
+    const joints = [{ joint_id: 'J01', slaveID: 1, zone_id: 'Z1', editing: false }];
+    const result = handleJointMasterMessage(
+      { payload: { action: 'edit', index: 0 } },
+      { joints, slaveList: legacySlaveList(), zones: legacyZones(), store }
+    );
+    assert.equal(result.draft[0].editing, true);
+    assert.equal(result.msg.payload.joints[0].editing, true);
   });
 
   test('save rejects missing fields without persisting', () => {
@@ -102,7 +116,7 @@ describe('handleJointMasterMessage - draft bookkeeping (add/edit/delete/save)', 
     assert.equal(result.draft[0].editing, false);
   });
 
-  test('delete removes the row at the given index', () => {
+  test('delete removes the row at the given index and sends the updated table', () => {
     const store = freshStore();
     const joints = [{ joint_id: 'J01' }, { joint_id: 'J02' }];
     const result = handleJointMasterMessage(
@@ -111,6 +125,23 @@ describe('handleJointMasterMessage - draft bookkeeping (add/edit/delete/save)', 
     );
     assert.equal(result.draft.length, 1);
     assert.equal(result.draft[0].joint_id, 'J02');
+    assert.equal(result.msg.payload.joints.length, 1);
+  });
+
+  test('preserves other msg properties (topic, req/res, socketid) the dashboard needs for routing', () => {
+    const store = freshStore();
+    const joints = [{ joint_id: 'J01' }];
+    const fakeReq = {};
+    const fakeRes = {};
+    const result = handleJointMasterMessage(
+      { topic: 'joints', socketid: 'abc123', req: fakeReq, res: fakeRes, _msgid: 'xyz', payload: { action: 'add' } },
+      { joints, slaveList: legacySlaveList(), zones: legacyZones(), store }
+    );
+    assert.equal(result.msg.topic, 'joints');
+    assert.equal(result.msg.socketid, 'abc123');
+    assert.equal(result.msg.req, fakeReq);
+    assert.equal(result.msg.res, fakeRes);
+    assert.equal(result.msg._msgid, 'xyz');
   });
 
   test('suppresses output on a plain refresh while a row is mid-edit (safe refresh)', () => {
