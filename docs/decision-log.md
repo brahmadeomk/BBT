@@ -56,3 +56,26 @@ companion project chat and recorded in the workplan/design docs there).
   in-memory array — Node-RED global context isn't durable across a
   restart unless separately configured to persist, and the workplan
   requires the trail to survive.
+
+- **2026-07-10** — Extended `busduct_modbus_joint_config.schema.json`
+  (not just the validator) with a schema/architecture change: **ambient
+  sensor override chain**. Confirmed with the user that this is a real
+  physical requirement, not a legacy artifact to migrate away from — a
+  busduct run passes through both air-conditioned and open-air zones,
+  so a single panel-wide `modbus.ambient_sensor` can't represent it. The
+  legacy `JointMasterBackEndNode` handled this with a per-joint
+  `ambientSlaveID` on every joint; instead of reproducing that (one
+  field to keep in sync per joint), added an optional `ambient_sensor`
+  to `zones[]` (so every joint in a zone inherits it) with an optional
+  `ambient_sensor` override on individual `joints[]` for the rare
+  exception within a zone (e.g. a joint right next to a vent). Both use
+  a new shared `definitions/ambient_sensor_ref`. Resolution order:
+  joint override → zone override → `modbus.ambient_sensor` (panel
+  default). R9's wording changed from "ambient_sensor must be
+  configured" to "every joint must resolve one through the chain"; R7's
+  collision check now covers ambient claims at all three levels, not
+  just the panel one; added **R14** (new) for referential integrity of
+  any ambient override present, independent of whether alarms/R9 apply.
+  **This changes a file the design chat ratified — flag it there** so
+  the companion project's copy of the schema stays in sync with this
+  repo's.

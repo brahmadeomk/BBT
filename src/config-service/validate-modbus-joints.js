@@ -45,9 +45,17 @@ function worstCaseSlaveMs(bus, slave) {
 
 /**
  * Validates a cfg/modbus + cfg/joints document: JSON Schema, then the
- * mandatory cross-field rules R1-R12 (R13 is an apply-time workflow
- * requirement enforced by the config store, not a document validation
- * rule - see src/config-service/store.js).
+ * mandatory cross-field rules R1-R12 and R14 (R13 is an apply-time
+ * workflow requirement enforced by the config store, not a document
+ * validation rule - see src/config-service/store.js).
+ *
+ * Ambient sensor resolution (R7/R9/R14) follows a 3-level override
+ * chain per joint: joints[].ambient_sensor, else zones[].ambient_sensor
+ * for that joint's zone, else modbus.ambient_sensor (panel-wide
+ * default) - added so a busduct run that passes through both
+ * air-conditioned and open-air zones can use a different ambient
+ * reference per zone (or per joint, for an exception within a zone)
+ * instead of one panel-wide ambient for the whole run.
  *
  * @param {object} doc - the cfg/modbus + cfg/joints document
  * @param {object} [context]
@@ -68,11 +76,25 @@ function validateModbusJoints(doc, context = {}) {
   const slaves = doc.modbus.slaves;
   const joints = doc.joints;
   const zones = doc.zones;
-  const ambientSensor = doc.modbus.ambient_sensor;
+  const panelAmbient = doc.modbus.ambient_sensor;
 
   const busIds = new Set(buses.map((b) => b.bus_id));
   const slaveById = new Map(slaves.map((s) => [s.slave_id, s]));
   const zoneIds = zones ? new Set(zones.map((z) => z.zone_id)) : null;
+  const zoneById = zones ? new Map(zones.map((z) => [z.zone_id, z])) : new Map();
+
+  /**
+   * Resolves the ambient sensor that applies to a joint: its own
+   * override, else its zone's override, else the panel-wide default.
+   * Returns { ref, source } or null if nothing applies at any level.
+   */
+  function resolveEffectiveAmbient(joint) {
+    if (joint.ambient_sensor) return { ref: joint.ambient_sensor, source: `joint '${joint.joint_id}' override` };
+    const zone = zoneById.get(joint.zone_id);
+    if (zone?.ambient_sensor) return { ref: zone.ambient_sensor, source: `zone '${zone.zone_id}' override` };
+    if (panelAmbient) return { ref: panelAmbient, source: 'panel default' };
+    return null;
+  }
 
   // R3: slaves[].bus_id must exist in buses[].bus_id
   for (const slave of slaves) {
@@ -147,7 +169,7 @@ function validateModbusJoints(doc, context = {}) {
     }
   }
 
-  // R7: (slave_id, channel) referenced by at most one joint, and not also by ambient_sensor
+  // R7: (slave_id, channel) referenced by at most one joint, and not also by any effective ambient_sensor
   {
     const claimedBy = new Map();
     for (const joint of joints) {
@@ -163,13 +185,22 @@ function validateModbusJoints(doc, context = {}) {
         claimedBy.set(key, joint.joint_id);
       }
     }
-    if (ambientSensor) {
-      const key = `${ambientSensor.slave_id}:${ambientSensor.channel}`;
+
+    const ambientClaims = [];
+    if (panelAmbient) ambientClaims.push({ ref: panelAmbient, label: 'modbus.ambient_sensor (panel default)' });
+    for (const zone of zones || []) {
+      if (zone.ambient_sensor) ambientClaims.push({ ref: zone.ambient_sensor, label: `zone '${zone.zone_id}' ambient_sensor` });
+    }
+    for (const joint of joints) {
+      if (joint.ambient_sensor) ambientClaims.push({ ref: joint.ambient_sensor, label: `joint '${joint.joint_id}' ambient_sensor override` });
+    }
+    for (const claim of ambientClaims) {
+      const key = `${claim.ref.slave_id}:${claim.ref.channel}`;
       if (claimedBy.has(key)) {
         errors.push(
           err(
             'R7',
-            `slave '${ambientSensor.slave_id}' channel ${ambientSensor.channel} is used by both ambient_sensor and joint '${claimedBy.get(key)}'`
+            `slave '${claim.ref.slave_id}' channel ${claim.ref.channel} is used by both ${claim.label} and joint '${claimedBy.get(key)}'`
           )
         );
       }
@@ -195,25 +226,42 @@ function validateModbusJoints(doc, context = {}) {
     }
   }
 
-  // R9: if alarms are in use (every profile requires deltaT), ambient_sensor must be configured and valid
+  // R9: if alarms are in use (every profile requires deltaT), every joint must resolve
+  // an effective ambient sensor via joint override -> zone override -> panel default.
   if (context.alarmsDoc) {
-    if (!ambientSensor) {
-      errors.push(err('R9', 'cfg/alarms profiles use deltaT but modbus.ambient_sensor is not configured'));
-    } else {
-      const ambientSlave = slaveById.get(ambientSensor.slave_id);
-      if (!ambientSlave) {
-        errors.push(err('R9', `ambient_sensor references unknown slave_id '${ambientSensor.slave_id}'`));
-      } else {
-        const channels = ambientSlave.channels ?? DEFAULTS.channels;
-        if (ambientSensor.channel > channels) {
-          errors.push(
-            err(
-              'R9',
-              `ambient_sensor channel ${ambientSensor.channel} exceeds slave '${ambientSensor.slave_id}' channel count ${channels}`
-            )
-          );
-        }
+    for (const joint of joints) {
+      if (!resolveEffectiveAmbient(joint)) {
+        errors.push(
+          err(
+            'R9',
+            `joint '${joint.joint_id}' has no ambient sensor available (no joint override, zone override for '${joint.zone_id}', or panel default)`
+          )
+        );
       }
+    }
+  }
+
+  // R14: any ambient_sensor set at panel, zone, or joint level must reference a real
+  // slave/channel, independent of whether alarms/R9 are in play.
+  {
+    const checkAmbientRef = (ref, label) => {
+      if (!ref) return;
+      const slave = slaveById.get(ref.slave_id);
+      if (!slave) {
+        errors.push(err('R14', `${label} references unknown slave_id '${ref.slave_id}'`));
+        return;
+      }
+      const channels = slave.channels ?? DEFAULTS.channels;
+      if (ref.channel > channels) {
+        errors.push(err('R14', `${label} channel ${ref.channel} exceeds slave '${ref.slave_id}' channel count ${channels}`));
+      }
+    };
+    checkAmbientRef(panelAmbient, 'modbus.ambient_sensor');
+    for (const zone of zones || []) {
+      checkAmbientRef(zone.ambient_sensor, `zone '${zone.zone_id}' ambient_sensor`);
+    }
+    for (const joint of joints) {
+      checkAmbientRef(joint.ambient_sensor, `joint '${joint.joint_id}' ambient_sensor override`);
     }
   }
 

@@ -28,7 +28,7 @@ across all of them.**
   rule or grep check in the test script (per the workplan's Working
   Agreement), not just by convention.
 
-- **Edge validation rules R1–R13** (`cfg/modbus` + `cfg/joints`, in
+- **Edge validation rules R1–R14** (`cfg/modbus` + `cfg/joints`, in
   `config/schemas/busduct_modbus_joint_config.schema.json`) and **A1–A10**
   (`cfg/alarms`, in `config/schemas/busduct_alarms_config.schema.json`)
   are mandatory. Every rule needs at least one passing and one failing
@@ -51,7 +51,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | `/docs` | Design artifacts, decision log |
 | `/config/schemas` | The JSON Schemas — source of truth for `cfg/modbus`, `cfg/joints`, `cfg/alarms` |
 | `/config/examples` | Reference config instances per domain; migration snapshots (empty — Slice 2) |
-| `/src/config-service` | Config store, validator (R1–R13, A1–A10), version manager, audit writer, Nano job compiler (empty — Slice 2+) |
+| `/src/config-service` | Config store, validator (R1–R14, A1–A10), version manager, audit writer, Nano job compiler (empty — Slice 2+) |
 | `/src/cloud-gateway` | Batcher, alarm publisher, heartbeat, outbox, transport interface (empty — Slice 5+) |
 | `/src/adapters/aws` | AWS-specific: endpoint config, Fleet Provisioning, Basic Ingest mapping (empty — Slice 6+) |
 | `/flows` | Node-RED flow exports — `flows_BBT.json` is the current production flow |
@@ -66,7 +66,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | Edge Implementation Work Plan (this plan) | `docs/BusductTherMo_Edge_Implementation_WorkPlan.md` (+ original `.docx`) | present |
 | Edge Cloud Readiness Workplan (phase-level plan this one maps to; referenced in §1, §4 Slice 8, needed for the final acceptance checklist) | — | **missing** |
 | Edge node config spec | `docs/busduct_edge_config.yaml` | present |
-| Modbus/joint schema (R1–R13) | `config/schemas/busduct_modbus_joint_config.schema.json` | present |
+| Modbus/joint schema (R1–R14) | `config/schemas/busduct_modbus_joint_config.schema.json` | present |
 | Alarms schema (A1–A10) | `config/schemas/busduct_alarms_config.schema.json` | present |
 | Existing Node-RED flow | `flows/flows_BBT.json` | present |
 | Arduino Nano firmware | `firmware/Nano_IOT.ino` | present |
@@ -83,7 +83,15 @@ units (R11/R12 govern `cfg/modbus`/`cfg/joints`; A6 governs `cfg/alarms`):
 
 - **`cfg/modbus` + `cfg/joints`** — wiring/commissioning reality: buses,
   slaves, register maps, joint↔slave↔channel↔zone mapping. Remote
-  changes gated to maintenance mode only (R12).
+  changes gated to maintenance mode only (R12). Ambient sensor for
+  delta-T resolves per joint through a 3-level override chain -
+  `joints[].ambient_sensor`, else `zones[].ambient_sensor` for that
+  joint's zone, else `modbus.ambient_sensor` (panel-wide default) - R9
+  requires every joint to resolve one when alarms use deltaT, R14
+  checks any override present is a valid slave/channel. Added so a
+  busduct run through both air-conditioned and open-air zones can use a
+  different ambient reference per zone (or per joint, for an exception
+  within a zone) instead of one ambient for the whole panel.
 - **`cfg/alarms`** — named threshold `profiles` (object keyed by profile
   name; `default` is mandatory, can't be deleted/renamed — A4), each
   with `deltaT`/`ror`/`persistence` thresholds (ordering A1/A2),

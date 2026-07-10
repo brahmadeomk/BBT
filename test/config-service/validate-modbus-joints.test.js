@@ -132,9 +132,25 @@ describe('R7 - double mapping of (slave_id, channel)', () => {
     assert.equal(errorsFor('R7', result).length, 1);
   });
 
-  test('rejects ambient_sensor colliding with a joint mapping', () => {
+  test('rejects panel ambient_sensor colliding with a joint mapping', () => {
     const doc = validModbusJointsDoc();
     doc.modbus.ambient_sensor = { slave_id: doc.joints[0].slave_id, channel: doc.joints[0].channel };
+    const result = validateModbusJoints(doc);
+    assert.equal(result.valid, false);
+    assert.equal(errorsFor('R7', result).length, 1);
+  });
+
+  test('rejects a zone-level ambient_sensor colliding with a joint mapping', () => {
+    const doc = validModbusJointsDoc();
+    doc.zones[0].ambient_sensor = { slave_id: doc.joints[0].slave_id, channel: doc.joints[0].channel };
+    const result = validateModbusJoints(doc);
+    assert.equal(result.valid, false);
+    assert.equal(errorsFor('R7', result).length, 1);
+  });
+
+  test('rejects a joint-level ambient_sensor override colliding with another joint mapping', () => {
+    const doc = validModbusJointsDoc();
+    doc.joints[3].ambient_sensor = { slave_id: doc.joints[0].slave_id, channel: doc.joints[0].channel };
     const result = validateModbusJoints(doc);
     assert.equal(result.valid, false);
     assert.equal(errorsFor('R7', result).length, 1);
@@ -171,12 +187,30 @@ describe('R9 - ambient sensor required when alarms use deltaT', () => {
     assert.equal(errorsFor('R9', result).length, 0);
   });
 
-  test('rejects missing ambient_sensor when alarms use deltaT', () => {
+  test('rejects when no joint can resolve an ambient sensor at any level', () => {
     const doc = validModbusJointsDoc();
-    delete doc.modbus.ambient_sensor;
+    delete doc.modbus.ambient_sensor; // no panel default, no zone/joint overrides in the base fixture
     const result = validateModbusJoints(doc, { alarmsDoc: validAlarmsDoc() });
     assert.equal(result.valid, false);
-    assert.equal(errorsFor('R9', result).length, 1);
+    assert.equal(errorsFor('R9', result).length, doc.joints.length);
+  });
+
+  test('a zone-level override satisfies R9 for every joint in that zone, even with no panel default', () => {
+    const doc = validModbusJointsDoc();
+    delete doc.modbus.ambient_sensor;
+    doc.zones[0].ambient_sensor = { slave_id: 'sl02', channel: 2 }; // all base-fixture joints are in zone z1
+    const result = validateModbusJoints(doc, { alarmsDoc: validAlarmsDoc() });
+    assert.equal(errorsFor('R9', result).length, 0);
+  });
+
+  test('a joint-level override satisfies R9 for that joint alone', () => {
+    const doc = validModbusJointsDoc();
+    delete doc.modbus.ambient_sensor;
+    doc.joints[0].ambient_sensor = { slave_id: 'sl02', channel: 2 };
+    const result = validateModbusJoints(doc, { alarmsDoc: validAlarmsDoc() });
+    // the other 3 joints still have nothing to fall back on
+    assert.equal(errorsFor('R9', result).length, doc.joints.length - 1);
+    assert.ok(!errorsFor('R9', result).some((e) => e.message.includes(doc.joints[0].joint_id)));
   });
 
   test('is not evaluated when no alarms context is supplied', () => {
@@ -184,6 +218,47 @@ describe('R9 - ambient sensor required when alarms use deltaT', () => {
     delete doc.modbus.ambient_sensor;
     const result = validateModbusJoints(doc);
     assert.equal(errorsFor('R9', result).length, 0);
+  });
+});
+
+describe('R14 - ambient_sensor references must be valid, at any level', () => {
+  test('accepts valid ambient_sensor references at every level', () => {
+    const doc = validModbusJointsDoc();
+    doc.zones[0].ambient_sensor = { slave_id: 'sl02', channel: 2 };
+    doc.joints[0].ambient_sensor = { slave_id: 'sl02', channel: 3 };
+    const result = validateModbusJoints(doc);
+    assert.equal(errorsFor('R14', result).length, 0);
+  });
+
+  test('rejects a panel ambient_sensor referencing an unknown slave', () => {
+    const doc = validModbusJointsDoc();
+    doc.modbus.ambient_sensor = { slave_id: 'sl99', channel: 1 };
+    const result = validateModbusJoints(doc);
+    assert.equal(result.valid, false);
+    assert.equal(errorsFor('R14', result).length, 1);
+  });
+
+  test('rejects a zone-level ambient_sensor with an out-of-range channel', () => {
+    const doc = validModbusJointsDoc();
+    doc.zones[0].ambient_sensor = { slave_id: 'sl01', channel: 6 }; // sl01 only has 4 channels
+    const result = validateModbusJoints(doc);
+    assert.equal(result.valid, false);
+    assert.equal(errorsFor('R14', result).length, 1);
+  });
+
+  test('rejects a joint-level ambient_sensor override referencing an unknown slave', () => {
+    const doc = validModbusJointsDoc();
+    doc.joints[0].ambient_sensor = { slave_id: 'sl99', channel: 1 };
+    const result = validateModbusJoints(doc);
+    assert.equal(result.valid, false);
+    assert.equal(errorsFor('R14', result).length, 1);
+  });
+
+  test('is checked even without an alarms context (independent of R9)', () => {
+    const doc = validModbusJointsDoc();
+    doc.modbus.ambient_sensor = { slave_id: 'sl99', channel: 1 };
+    const result = validateModbusJoints(doc); // no alarmsDoc
+    assert.equal(errorsFor('R14', result).length, 1);
   });
 });
 

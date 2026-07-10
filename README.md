@@ -15,7 +15,7 @@ plan — that workplan is the source of truth for what gets built when.
 - `docs/` — workplan (`.md` + original `.docx`), edge node config spec
   (`busduct_edge_config.yaml`), decision log
 - `config/schemas/` — the JSON Schemas: `busduct_modbus_joint_config.schema.json`
-  (`cfg/modbus` + `cfg/joints`, rules R1–R13) and
+  (`cfg/modbus` + `cfg/joints`, rules R1–R14) and
   `busduct_alarms_config.schema.json` (`cfg/alarms`, rules A1–A10)
 - `config/examples/` — reference config instances per domain, migration
   snapshots (empty until Slice 2)
