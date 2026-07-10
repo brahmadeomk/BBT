@@ -1,0 +1,120 @@
+# =====================================================================
+# BusductTherMo — Edge Node Configuration Specification (v1.0 draft)
+# One file per panel. Written at commissioning; identity section is
+# immutable after provisioning. All other sections updatable via
+# remote config (shadow / cmd channel) with local validation.
+# =====================================================================
+
+config_version: 1            # incremented by cloud on every push; edge
+                             # rejects versions <= currently applied
+
+# ---------------------------------------------------------------
+# 1. IDENTITY — set once at commissioning, never changed remotely
+# ---------------------------------------------------------------
+identity:
+  customer_id: c1024          # internal immutable code, NOT customer name
+  site_id: s02                # substation / plant code
+  panel_id: p07               # panel / cluster code
+  thing_name: bt-c1024-s02-p07   # AWS IoT Thing name = MQTT client ID
+  hw_serial: BT26-000317
+  fw_version: 2.4.1           # reported, not configured
+
+# ---------------------------------------------------------------
+# 2. CLOUD CONNECTION
+# ---------------------------------------------------------------
+mqtt:
+  endpoint: xxxxxxxx-ats.iot.ap-south-1.amazonaws.com
+  port: 8883
+  cert_path: /etc/busduct/certs/device.pem.crt
+  key_path: /etc/busduct/certs/private.pem.key
+  root_ca_path: /etc/busduct/certs/AmazonRootCA1.pem
+  keep_alive_sec: 300         # long keep-alive lowers connection-minute cost
+  reconnect_backoff:
+    initial_sec: 2
+    max_sec: 300              # exponential backoff, jittered
+
+# ---------------------------------------------------------------
+# 3. TOPICS — templates resolved from identity at startup
+# ---------------------------------------------------------------
+topics:
+  telemetry: dt/{customer_id}/{site_id}/{panel_id}/tel
+  alarm:     dt/{customer_id}/{site_id}/{panel_id}/alarm
+  # Basic Ingest variant (cheaper, no broker fan-out). Enable once
+  # IoT Rules are in place:
+  telemetry_basic_ingest: $aws/rules/btTelemetry/dt/{customer_id}/{site_id}/{panel_id}/tel
+  use_basic_ingest: false
+  # Config delivery: "shadow" (recommended) or "cmd"
+  config_channel: shadow
+  cmd_config:     cmd/{customer_id}/{site_id}/{panel_id}/config
+  cmd_config_ack: cmd/{customer_id}/{site_id}/{panel_id}/config/ack
+
+# ---------------------------------------------------------------
+# 4. PUBLISH POLICY — the cost lever
+# ---------------------------------------------------------------
+publish:
+  telemetry:
+    mode: batch_aggregate     # never per-joint, never per-sample
+    interval_min: 10          # one message per panel per interval
+    qos: 0                    # loss-tolerant; historian has full data
+    payload_fields:           # per joint, computed over the interval
+      - dt_min
+      - dt_max
+      - dt_avg
+      - ror_max
+      - t_max
+    include_ambient: true
+    max_payload_bytes: 4800   # stay under 5 KB AWS metering block
+  alarm:
+    mode: on_state_transition # RAISE, CLEAR, ACK only — no repeats
+    qos: 1                    # must not be lost
+    include_context:          # snapshot sent with each event
+      - joint_id
+      - level                 # WATCH | WARNING | CRITICAL
+      - kpi                   # delta_t | rate_of_rise
+      - value
+      - threshold
+      - persistence_min
+  heartbeat:
+    interval_min: 60          # tiny liveness ping; cloud marks panel
+    qos: 0                    #   offline after 2 missed heartbeats
+
+# ---------------------------------------------------------------
+# 5. STORE-AND-FORWARD BUFFER (link-down resilience)
+# ---------------------------------------------------------------
+buffer:
+  path: /var/busduct/outbox
+  max_size_mb: 200
+  drain_rate_msgs_per_sec: 5  # gentle drain on reconnect
+  overflow_policy:
+    telemetry: drop_oldest    # acceptable loss; edge historian keeps raw
+    alarm: never_drop         # alarms evict telemetry if space needed
+  timestamp_source: edge_utc  # original event time in payload, always
+
+# ---------------------------------------------------------------
+# 6. REMOTE CONFIG HANDLING (thresholds & persistence)
+# ---------------------------------------------------------------
+remote_config:
+  validate_before_apply: true
+  validation_rules:
+    dt_thresholds_c:        { min: 5,  max: 80,  order: watch < warning < critical }
+    ror_thresholds_c_hr:    { min: 5,  max: 120, order: watch < warning < critical }
+    ror_time_window_min:    { min: 5,  max: 60 }
+    persistence_min:        { min: 1,  max: 120, order: watch >= warning >= critical }
+  apply_mode: atomic          # all-or-nothing; partial configs rejected
+  on_success:
+    - write_local_audit_trail # existing BusbarTherm audit log
+    - report_applied_version  # shadow "reported" or cmd ack
+  on_failure:
+    - keep_current_config
+    - report_rejection_reason
+  fallback: last_known_good   # if config file corrupt at boot
+
+# ---------------------------------------------------------------
+# 7. LOCAL RETENTION (unchanged responsibilities)
+# ---------------------------------------------------------------
+local:
+  historian_full_resolution_days: 30
+  alarm_history_entries: 1000
+  audit_trail_entries: 5000
+  raw_data_upload: on_demand_only   # cloud pulls slices via IoT Job
+                                     # when investigating an incident

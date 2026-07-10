@@ -11,15 +11,18 @@ edge validation rules R1–R13).
 
 ## Repo layout
 
-- `config/` — edge config (e.g. `busduct_edge_config.yaml`)
-- `schemas/` — Modbus/joint config JSON schema (validation rules R1–R13)
-- `docs/` — workplan and design reference docs
+- `config/busduct_edge_config.yaml` — edge node config spec: identity,
+  MQTT/AWS IoT connection, topics, publish policy, store-and-forward
+  buffer, remote-config validation rules, local retention
+- `schemas/modbus_joint.schema.json` — `cfg/modbus` + `cfg/joints` JSON
+  Schema (buses, slaves, register maps, joint/zone mapping) with the
+  mandatory cross-field edge validation rules R1–R13
+- `docs/` — workplan and design reference docs (still to add)
 - `flows/` — Node-RED flow export (`flows_BBT.json`, 13 tabs incl.
   `modbusMaster_V2`, `BusbarTherMo`, `Alert system`, `Dashboard`)
 - `firmware/` — Arduino Nano sketch (`Nano_IOT.ino`) that consumes the
   read/write/transfer job JSON produced by the Nano job compiler and
   drives the RS-485 Modbus RTU bus
 
-Drop the remaining design artifacts (`busduct_edge_config.yaml`, the
-schema, the workplan) from the companion chat/project space into the
-paths above before starting the phase that depends on them.
+Still missing: the `cfg/alarms` thresholds schema and the workplan —
+see the table in `CLAUDE.md` for what each phase depends on.

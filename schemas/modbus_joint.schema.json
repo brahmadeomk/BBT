@@ -1,0 +1,177 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "busduct/cfg/modbus-joints/v1",
+  "title": "BusductTherMo — Modbus & Joint Configuration (cfg/modbus + cfg/joints)",
+  "description": "Commissioning-time configuration describing physical wiring reality. Versioned independently from alarm thresholds. Applied atomically; edge validates schema AND cross-field rules (see x-edge-validation) before accepting.",
+  "type": "object",
+  "required": ["config_domain_versions", "modbus", "joints"],
+  "additionalProperties": false,
+
+  "properties": {
+
+    "config_domain_versions": {
+      "type": "object",
+      "description": "Monotonic version per domain. Edge rejects a push whose version is <= currently applied version for that domain.",
+      "required": ["modbus", "joints"],
+      "properties": {
+        "modbus": { "type": "integer", "minimum": 1 },
+        "joints": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "modbus": {
+      "type": "object",
+      "required": ["buses", "slaves"],
+      "additionalProperties": false,
+      "properties": {
+
+        "buses": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "required": ["bus_id", "type"],
+            "additionalProperties": false,
+            "properties": {
+              "bus_id":    { "type": "string", "pattern": "^bus[0-9]{1,2}$" },
+              "type":      { "enum": ["rtu", "tcp"] },
+              "port":      { "type": "string", "description": "RTU only, e.g. /dev/ttyS1" },
+              "baud":      { "enum": [9600, 19200, 38400, 57600, 115200] },
+              "parity":    { "enum": ["N", "E", "O"], "default": "N" },
+              "stop_bits": { "enum": [1, 2], "default": 1 },
+              "host":      { "type": "string", "format": "ipv4", "description": "TCP only" },
+              "tcp_port":  { "type": "integer", "minimum": 1, "maximum": 65535, "default": 502 },
+              "timeout_ms":       { "type": "integer", "minimum": 50, "maximum": 5000, "default": 500 },
+              "retries":          { "type": "integer", "minimum": 0, "maximum": 5, "default": 2 },
+              "inter_frame_ms":   { "type": "integer", "minimum": 0, "maximum": 500, "default": 20 }
+            }
+          }
+        },
+
+        "slaves": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "required": ["slave_id", "bus_id", "unit_address", "model", "registers"],
+            "additionalProperties": false,
+            "properties": {
+              "slave_id":     { "type": "string", "pattern": "^sl[0-9]{2}$", "description": "Logical ID referenced by joints. Stable even if unit_address changes." },
+              "bus_id":       { "type": "string", "pattern": "^bus[0-9]{1,2}$" },
+              "unit_address": { "type": "integer", "minimum": 1, "maximum": 247 },
+              "model":        { "type": "string", "maxLength": 32, "description": "Sensor module model, e.g. BT-SCM-4" },
+              "hw_serial":    { "type": "string", "maxLength": 32 },
+              "channels":     { "type": "integer", "minimum": 1, "maximum": 8, "default": 4, "description": "Number of temperature channels on this module" },
+              "poll_interval_s": { "type": "integer", "minimum": 5, "maximum": 300, "default": 30 },
+              "registers": {
+                "type": "object",
+                "required": ["function_code", "temp_base_addr", "temp_scale"],
+                "additionalProperties": false,
+                "properties": {
+                  "function_code":   { "enum": [3, 4], "description": "3 = holding, 4 = input registers" },
+                  "temp_base_addr":  { "type": "integer", "minimum": 0, "maximum": 65535 },
+                  "temp_word_count": { "type": "integer", "minimum": 1, "maximum": 2, "default": 1 },
+                  "temp_scale":      { "type": "number", "enum": [1, 0.1, 0.01], "description": "Multiplier raw->degC" },
+                  "temp_offset":     { "type": "number", "default": 0 },
+                  "byte_order":      { "enum": ["AB", "BA", "ABCD", "DCBA", "BADC", "CDAB"], "default": "AB" },
+                  "status_addr":     { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Optional module health register" }
+                }
+              }
+            }
+          }
+        },
+
+        "ambient_sensor": {
+          "type": "object",
+          "description": "Which slave/channel provides ambient T for delta-T computation.",
+          "required": ["slave_id", "channel"],
+          "properties": {
+            "slave_id": { "type": "string", "pattern": "^sl[0-9]{2}$" },
+            "channel":  { "type": "integer", "minimum": 1, "maximum": 8 }
+          }
+        }
+      }
+    },
+
+    "joints": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "required": ["joint_id", "slave_id", "channel", "zone_id"],
+        "additionalProperties": false,
+        "properties": {
+          "joint_id":  { "type": "string", "pattern": "^J[0-9]{2,3}$", "description": "Display ID used on HMI, heat map, alarms, cloud payloads" },
+          "slave_id":  { "type": "string", "pattern": "^sl[0-9]{2}$" },
+          "channel":   { "type": "integer", "minimum": 1, "maximum": 8 },
+          "zone_id":   { "type": "string", "pattern": "^z[0-9]{1,2}$" },
+          "label":     { "type": "string", "maxLength": 48, "description": "Human location, e.g. 'Riser bend, above ACB-8'" },
+          "enabled":   { "type": "boolean", "default": true },
+          "threshold_profile": { "type": "string", "default": "default", "description": "Optional per-joint override profile name defined in cfg/alarms; 'default' = panel-wide thresholds" }
+        }
+      }
+    },
+
+    "zones": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "required": ["zone_id", "name"],
+        "properties": {
+          "zone_id": { "type": "string", "pattern": "^z[0-9]{1,2}$" },
+          "name":    { "type": "string", "maxLength": 32 }
+        }
+      }
+    }
+  },
+
+  "x-edge-validation": {
+    "description": "Cross-field rules the edge MUST enforce beyond JSON Schema. Any failure -> reject entire push atomically, report reason on cmd/../config/ack.",
+    "rules": [
+      "R1  Referential integrity: every joints[].slave_id must exist in modbus.slaves[].slave_id.",
+      "R2  Referential integrity: every joints[].zone_id must exist in zones[].zone_id (if zones provided).",
+      "R3  Every slaves[].bus_id must exist in buses[].bus_id.",
+      "R4  Uniqueness: (bus_id, unit_address) pairs must be unique — no duplicate Modbus addresses on one bus.",
+      "R5  Uniqueness: slave_id values unique; joint_id values unique; zone_id values unique.",
+      "R6  Channel range: joints[].channel <= channels of the referenced slave.",
+      "R7  No double mapping: (slave_id, channel) referenced by at most one joint, and not by ambient_sensor simultaneously.",
+      "R8  Bus type consistency: RTU buses require port+baud; TCP buses require host. Reject mixed/missing fields.",
+      "R9  Ambient present: if any alarm profile uses delta-T, ambient_sensor must be configured and reference a valid slave/channel.",
+      "R10 Capacity: total poll load (slaves x registers / poll_interval) must fit bus timing (edge computes worst-case scan time; reject if scan time > shortest poll_interval).",
+      "R11 Version monotonicity: incoming config_domain_versions.{modbus|joints} must be > currently applied version for that domain.",
+      "R12 Maintenance gate: remote (cloud-originated) changes to modbus or joints domains are accepted only when panel is in maintenance mode; local UI/commissioning tool changes are exempt.",
+      "R13 On any accepted change: write before/after to audit trail, publish applied versions on ack/reported channel, keep last-known-good snapshot for boot fallback."
+    ]
+  },
+
+  "examples": [
+    {
+      "config_domain_versions": { "modbus": 3, "joints": 5 },
+      "modbus": {
+        "buses": [
+          { "bus_id": "bus1", "type": "rtu", "port": "/dev/ttyS1", "baud": 19200, "parity": "N", "stop_bits": 1, "timeout_ms": 500, "retries": 2, "inter_frame_ms": 20 }
+        ],
+        "slaves": [
+          { "slave_id": "sl01", "bus_id": "bus1", "unit_address": 1, "model": "BT-SCM-4", "hw_serial": "SCM26-0091", "channels": 4, "poll_interval_s": 30,
+            "registers": { "function_code": 4, "temp_base_addr": 100, "temp_word_count": 1, "temp_scale": 0.1, "temp_offset": 0, "byte_order": "AB", "status_addr": 199 } },
+          { "slave_id": "sl02", "bus_id": "bus1", "unit_address": 2, "model": "BT-SCM-4", "hw_serial": "SCM26-0092", "channels": 4, "poll_interval_s": 30,
+            "registers": { "function_code": 4, "temp_base_addr": 100, "temp_word_count": 1, "temp_scale": 0.1, "byte_order": "AB" } }
+        ],
+        "ambient_sensor": { "slave_id": "sl02", "channel": 4 }
+      },
+      "joints": [
+        { "joint_id": "J01", "slave_id": "sl01", "channel": 1, "zone_id": "z1", "label": "Riser bend above ACB-8", "enabled": true, "threshold_profile": "default" },
+        { "joint_id": "J02", "slave_id": "sl01", "channel": 2, "zone_id": "z1", "label": "Horizontal run joint 2", "enabled": true, "threshold_profile": "default" },
+        { "joint_id": "J03", "slave_id": "sl01", "channel": 3, "zone_id": "z1", "label": "Tap-off box TB-3", "enabled": true, "threshold_profile": "default" },
+        { "joint_id": "J04", "slave_id": "sl02", "channel": 1, "zone_id": "z1", "label": "Elbow near LT panel", "enabled": true, "threshold_profile": "default" }
+      ],
+      "zones": [
+        { "zone_id": "z1", "name": "Zone-1 Substation LT" }
+      ]
+    }
+  ]
+}

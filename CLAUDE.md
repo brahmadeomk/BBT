@@ -33,8 +33,9 @@ deployed.
 
 | Artifact | Path | Status | Used by |
 |---|---|---|---|
-| `busduct_edge_config.yaml` | `config/busduct_edge_config.yaml` | missing | Config validator |
-| Modbus/joint JSON schema (R1–R13) | `schemas/modbus_joint.schema.json` | missing | Config validator |
+| Edge node config spec | `config/busduct_edge_config.yaml` | present | Edge boot config, MQTT/publish policy, config validator |
+| Modbus/joint JSON schema (R1–R13) | `schemas/modbus_joint.schema.json` | present | Config validator |
+| Alarm thresholds schema (`cfg/alarms`) | `schemas/alarms.schema.json` | missing | Config validator, alarm engine |
 | Workplan (docx or markdown extract) | `docs/workplan.md` | missing | All phases |
 | Existing Node-RED flow | `flows/flows_BBT.json` | present | Nano job compiler, Cloud Gateway |
 | Arduino Nano firmware | `firmware/Nano_IOT.ino` | present | Nano job compiler (target device) |
@@ -42,6 +43,28 @@ deployed.
 If a "missing" artifact is needed when you start a phase, ask for it
 rather than inventing the schema/config shape from scratch — the design
 intent lives in those documents, not in this file.
+
+### Config domains (from the schema + edge config spec)
+
+There are (at least) three independently-versioned config domains, and
+the validator must treat them as separate atomic units per R11/R12:
+
+- **`cfg/modbus` + `cfg/joints`** — wiring/commissioning reality:
+  buses, slaves, register maps, joint↔slave↔channel↔zone mapping.
+  Defined in `schemas/modbus_joint.schema.json`; versioned via
+  `config_domain_versions.{modbus,joints}`; remote changes gated to
+  maintenance mode only (R12).
+- **`cfg/alarms`** — thresholds referenced by `joints[].threshold_profile`
+  and validated per `busduct_edge_config.yaml`'s `remote_config.validation_rules`
+  (dt/ror thresholds, ordering `watch < warning < critical`, persistence
+  minutes). Schema not yet in this repo — ask before inventing it.
+- **Edge node config** (`busduct_edge_config.yaml` itself) — identity
+  (immutable after provisioning), MQTT/topics, publish policy, buffer,
+  local retention. Single `config_version`, not per-domain.
+
+The Nano job compiler only touches `cfg/modbus`/`cfg/joints` (it turns
+slave/register definitions into the firmware's `read`/`write`/`transfer`
+job JSON below) — it must not need the alarms schema.
 
 ### Nano job protocol (from `firmware/Nano_IOT.ino`)
 
