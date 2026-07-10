@@ -17,6 +17,10 @@ edge validation rules R1–R13).
 - `schemas/modbus_joint.schema.json` — `cfg/modbus` + `cfg/joints` JSON
   Schema (buses, slaves, register maps, joint/zone mapping) with the
   mandatory cross-field edge validation rules R1–R13
+- `schemas/alarms.schema.json` — `cfg/alarms` threshold profiles (delta-T,
+  rate-of-rise, persistence), drafted in this repo from
+  `busduct_edge_config.yaml`'s validation rules — pending review in the
+  design chat (see `CLAUDE.md`)
 - `docs/` — workplan and design reference docs (still to add)
 - `flows/` — Node-RED flow export (`flows_BBT.json`, 13 tabs incl.
   `modbusMaster_V2`, `BusbarTherMo`, `Alert system`, `Dashboard`)
@@ -24,5 +28,5 @@ edge validation rules R1–R13).
   read/write/transfer job JSON produced by the Nano job compiler and
   drives the RS-485 Modbus RTU bus
 
-Still missing: the `cfg/alarms` thresholds schema and the workplan —
-see the table in `CLAUDE.md` for what each phase depends on.
+Still missing: the workplan. See the table in `CLAUDE.md` for what each
+phase depends on.

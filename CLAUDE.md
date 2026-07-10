@@ -35,7 +35,7 @@ deployed.
 |---|---|---|---|
 | Edge node config spec | `config/busduct_edge_config.yaml` | present | Edge boot config, MQTT/publish policy, config validator |
 | Modbus/joint JSON schema (R1–R13) | `schemas/modbus_joint.schema.json` | present | Config validator |
-| Alarm thresholds schema (`cfg/alarms`) | `schemas/alarms.schema.json` | missing | Config validator, alarm engine |
+| Alarm thresholds schema (`cfg/alarms`) | `schemas/alarms.schema.json` | present | Config validator, alarm engine |
 | Workplan (docx or markdown extract) | `docs/workplan.md` | missing | All phases |
 | Existing Node-RED flow | `flows/flows_BBT.json` | present | Nano job compiler, Cloud Gateway |
 | Arduino Nano firmware | `firmware/Nano_IOT.ino` | present | Nano job compiler (target device) |
@@ -57,7 +57,11 @@ the validator must treat them as separate atomic units per R11/R12:
 - **`cfg/alarms`** — thresholds referenced by `joints[].threshold_profile`
   and validated per `busduct_edge_config.yaml`'s `remote_config.validation_rules`
   (dt/ror thresholds, ordering `watch < warning < critical`, persistence
-  minutes). Schema not yet in this repo — ask before inventing it.
+  minutes). `schemas/alarms.schema.json` was drafted in this repo (not in
+  the companion design chat) by inferring field names/ranges directly
+  from `remote_config.validation_rules` and the `threshold_profile`
+  reference in the modbus/joints schema — **treat it as a proposal, not
+  a ratified design artifact, until it's been reviewed there.**
 - **Edge node config** (`busduct_edge_config.yaml` itself) — identity
   (immutable after provisioning), MQTT/topics, publish policy, buffer,
   local retention. Single `config_version`, not per-domain.
