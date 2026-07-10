@@ -3,25 +3,12 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { resolveAmbientChain } = require('../src/config-service/ambient-resolution');
 
 const FUNCTION_CODE_HOLDING = 3; // firmware/Nano_IOT.ino always calls readHoldingRegisters - see CLAUDE.md
 
 function pad2(n) {
   return String(n).padStart(2, '0');
-}
-
-function mode(values) {
-  const counts = new Map();
-  for (const v of values) counts.set(v, (counts.get(v) || 0) + 1);
-  let best = null;
-  let bestCount = -1;
-  for (const [v, c] of counts) {
-    if (c > bestCount) {
-      best = v;
-      bestCount = c;
-    }
-  }
-  return best;
 }
 
 /**
@@ -94,41 +81,33 @@ function migrateLegacyConfig(legacy, options = {}) {
     zone_id: lj.zone_id.toLowerCase(),
     enabled: true,
     threshold_profile: 'default',
-    _legacyAmbientSlaveID: lj.ambientSlaveID, // stripped before returning
   }));
   warnings.push('joints[].label omitted - legacy has no physical-location description, fill in during commissioning review');
 
-  const panelDefaultAmbientLegacyId = mode(joints.map((j) => j._legacyAmbientSlaveID));
-  const panelAmbientNewId = legacyToNewSlaveId.get(panelDefaultAmbientLegacyId);
+  const chainInput = legacy.joint_master_zone_A.map((lj) => ({
+    joint_id: lj.joint_id,
+    zone_id: lj.zone_id.toLowerCase(),
+    legacyAmbientId: lj.ambientSlaveID,
+  }));
+  const { panelDefaultSlaveId: panelAmbientNewId, zoneOverrides, jointOverrides } = resolveAmbientChain(
+    chainInput,
+    zones,
+    legacyToNewSlaveId
+  );
   if (!panelAmbientNewId) {
-    warnings.push(`most common ambientSlaveID (${panelDefaultAmbientLegacyId}) does not match any known slave - no modbus.ambient_sensor set`);
-  }
-
-  const jointsByZone = new Map();
-  for (const j of joints) {
-    if (!jointsByZone.has(j.zone_id)) jointsByZone.set(j.zone_id, []);
-    jointsByZone.get(j.zone_id).push(j);
+    warnings.push('no ambientSlaveID resolves to a known slave - no modbus.ambient_sensor set');
   }
   for (const zone of zones) {
-    const zoneJoints = jointsByZone.get(zone.zone_id) || [];
-    const distinctAmbientIds = new Set(zoneJoints.map((j) => j._legacyAmbientSlaveID));
-    if (distinctAmbientIds.size === 1) {
-      const onlyId = [...distinctAmbientIds][0];
-      if (onlyId !== panelDefaultAmbientLegacyId && legacyToNewSlaveId.has(onlyId)) {
-        zone.ambient_sensor = { slave_id: legacyToNewSlaveId.get(onlyId), channel: 1 };
-        warnings.push(`zone '${zone.zone_id}': all joints share ambientSlaveID ${onlyId} (differs from panel default) - set as zone-level override`);
-      }
+    if (zoneOverrides.has(zone.zone_id)) {
+      zone.ambient_sensor = { slave_id: zoneOverrides.get(zone.zone_id), channel: 1 };
+      warnings.push(`zone '${zone.zone_id}': all joints share an ambientSlaveID that differs from the panel default - set as zone-level override`);
     }
   }
   for (const j of joints) {
-    const zone = zones.find((z) => z.zone_id === j.zone_id);
-    const resolvesViaZone = zone?.ambient_sensor;
-    const needsOverride = j._legacyAmbientSlaveID !== panelDefaultAmbientLegacyId && !resolvesViaZone;
-    if (needsOverride && legacyToNewSlaveId.has(j._legacyAmbientSlaveID)) {
-      j.ambient_sensor = { slave_id: legacyToNewSlaveId.get(j._legacyAmbientSlaveID), channel: 1 };
-      warnings.push(`joint '${j.joint_id}': ambientSlaveID ${j._legacyAmbientSlaveID} differs from both panel default and its zone - set as joint-level override`);
+    if (jointOverrides.has(j.joint_id)) {
+      j.ambient_sensor = { slave_id: jointOverrides.get(j.joint_id), channel: 1 };
+      warnings.push(`joint '${j.joint_id}': ambientSlaveID differs from both panel default and its zone - set as joint-level override`);
     }
-    delete j._legacyAmbientSlaveID;
   }
 
   // --- modbus / bus ---

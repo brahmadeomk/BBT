@@ -16,10 +16,13 @@ across all of them.**
 
 - **Work in the slice order the workplan defines** (Slice 1 → Slice 8).
   Each slice has a "Done when" acceptance line — don't start the next
-  slice until the current one meets it. Slice 1 (repo bootstrap) and
-  Slice 2 (config service: store, validator, migration) are furthest
-  along; Slice 3 (Nano job compiler) is next and touches existing edge
-  behavior directly, so it needs the most care and the most tests.
+  slice until the current one meets it. Slice 1 and Slice 2 (config
+  service: store, validators, migration tool, Node-RED refactor) are
+  functionally complete but **the Node-RED refactor has not been tested
+  against a live Node-RED instance yet** — see "Node-RED integration"
+  below before treating Slice 2 as fully done. Slice 3 (Nano job
+  compiler) is next and touches existing edge behavior directly, so it
+  needs the most care and the most tests.
 
 - **Cloud-agnostic rule**: no AWS SDK (or any single-cloud SDK) may be
   imported outside `/src/adapters/aws`. Everything else — config
@@ -106,6 +109,49 @@ units (R11/R12 govern `cfg/modbus`/`cfg/joints`; A6 governs `cfg/alarms`):
 
 The Nano job compiler (Slice 3) only touches `cfg/modbus`/`cfg/joints` —
 it must not need the alarms schema.
+
+## Node-RED integration
+
+`flows/flows_BBT.json`'s two config-editing function nodes now call the
+config service instead of touching raw global context directly:
+
+- **`BusbarTherm Config Manager`** (alarms domain) → `src/config-service/node-red/config-manager-handler.js`
+- **`JointMasterBackEndNode`** (modbus/joints domain) → `src/config-service/node-red/joint-master-handler.js`
+
+Both function node bodies are now one-liners requiring
+`global.get('busductConfigService')` (see
+`src/config-service/node-red/index.js`), per the thin-function-node
+rule above. **This requires a `functionGlobalContext` entry in the
+Pi's Node-RED `settings.js`** — see
+`src/config-service/node-red/settings.js.example` for the exact
+snippet; function nodes can't `require()` a local (non-npm) repo path
+without it.
+
+`add`/`add_below`/`edit`/`delete`/`save` (single-row draft edits) keep
+operating on the legacy draft shape in `global` context exactly as
+before — those are UI-side bookkeeping on an intentionally-incomplete
+array mid-edit, which can't be schema-validated. Only `apply` changed:
+it transforms the completed draft into the new schema shape (looking
+up each legacy `slaveID` against the *currently applied*
+`cfg/modbus+joints` document's `modbus.slaves[]` by `unit_address` —
+not re-deriving `slave_id` from scratch, since `slave_id` must stay
+stable across edits) and pushes it through `validateModbusJoints` +
+`ConfigStore.applyIfValid`. If a joint references a `slaveID` that
+hasn't been provisioned into the applied `cfg/modbus` yet, `apply`
+rejects with a clear error — this refactor doesn't add a way to
+commission new slaves from the dashboard; that's still a separate,
+untouched flow.
+
+**Tested so far: unit tests only** (120 tests, mocking Node-RED's
+`msg`/`global` shape but not running inside actual Node-RED). **Not
+yet verified against a live Node-RED instance** — do that before
+treating Slice 2 as done. Concretely, once Node-RED is available:
+wire the `settings.js` entry, deploy the updated flow, and check the
+existing dashboard save/apply/restore/load paths all still work
+end-to-end (this is Slice 2's own "Done when": *"UI save/apply paths
+work unchanged"*), plus that a rejected push (e.g. an A1/A2 threshold
+ordering violation, or an unprovisioned slave) surfaces the same way
+the dashboard already expects errors to show up.
 
 ## Nano job protocol (from `firmware/Nano_IOT.ino`)
 

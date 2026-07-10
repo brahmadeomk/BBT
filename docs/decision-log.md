@@ -134,3 +134,40 @@ companion project chat and recorded in the workplan/design docs there).
   - Output committed to `config/examples/migrated_modbus_joints.json`
     and `migrated_alarms.json` — both pass `validateModbusJoints`/
     `validateAlarms` with zero errors.
+
+- **2026-07-10** — Refactored `BusbarTherm Config Manager` and
+  `JointMasterBackEndNode` in `flows_BBT.json` to call the config
+  service (`src/config-service/node-red/{config-manager-handler,
+  joint-master-handler}.js`) instead of raw global context, completing
+  Slice 2's last item. Extracted the ambient-chain-resolution algorithm
+  out of `tools/migrate-legacy-config.js` into a shared
+  `src/config-service/ambient-resolution.js` since the live
+  `JointMasterBackEndNode` replacement needs the exact same logic on
+  every `apply`, not just at one-time migration.
+  - Kept `add`/`add_below`/`edit`/`delete`/`save` operating on the
+    legacy draft shape in `global` context, unchanged — those are
+    UI-side bookkeeping on an intentionally-incomplete array mid-edit
+    (empty `joint_id`, `editing: true`), which the new schema can't
+    validate anyway. Only `apply` was replaced.
+  - `apply` looks up each legacy `slaveID` against the **currently
+    applied** `cfg/modbus+joints` document's `modbus.slaves[]` (by
+    `unit_address`), not a fresh sequential re-assignment like the
+    one-time migration tool uses — `slave_id` must stay stable across
+    edits (that's the whole reason the schema separates `slave_id`
+    from `unit_address`). If a slave isn't provisioned there yet,
+    `apply` rejects with a clear error rather than inventing a mapping;
+    slave/register commissioning is a separate, untouched flow, out of
+    this refactor's scope.
+  - `config_domain_versions.modbus` and `.joints` both bump on every
+    `apply`, even one that only changed joints — R11 requires both to
+    be strictly greater on every push of the combined document, since
+    they're delivered atomically together (see the earlier
+    two-files-not-three entry above).
+  - Function nodes are now one-line `require()`s via
+    `global.get('busductConfigService')`, requiring a
+    `functionGlobalContext` entry in the Pi's Node-RED `settings.js` —
+    documented in `src/config-service/node-red/settings.js.example`.
+  - **Tested with 120 unit tests (mocking Node-RED's `msg`/`global`
+    shape) but not yet run inside an actual Node-RED instance.** Do
+    that once Node-RED is available, per the checklist in `CLAUDE.md`'s
+    "Node-RED integration" section, before marking Slice 2 fully done.

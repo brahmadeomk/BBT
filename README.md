@@ -17,10 +17,13 @@ plan — that workplan is the source of truth for what gets built when.
 - `config/schemas/` — the JSON Schemas: `busduct_modbus_joint_config.schema.json`
   (`cfg/modbus` + `cfg/joints`, rules R1–R14) and
   `busduct_alarms_config.schema.json` (`cfg/alarms`, rules A1–A10)
-- `config/examples/` — reference config instances per domain, migration
-  snapshots (empty until Slice 2)
-- `src/config-service/` — config store, validator, version manager,
-  audit writer, Nano job compiler (empty until Slice 2+)
+- `config/examples/` — reference config instances per domain, incl. the
+  real migrated production config (`migrated_modbus_joints.json`,
+  `migrated_alarms.json`)
+- `src/config-service/` — config store, validators, migration mapping
+  helpers, and `node-red/` (thin handlers the Node-RED function nodes
+  call — see `CLAUDE.md`'s "Node-RED integration" section); Nano job
+  compiler still to come (Slice 3)
 - `src/cloud-gateway/` — batcher, alarm publisher, heartbeat, outbox,
   transport interface (empty until Slice 5+)
 - `src/adapters/aws/` — AWS-specific code, the only place an AWS SDK may
@@ -30,8 +33,10 @@ plan — that workplan is the source of truth for what gets built when.
 - `firmware/` — Arduino Nano sketch (`Nano_IOT.ino`) that consumes the
   read/write/transfer job JSON produced by the Nano job compiler and
   drives the RS-485 Modbus RTU bus
-- `test/`, `tools/` — unit tests and migration/commissioning scripts
-  (empty until Slice 2+)
+- `test/` — unit tests (config-service, migration tool, Node-RED
+  handlers)
+- `tools/` — `migrate-legacy-config.js` (legacy → new schema converter);
+  commissioning helper still to come (Slice 6)
 
 Still missing: the Edge Cloud Readiness Workplan (the higher-level
 phase/acceptance-criteria doc this implementation plan maps to — needed

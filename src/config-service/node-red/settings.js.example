@@ -1,0 +1,18 @@
+// Add this to the Pi's Node-RED settings.js (usually ~/.node-red/settings.js)
+// so the "BusbarTherm Config Manager" and "JointMasterBackEndNode" function
+// nodes in flows/flows_BBT.json can resolve global.get('busductConfigService').
+//
+// Function nodes can't require() a local (non-npm-installed) repo path
+// directly - functionGlobalContext is the standard Node-RED mechanism for
+// sharing a local library across function nodes without installing it as
+// an npm package. Replace the path below with wherever this repo is
+// actually cloned on the Pi.
+
+module.exports = {
+  // ...existing settings...
+
+  functionGlobalContext: {
+    // ...any existing entries...
+    busductConfigService: require('/home/pi/busduct-cloud-edge/src/config-service/node-red'),
+  },
+};
