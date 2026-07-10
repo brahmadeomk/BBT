@@ -17,10 +17,10 @@ edge validation rules R1–R13).
 - `schemas/modbus_joint.schema.json` — `cfg/modbus` + `cfg/joints` JSON
   Schema (buses, slaves, register maps, joint/zone mapping) with the
   mandatory cross-field edge validation rules R1–R13
-- `schemas/alarms.schema.json` — `cfg/alarms` threshold profiles (delta-T,
-  rate-of-rise, persistence), drafted in this repo from
-  `busduct_edge_config.yaml`'s validation rules — pending review in the
-  design chat (see `CLAUDE.md`)
+- `schemas/alarms.schema.json` — `cfg/alarms` threshold profiles
+  (deltaT/ror/persistence), clear hysteresis, sensor-fault handling, and
+  email/SMS/cloud notification routing, with the mandatory cross-field
+  edge validation rules A1–A10
 - `docs/` — workplan and design reference docs (still to add)
 - `flows/` — Node-RED flow export (`flows_BBT.json`, 13 tabs incl.
   `modbusMaster_V2`, `BusbarTherMo`, `Alert system`, `Dashboard`)

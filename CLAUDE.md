@@ -23,9 +23,9 @@ deployed.
   Nano job compiler must not import cloud-provider SDKs directly — they
   call through the adapter interface only.
 
-- **Edge validation rules R1–R13** live in the JSON schema file for
-  Modbus/joint config (see `schemas/`) and are mandatory. Any config
-  validator or compiler change must keep all R1–R13 rules enforced and
+- **Edge validation rules R1–R13** (modbus/joints, `schemas/modbus_joint.schema.json`)
+  and **A1–A10** (alarms, `schemas/alarms.schema.json`) are mandatory. Any
+  config validator or compiler change must keep all of them enforced and
   covered by tests. Do not relax or bypass a rule without explicit
   instruction.
 
@@ -54,14 +54,17 @@ the validator must treat them as separate atomic units per R11/R12:
   Defined in `schemas/modbus_joint.schema.json`; versioned via
   `config_domain_versions.{modbus,joints}`; remote changes gated to
   maintenance mode only (R12).
-- **`cfg/alarms`** — thresholds referenced by `joints[].threshold_profile`
-  and validated per `busduct_edge_config.yaml`'s `remote_config.validation_rules`
-  (dt/ror thresholds, ordering `watch < warning < critical`, persistence
-  minutes). `schemas/alarms.schema.json` was drafted in this repo (not in
-  the companion design chat) by inferring field names/ranges directly
-  from `remote_config.validation_rules` and the `threshold_profile`
-  reference in the modbus/joints schema — **treat it as a proposal, not
-  a ratified design artifact, until it's been reviewed there.**
+- **`cfg/alarms`** — named threshold `profiles` (object keyed by profile
+  name; `default` is mandatory and can't be deleted/renamed — A4), each
+  with `deltaT`/`ror`/`persistence` thresholds (ordering rules A1/A2),
+  `clear_hysteresis_pct`/`clear_persistence_min` for raise/clear chatter
+  control, plus panel-wide `sensor_fault` (comm timeout, sensor-error
+  cutoff) and `notifications` (email/SMS/cloud alarm publish routing).
+  Field names deliberately match the existing Node-RED Config Manager
+  (`deltaT`/`ror`/`persistence`) for a direct migration. Defined in
+  `schemas/alarms.schema.json`; versioned via `config_domain_versions.alarms`
+  (monotonicity is rule A6); no maintenance-mode gate — thresholds aren't
+  wiring reality, unlike `cfg/modbus`/`cfg/joints` (R12).
 - **Edge node config** (`busduct_edge_config.yaml` itself) — identity
   (immutable after provisioning), MQTT/topics, publish policy, buffer,
   local retention. Single `config_version`, not per-domain.

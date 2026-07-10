@@ -1,17 +1,78 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "busduct/cfg/alarms/v1",
-  "title": "BusductTherMo — Alarm Threshold Configuration (cfg/alarms)",
-  "description": "Named threshold profiles referenced by joints[].threshold_profile in cfg/joints. Versioned independently from wiring config. Field names and ranges mirror remote_config.validation_rules in busduct_edge_config.yaml; the two must be kept in sync.",
+  "title": "BusductTherMo — Alarm Configuration Domain (cfg/alarms)",
+  "description": "Operational tuning domain: threshold profiles, persistence, and notification routing. Remotely tunable (unlike cfg/modbus and cfg/joints, no maintenance-mode gate required). Field names align with the existing Node-RED Config Manager (deltaT / ror / persistence) so migration is a direct mapping. Applied atomically after schema + x-edge-validation checks; every accepted change is written to the audit trail and the applied version reported on the ack channel.",
   "type": "object",
   "required": ["config_domain_versions", "profiles"],
   "additionalProperties": false,
+
+  "definitions": {
+
+    "delta_t_thresholds": {
+      "type": "object",
+      "description": "\u0394T thresholds in \u00b0C (joint temp minus ambient, EMA-smoothed). Must satisfy watch < warning < critical (rule A1).",
+      "required": ["watch", "warning", "critical"],
+      "additionalProperties": false,
+      "properties": {
+        "watch":    { "type": "number", "minimum": 5, "maximum": 80 },
+        "warning":  { "type": "number", "minimum": 5, "maximum": 80 },
+        "critical": { "type": "number", "minimum": 5, "maximum": 80 }
+      }
+    },
+
+    "ror_thresholds": {
+      "type": "object",
+      "description": "Rate-of-Rise thresholds in \u00b0C/hr over timeWindowMin. Must satisfy watch < warning < critical (rule A1).",
+      "required": ["watch", "warning", "critical", "timeWindowMin"],
+      "additionalProperties": false,
+      "properties": {
+        "watch":         { "type": "number", "minimum": 5, "maximum": 120 },
+        "warning":       { "type": "number", "minimum": 5, "maximum": 120 },
+        "critical":      { "type": "number", "minimum": 5, "maximum": 120 },
+        "timeWindowMin": { "type": "integer", "minimum": 5, "maximum": 60,
+          "description": "EMA time window (tau) in minutes; drives RoR smoothing in ProcessLogic" }
+      }
+    },
+
+    "persistence": {
+      "type": "object",
+      "description": "Minutes a condition must persist before the alarm is raised. Higher severity reacts faster: watchMin >= warningMin >= criticalMin (rule A2).",
+      "required": ["watchMin", "warningMin", "criticalMin"],
+      "additionalProperties": false,
+      "properties": {
+        "watchMin":    { "type": "integer", "minimum": 1, "maximum": 120 },
+        "warningMin":  { "type": "integer", "minimum": 1, "maximum": 120 },
+        "criticalMin": { "type": "integer", "minimum": 1, "maximum": 120 }
+      }
+    },
+
+    "profile": {
+      "type": "object",
+      "required": ["deltaT", "ror", "persistence"],
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string", "maxLength": 96 },
+        "deltaT":      { "$ref": "#/definitions/delta_t_thresholds" },
+        "ror":         { "$ref": "#/definitions/ror_thresholds" },
+        "persistence": { "$ref": "#/definitions/persistence" },
+        "clear_hysteresis_pct": {
+          "type": "number", "minimum": 0, "maximum": 30, "default": 10,
+          "description": "Value must fall this % below the raise threshold before CLEAR is evaluated, to prevent raise/clear chatter at the boundary."
+        },
+        "clear_persistence_min": {
+          "type": "integer", "minimum": 1, "maximum": 60, "default": 5,
+          "description": "Minutes the value must stay below (threshold - hysteresis) before the alarm clears."
+        }
+      }
+    }
+  },
 
   "properties": {
 
     "config_domain_versions": {
       "type": "object",
-      "description": "Monotonic version for the alarms domain. Edge rejects a push whose version is <= currently applied version.",
+      "description": "Monotonic version. Edge rejects a push whose version is <= currently applied (rule A6).",
       "required": ["alarms"],
       "properties": {
         "alarms": { "type": "integer", "minimum": 1 }
@@ -19,62 +80,75 @@
     },
 
     "profiles": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 64,
-      "items": {
-        "type": "object",
-        "required": ["profile_id", "dt_thresholds_c", "ror_thresholds_c_hr", "ror_time_window_min", "persistence_min"],
-        "additionalProperties": false,
-        "properties": {
+      "type": "object",
+      "description": "Named threshold profiles. 'default' is mandatory and applies to every joint whose threshold_profile is 'default' or unset. Additional profiles are referenced by joints[].threshold_profile in cfg/joints.",
+      "required": ["default"],
+      "minProperties": 1,
+      "maxProperties": 16,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]{0,23}$" },
+      "additionalProperties": { "$ref": "#/definitions/profile" }
+    },
 
-          "profile_id": {
-            "type": "string",
-            "maxLength": 32,
-            "description": "Referenced by joints[].threshold_profile in cfg/joints. Exactly one profile must have profile_id 'default' — used by any joint that doesn't set an explicit threshold_profile."
-          },
+    "sensor_fault": {
+      "type": "object",
+      "description": "System-alarm behaviour for sensor/communication faults (maps to Alarm Manager SYSTEM category).",
+      "additionalProperties": false,
+      "properties": {
+        "comm_timeout_s": {
+          "type": "integer", "minimum": 30, "maximum": 3600, "default": 300,
+          "description": "No valid data from the Nano/bus for this long -> SYSTEM COMM_FAILURE alarm."
+        },
+        "sensor_error_above_c": {
+          "type": "number", "minimum": 100, "maximum": 500, "default": 300,
+          "description": "Reading above this value is treated as Sensor_Error and freezes KPI updates for that joint (matches ProcessLogic freeze)."
+        },
+        "freeze_kpis_on_fault": { "type": "boolean", "default": true }
+      }
+    },
 
-          "dt_thresholds_c": {
-            "type": "object",
-            "description": "Delta-T (joint temp minus ambient) thresholds, degC. Range and ordering must match busduct_edge_config.yaml remote_config.validation_rules.dt_thresholds_c.",
-            "required": ["watch", "warning", "critical"],
-            "additionalProperties": false,
-            "properties": {
-              "watch":    { "type": "number", "minimum": 5, "maximum": 80 },
-              "warning":  { "type": "number", "minimum": 5, "maximum": 80 },
-              "critical": { "type": "number", "minimum": 5, "maximum": 80 }
-            }
-          },
-
-          "ror_thresholds_c_hr": {
-            "type": "object",
-            "description": "Rate-of-rise thresholds, degC/hr, computed over ror_time_window_min. Range and ordering must match remote_config.validation_rules.ror_thresholds_c_hr.",
-            "required": ["watch", "warning", "critical"],
-            "additionalProperties": false,
-            "properties": {
-              "watch":    { "type": "number", "minimum": 5, "maximum": 120 },
-              "warning":  { "type": "number", "minimum": 5, "maximum": 120 },
-              "critical": { "type": "number", "minimum": 5, "maximum": 120 }
-            }
-          },
-
-          "ror_time_window_min": {
-            "type": "integer",
-            "minimum": 5,
-            "maximum": 60,
-            "description": "Sliding window, minutes, over which rate-of-rise is computed for this profile."
-          },
-
-          "persistence_min": {
-            "type": "object",
-            "description": "Minutes a KPI must remain past its threshold before the level is raised. Higher-severity levels must require persistence <= lower-severity levels (trip faster, not slower).",
-            "required": ["watch", "warning", "critical"],
-            "additionalProperties": false,
-            "properties": {
-              "watch":    { "type": "integer", "minimum": 1, "maximum": 120 },
-              "warning":  { "type": "integer", "minimum": 1, "maximum": 120 },
-              "critical": { "type": "integer", "minimum": 1, "maximum": 120 }
-            }
+    "notifications": {
+      "type": "object",
+      "description": "Edge-local notification routing (email/SMS). Cloud-side routing is configured cloud-side; these settings keep the edge autonomous when offline.",
+      "additionalProperties": false,
+      "properties": {
+        "email": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "min_level": { "enum": ["WATCH", "WARNING", "CRITICAL"], "default": "WARNING",
+              "description": "Lowest severity that triggers an email." },
+            "on_clear": { "type": "boolean", "default": true },
+            "recipients": {
+              "type": "array", "minItems": 1, "maxItems": 10,
+              "items": { "type": "string", "format": "email" }
+            },
+            "rate_limit_per_hour": { "type": "integer", "minimum": 1, "maximum": 60, "default": 12,
+              "description": "Max emails per hour panel-wide; excess events are summarised in the next email." }
+          }
+        },
+        "sms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "min_level": { "enum": ["WATCH", "WARNING", "CRITICAL"], "default": "CRITICAL" },
+            "on_clear": { "type": "boolean", "default": false },
+            "recipients": {
+              "type": "array", "minItems": 1, "maxItems": 10,
+              "items": { "type": "string", "pattern": "^\\+?[0-9]{10,15}$" }
+            },
+            "rate_limit_per_hour": { "type": "integer", "minimum": 1, "maximum": 30, "default": 6 }
+          }
+        },
+        "cloud_alarm_publish": {
+          "type": "object",
+          "description": "Controls the alarm event stream to cloud (dt/.../alarm). Independent of local email/SMS.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "min_level": { "enum": ["WATCH", "WARNING", "CRITICAL"], "default": "WATCH",
+              "description": "Cloud normally receives everything; raise this only to reduce message volume." }
           }
         }
       }
@@ -82,39 +156,62 @@
   },
 
   "x-edge-validation": {
-    "description": "Cross-field rules the edge MUST enforce beyond JSON Schema. Any failure -> reject entire push atomically, report reason on cmd/../config/ack (same apply_mode: atomic contract as cfg/modbus + cfg/joints).",
+    "description": "Cross-field rules the edge MUST enforce beyond JSON Schema. Any failure -> reject entire push atomically, report reason on cmd/../config/ack.",
     "rules": [
-      "A1 Uniqueness: profiles[].profile_id values must be unique.",
-      "A2 Default required: exactly one profile with profile_id == 'default' must be present.",
-      "A3 Ordering: dt_thresholds_c.watch < dt_thresholds_c.warning < dt_thresholds_c.critical.",
-      "A4 Ordering: ror_thresholds_c_hr.watch < ror_thresholds_c_hr.warning < ror_thresholds_c_hr.critical.",
-      "A5 Ordering: persistence_min.watch >= persistence_min.warning >= persistence_min.critical (more severe levels alarm at least as fast).",
-      "A6 Referential integrity (cross-domain): every joints[].threshold_profile in the currently-applied cfg/joints must resolve to a profile_id here; validate against the applied cfg/joints snapshot even when cfg/alarms is pushed on its own.",
-      "A7 Version monotonicity: incoming config_domain_versions.alarms must be > currently applied version.",
-      "A8 No maintenance gate: unlike cfg/modbus/cfg/joints (R12), remote (cloud-originated) alarm threshold changes are accepted in normal operating mode — thresholds are not wiring reality. Maintenance mode is not required.",
-      "A9 On any accepted change: write before/after to audit trail and publish applied version on ack/reported channel, same as R13."
+      "A1  Ordering: for every profile, deltaT.watch < deltaT.warning < deltaT.critical AND ror.watch < ror.warning < ror.critical (strict).",
+      "A2  Persistence ordering: persistence.watchMin >= persistence.warningMin >= persistence.criticalMin.",
+      "A3  Profile references resolve: every joints[].threshold_profile in the currently applied cfg/joints must exist in profiles{}. A push that deletes a profile still referenced by a joint is rejected.",
+      "A4  'default' profile cannot be deleted or renamed.",
+      "A5  Ambient dependency: deltaT alarming requires ambient_sensor configured in cfg/modbus; if absent, reject unless every profile's deltaT section is explicitly disabled by agreed convention.",
+      "A6  Version monotonicity: incoming config_domain_versions.alarms must be > currently applied version.",
+      "A7  Notification sanity: if email.enabled or sms.enabled, recipients must be non-empty.",
+      "A8  Applied atomically: on any accepted change write before/after to the audit trail, publish applied version on ack/reported channel, retain last-known-good snapshot for boot fallback.",
+      "A9  Hysteresis sanity: clear_hysteresis_pct of the watch threshold must not push the clear level below 0 for deltaT.",
+      "A10 Live re-evaluation: after apply, active alarms are re-evaluated against new thresholds on the next sample; alarms whose condition no longer holds follow the normal clear path (with clear persistence), never an instant mass-clear."
     ]
   },
 
   "examples": [
     {
-      "config_domain_versions": { "alarms": 1 },
-      "profiles": [
-        {
-          "profile_id": "default",
-          "dt_thresholds_c":     { "watch": 15, "warning": 30, "critical": 50 },
-          "ror_thresholds_c_hr": { "watch": 10, "warning": 25, "critical": 45 },
-          "ror_time_window_min": 15,
-          "persistence_min":     { "watch": 10, "warning": 5, "critical": 2 }
+      "config_domain_versions": { "alarms": 12 },
+      "profiles": {
+        "default": {
+          "description": "Panel-wide defaults (matches UI: 15/25/35, 15/30/60 @20min, 30/15/5)",
+          "deltaT":      { "watch": 15, "warning": 25, "critical": 35 },
+          "ror":         { "watch": 15, "warning": 30, "critical": 60, "timeWindowMin": 20 },
+          "persistence": { "watchMin": 30, "warningMin": 15, "criticalMin": 5 },
+          "clear_hysteresis_pct": 10,
+          "clear_persistence_min": 5
         },
-        {
-          "profile_id": "high_load_riser",
-          "dt_thresholds_c":     { "watch": 12, "warning": 25, "critical": 40 },
-          "ror_thresholds_c_hr": { "watch": 8,  "warning": 20, "critical": 35 },
-          "ror_time_window_min": 10,
-          "persistence_min":     { "watch": 5,  "warning": 3, "critical": 1 }
+        "hot_tapoff": {
+          "description": "Known-hot tap-off boxes; relaxed deltaT, same RoR vigilance",
+          "deltaT":      { "watch": 20, "warning": 30, "critical": 40 },
+          "ror":         { "watch": 15, "warning": 30, "critical": 60, "timeWindowMin": 20 },
+          "persistence": { "watchMin": 30, "warningMin": 15, "criticalMin": 5 }
         }
-      ]
+      },
+      "sensor_fault": {
+        "comm_timeout_s": 300,
+        "sensor_error_above_c": 300,
+        "freeze_kpis_on_fault": true
+      },
+      "notifications": {
+        "email": {
+          "enabled": true,
+          "min_level": "WARNING",
+          "on_clear": true,
+          "recipients": ["substation.team@example.com"],
+          "rate_limit_per_hour": 12
+        },
+        "sms": {
+          "enabled": true,
+          "min_level": "CRITICAL",
+          "on_clear": false,
+          "recipients": ["+919800000000"],
+          "rate_limit_per_hour": 6
+        },
+        "cloud_alarm_publish": { "enabled": true, "min_level": "WATCH" }
+      }
     }
   ]
 }
