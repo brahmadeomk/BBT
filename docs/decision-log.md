@@ -34,3 +34,25 @@ companion project chat and recorded in the workplan/design docs there).
     formulas/bounds that are reasonable but not handed down verbatim by
     the schema author — see the comments in the two validator files if
     those numbers ever need revisiting.
+
+- **2026-07-10** — `src/config-service/store.js` stores **two** domain
+  files, not three: `modbus_joints.json` (covering both `cfg/modbus`
+  and `cfg/joints` together) and `alarms.json`. The workplan's §3 table
+  says "one JSON file per domain (modbus, joints, alarms)", but the
+  schema we were actually given
+  (`busduct_modbus_joint_config.schema.json`) requires `modbus` and
+  `joints` as top-level keys of a single document with one atomic push
+  covering both — there's no schema for a standalone `cfg/modbus`-only
+  or `cfg/joints`-only file. Followed the schema over the prose. Each
+  domain file gets a `.lkg.json` last-known-good snapshot next to it.
+  Checked the existing `BusbarTherm Config Manager` function node in
+  `flows_BBT.json` (id `ebbf810a01b0f9a6`) for the current audit-trail
+  shape before building the new one: `{ts, action, user, oldConfig,
+  newConfig}` in a capped array under global context key
+  `audit_busbartherm`. The new `ConfigStore` audit writer keeps those
+  field names (plus additive `domain`/`result`/`errors` fields) and
+  writes them as an append-only `audit_trail.jsonl`, one line per
+  domain-apply attempt (accepted or rejected), rather than a capped
+  in-memory array — Node-RED global context isn't durable across a
+  restart unless separately configured to persist, and the workplan
+  requires the trail to survive.
