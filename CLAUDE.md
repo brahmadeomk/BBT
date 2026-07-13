@@ -18,9 +18,9 @@ across all of them.**
   Each slice has a "Done when" acceptance line — don't start the next
   slice until the current one meets it. Slice 1 and Slice 2 (config
   service: store, validators, migration tool, Node-RED refactor) are
-  functionally complete but **the Node-RED refactor has not been tested
-  against a live Node-RED instance yet** — see "Node-RED integration"
-  below before treating Slice 2 as fully done. Slice 3 (Nano job
+  **done** — the Node-RED refactor has been live-verified on the real
+  Pi (dashboard save/apply/restore/load paths all confirmed working
+  after the two bug fixes; see decision log). Slice 3 (Nano job
   compiler) is next and touches existing edge behavior directly, so it
   needs the most care and the most tests.
 
@@ -152,18 +152,14 @@ rejects with a clear error — this refactor doesn't add a way to
 commission new slaves from the dashboard; that's still a separate,
 untouched flow.
 
-**Tested so far: unit tests only** (123 tests, mocking Node-RED's
-`msg`/`global` shape but not running inside actual Node-RED). Live
-testing on the real Node-RED 4 / Pi deployment has started and already
-caught two real bugs (dropped `msg` properties breaking dashboard
-routing; `add`/`edit`/`delete` silently suppressing their table-refresh
-output) — both fixed and covered by new tests, see the decision log.
-**Full live verification is still pending** — do that before treating
-Slice 2 as done: check the existing dashboard save/apply/restore/load
-paths all still work end-to-end (Slice 2's own "Done when": *"UI
-save/apply paths work unchanged"*), plus that a rejected push (e.g. an
-A1/A2 threshold ordering violation, or an unprovisioned slave) surfaces
-the same way the dashboard already expects errors to show up.
+**Live-verified on the Pi**: dashboard save/apply/restore/load paths
+for both the joint table and the alarm config table all confirmed
+working (Slice 2's own "Done when": *"UI save/apply paths work
+unchanged"* — met). Two real bugs were caught and fixed along the way
+(dropped `msg` properties breaking dashboard routing;
+`add`/`edit`/`delete` silently suppressing their table-refresh output)
+— see the decision log. 123 unit tests plus this live pass; **Slice 2
+is done.**
 
 ## Nano job protocol (from `firmware/Nano_IOT.ino`)
 

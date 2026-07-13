@@ -226,3 +226,10 @@ companion project chat and recorded in the workplan/design docs there).
   needs an actual restart after `git pull`ing anything under
   `src/config-service/`. Added this to `settings.js.example` and
   `CLAUDE.md`'s Node-RED integration section.
+
+- **2026-07-10** — **Slice 2 confirmed done.** Live-verified on the
+  actual Node-RED 4 / Pi deployment after the settings.js wiring +
+  restart: joint configuration table loads existing data, "Add Joint"
+  adds a row immediately, alarm configuration table loads current
+  thresholds - all three symptoms reported after the first live test
+  are resolved. Moving to Slice 3 (Nano job compiler).
