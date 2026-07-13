@@ -26,7 +26,10 @@ const KPI_BY_ALARM_TYPE = {
  * carry these as structured fields alongside their existing
  * `description` string. SYSTEM alarms (comm timeout, sensor fault)
  * don't evaluate a numeric threshold, so these are simply absent
- * there rather than fabricated.
+ * there rather than fabricated. `absolute_temp_c` (the raw sensor
+ * reading at evaluation time, distinct from `value` - which is the
+ * rate-of-rise or delta-T number depending on alarm_type) is promoted
+ * the same way, PROCESS alarms only.
  */
 class AlarmPublisher {
   /**
@@ -71,6 +74,7 @@ class AlarmPublisher {
     if (typeof alarm.value === 'number') event.value = alarm.value;
     if (typeof alarm.threshold === 'number') event.threshold = alarm.threshold;
     if (typeof alarm.persistence_min === 'number') event.persistence_min = alarm.persistence_min;
+    if (typeof alarm.absolute_temp_c === 'number') event.absolute_temp_c = alarm.absolute_temp_c;
 
     this.outbox.enqueue('alarm', this.topic, event, 1); // qos 1, per publish.alarm.qos - must not be lost
   }

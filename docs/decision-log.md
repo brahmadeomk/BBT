@@ -370,3 +370,14 @@ companion project chat and recorded in the workplan/design docs there).
   fabricated, for SYSTEM alarms that don't evaluate a numeric
   threshold). Updated `docs/internal-message-contracts.md` and the
   publisher's tests to match.
+
+- **2026-07-10** — Added `absolute_temp_c` (the raw sensor reading,
+  `d.val`) to the same two `PROCESS` alarm `build()` callbacks in
+  `Alarm Manager`, at the user's direction - distinct from `value`
+  (which is the rate-of-rise number for `ROR` alarms or the delta-T
+  number for `DELTA_T` alarms, not the absolute temperature). Same
+  pattern as the previous entry: `d.val` was already in scope via
+  closure, one added key per alarm type, verified by diff that nothing
+  else changed. `alarm-publisher.js` promotes it the same way as the
+  other structured fields (present for PROCESS alarms, absent for
+  SYSTEM). Updated docs and tests.

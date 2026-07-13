@@ -30,6 +30,7 @@ function alarm(overrides = {}) {
     value: 29.48,
     threshold: 25,
     persistence_min: 15,
+    absolute_temp_c: 55.2,
     ...overrides,
   };
 }
@@ -50,6 +51,7 @@ describe('AlarmPublisher - RAISE (state transition, no repeats)', () => {
     assert.equal(event.value, 29.48);
     assert.equal(event.threshold, 25);
     assert.equal(event.persistence_min, 15);
+    assert.equal(event.absolute_temp_c, 55.2);
   });
 
   test('does not re-publish an alarm that is still active and unchanged', () => {
@@ -105,20 +107,30 @@ describe('AlarmPublisher - CLEAR', () => {
   });
 });
 
-describe('AlarmPublisher - structured value/threshold/persistence_min', () => {
-  test('promotes value/threshold/persistence_min to the top-level event for a PROCESS alarm', () => {
+describe('AlarmPublisher - structured value/threshold/persistence_min/absolute_temp_c', () => {
+  test('promotes value/threshold/persistence_min/absolute_temp_c to the top-level event for a PROCESS alarm', () => {
     const outbox = freshOutbox();
     const publisher = new AlarmPublisher({ outbox, topic: 'dt/alarm' });
-    publisher.ingestActiveAlarms([alarm({ value: 29.48, threshold: 25, persistence_min: 15 })]);
+    publisher.ingestActiveAlarms([alarm({ value: 29.48, threshold: 25, persistence_min: 15, absolute_temp_c: 55.2 })]);
     const event = outbox.queues.alarm[0].payload;
     assert.equal(event.value, 29.48);
     assert.equal(event.threshold, 25);
     assert.equal(event.persistence_min, 15);
+    assert.equal(event.absolute_temp_c, 55.2);
     // the full alarm (including description) is still passed through for context
     assert.equal(event.alarm.description, 'ΔT 29.48 ≥ 25');
   });
 
-  test('does not fabricate value/threshold/persistence_min for a SYSTEM alarm that has none', () => {
+  test('a ROR alarm also carries the absolute temperature reading, distinct from its rate-of-rise value', () => {
+    const outbox = freshOutbox();
+    const publisher = new AlarmPublisher({ outbox, topic: 'dt/alarm' });
+    publisher.ingestActiveAlarms([alarm({ alarm_type: 'ROR', value: 8.5, absolute_temp_c: 62.1 })]);
+    const event = outbox.queues.alarm[0].payload;
+    assert.equal(event.value, 8.5); // rate-of-rise, degC/hr
+    assert.equal(event.absolute_temp_c, 62.1); // the actual sensor reading, degC
+  });
+
+  test('does not fabricate value/threshold/persistence_min/absolute_temp_c for a SYSTEM alarm that has none', () => {
     const outbox = freshOutbox();
     const publisher = new AlarmPublisher({ outbox, topic: 'dt/alarm' });
     publisher.ingestActiveAlarms([
@@ -130,11 +142,13 @@ describe('AlarmPublisher - structured value/threshold/persistence_min', () => {
         value: undefined,
         threshold: undefined,
         persistence_min: undefined,
+        absolute_temp_c: undefined,
       }),
     ]);
     const event = outbox.queues.alarm[0].payload;
     assert.equal(event.value, undefined);
     assert.equal(event.threshold, undefined);
     assert.equal(event.persistence_min, undefined);
+    assert.equal(event.absolute_temp_c, undefined);
   });
 });
