@@ -115,9 +115,20 @@ just-this-message deltas).
   "clearedTs": "2026-07-04T04:36:05.444Z",         // present once cleared
   "description": "ΔT 29.48 ≥ 25",
   "reason": "CONFIG_REMOVED",                       // present only on auto-clear (joint removed from config)
-  "kpi": { "state": "No Data" }                    // present only on some SYSTEM alarms
+  "kpi": { "state": "No Data" },                   // present only on some SYSTEM alarms
+  "value": 29.48,                                   // PROCESS (ROR/DELTA_T) alarms only - the evaluated reading
+  "threshold": 25,                                  // PROCESS alarms only - the threshold it crossed
+  "persistence_min": 15                             // PROCESS alarms only - persistence_min from cfg/alarms for this level
 }
 ```
+
+`value`/`threshold`/`persistence_min` are only present on `PROCESS`
+alarms (`ROR`/`DELTA_T`) — they're the same numbers already baked into
+`description`, now also available as structured fields for the Cloud
+Gateway's alarm publisher (`busduct_edge_config.yaml`'s
+`publish.alarm.include_context`). `SYSTEM` alarms (comm timeout, sensor
+fault) don't evaluate a numeric threshold, so these are simply absent
+there, not fabricated.
 
 `INJECT_EVENT`-sourced entries (e.g. the `RECOVERY CONTROLLER`'s
 `SYSTEM|MODULE|RESET_N` events) use `status: "EVENT"` with

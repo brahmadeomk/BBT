@@ -27,6 +27,9 @@ function alarm(overrides = {}) {
     status: 'ACTIVE_NACK',
     raisedTs: '2026-07-10T10:00:00.000Z',
     description: 'ΔT 29.48 ≥ 25',
+    value: 29.48,
+    threshold: 25,
+    persistence_min: 15,
     ...overrides,
   };
 }
@@ -44,6 +47,9 @@ describe('AlarmPublisher - RAISE (state transition, no repeats)', () => {
     assert.equal(event.joint_id, 'J01');
     assert.equal(event.level, 'WARNING');
     assert.equal(event.kpi, 'delta_t');
+    assert.equal(event.value, 29.48);
+    assert.equal(event.threshold, 25);
+    assert.equal(event.persistence_min, 15);
   });
 
   test('does not re-publish an alarm that is still active and unchanged', () => {
@@ -99,16 +105,36 @@ describe('AlarmPublisher - CLEAR', () => {
   });
 });
 
-describe('AlarmPublisher - missing structured fields (documented gap)', () => {
-  test('does not fabricate value/threshold/persistence_min - only includes what the alarm object actually has', () => {
+describe('AlarmPublisher - structured value/threshold/persistence_min', () => {
+  test('promotes value/threshold/persistence_min to the top-level event for a PROCESS alarm', () => {
     const outbox = freshOutbox();
     const publisher = new AlarmPublisher({ outbox, topic: 'dt/alarm' });
-    publisher.ingestActiveAlarms([alarm()]);
+    publisher.ingestActiveAlarms([alarm({ value: 29.48, threshold: 25, persistence_min: 15 })]);
+    const event = outbox.queues.alarm[0].payload;
+    assert.equal(event.value, 29.48);
+    assert.equal(event.threshold, 25);
+    assert.equal(event.persistence_min, 15);
+    // the full alarm (including description) is still passed through for context
+    assert.equal(event.alarm.description, 'ΔT 29.48 ≥ 25');
+  });
+
+  test('does not fabricate value/threshold/persistence_min for a SYSTEM alarm that has none', () => {
+    const outbox = freshOutbox();
+    const publisher = new AlarmPublisher({ outbox, topic: 'dt/alarm' });
+    publisher.ingestActiveAlarms([
+      alarm({
+        instanceId: 'SYSTEM|MODULE|COMM_FAILURE',
+        category: 'SYSTEM',
+        alarm_type: 'COMM_MODULE',
+        description: 'No data received from communication module for 60 seconds',
+        value: undefined,
+        threshold: undefined,
+        persistence_min: undefined,
+      }),
+    ]);
     const event = outbox.queues.alarm[0].payload;
     assert.equal(event.value, undefined);
     assert.equal(event.threshold, undefined);
     assert.equal(event.persistence_min, undefined);
-    // the full alarm is still passed through for context, description included
-    assert.equal(event.alarm.description, 'ΔT 29.48 ≥ 25');
   });
 });

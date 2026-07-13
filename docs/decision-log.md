@@ -338,3 +338,35 @@ companion project chat and recorded in the workplan/design docs there).
   taps visible in the editor, HMI/historian/email behavior confirmed
   unchanged. Moving to Slice 5 (Cloud Gateway: batcher, alarm
   publisher, outbox, heartbeat).
+
+- **2026-07-10** — Slice 5 core modules added under `src/cloud-gateway/`
+  (see individual commits for full detail): `transport.js`
+  (cloud-agnostic interface + `LoopbackTransport`), `outbox.js`
+  (disk-backed alarm/telemetry priority queue matching
+  `busduct_edge_config.yaml`'s buffer section exactly, tested against
+  a simulated 24h-link-loss-then-recovery scenario), `batcher.js`
+  (KPI aggregation into batched telemetry, with a byte-budget chunking
+  safety valve instead of silently dropping joints), `alarm-publisher.js`
+  (RAISE/CLEAR on state transitions only, QoS 1), `heartbeat.js`
+  (hourly liveness ping). 179 tests total across the four modules.
+
+- **2026-07-10** — Resolved the value/threshold/persistence_min gap
+  flagged when `alarm-publisher.js` was built: at the user's direction,
+  extended `Alarm Manager` (node `de6fcc55794afd9e`) to emit these as
+  structured fields **alongside** the existing `description` string,
+  not replacing it. This is a real (if small) logic change to a live
+  function node, unlike Slice 4's purely-additive taps - handled with
+  the same care: `d.ror`/`L.th`/`L.p` (and the DELTA_T equivalents)
+  were already in scope via closure at the exact point each `PROCESS`
+  alarm object is built (`evaluateAlarm`'s `build()` callbacks), so
+  the change is three added object keys per alarm type, nothing else
+  touched. Verified via `difflib` against the pre-change function body
+  that only those 6 lines (3 keys × 2 alarm types) differ, and that
+  the patched source still parses (`node --check`). `clearAlarm`
+  already spreads `...a` when building the cleared copy, so these
+  fields carry through to CLEARED alarms automatically - no separate
+  change needed there. `alarm-publisher.js` now promotes them to the
+  top level of the published event when present (still absent, not
+  fabricated, for SYSTEM alarms that don't evaluate a numeric
+  threshold). Updated `docs/internal-message-contracts.md` and the
+  publisher's tests to match.

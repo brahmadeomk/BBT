@@ -20,18 +20,13 @@ const KPI_BY_ALARM_TYPE = {
  * just-this-message delta by construction, so every item there is a
  * CLEAR.
  *
- * Gap, flagged rather than worked around: busduct_edge_config.yaml's
- * publish.alarm.include_context also asks for `value`, `threshold`,
- * and `persistence_min`, but the current Alarm Manager alarm objects
- * don't carry these as structured fields - only baked into a
- * human-readable `description` string (e.g. "ΔT 29.48 ≥ 25").
- * Rather than regex-parse that string (fragile, and the two alarm
- * types already use different wording), this publisher includes only
- * the fields that actually exist as data: `joint_id`, `level`, `kpi`
- * (mapped from `alarm_type`), plus the rest of the alarm object for
- * context. Extending Alarm Manager to emit structured value/threshold
- * fields is a design decision for the companion chat, not something
- * to invent here.
+ * `value`/`threshold`/`persistence_min` (busduct_edge_config.yaml's
+ * publish.alarm.include_context) are promoted from the alarm object
+ * when present - Alarm Manager's PROCESS alarms (ROR/DELTA_T) now
+ * carry these as structured fields alongside their existing
+ * `description` string. SYSTEM alarms (comm timeout, sensor fault)
+ * don't evaluate a numeric threshold, so these are simply absent
+ * there rather than fabricated.
  */
 class AlarmPublisher {
   /**
@@ -73,6 +68,10 @@ class AlarmPublisher {
       timestamp: action === 'CLEAR' ? alarm.clearedTs : alarm.raisedTs,
       alarm, // full context snapshot
     };
+    if (typeof alarm.value === 'number') event.value = alarm.value;
+    if (typeof alarm.threshold === 'number') event.threshold = alarm.threshold;
+    if (typeof alarm.persistence_min === 'number') event.persistence_min = alarm.persistence_min;
+
     this.outbox.enqueue('alarm', this.topic, event, 1); // qos 1, per publish.alarm.qos - must not be lost
   }
 }
