@@ -17,12 +17,10 @@ across all of them.**
 - **Work in the slice order the workplan defines** (Slice 1 → Slice 8).
   Each slice has a "Done when" acceptance line — don't start the next
   slice until the current one meets it. Slice 1, Slice 2 (config
-  service), and Slice 3 (Nano job compiler + resend wiring) are
-  **done** — all live-verified on the real Pi. Slice 4 (internal bus:
-  link-out taps at ProcessLogic/Alarm Manager, message contracts
-  documented) is drafted, additive-only, and awaiting deploy
-  confirmation — see decision log. Slice 5 (Cloud Gateway) is next
-  after that's confirmed.
+  service), Slice 3 (Nano job compiler + resend wiring), and Slice 4
+  (internal bus link-out taps) are **done** — all live-verified on the
+  real Pi, HMI/historian/email behavior confirmed unchanged. Slice 5
+  (Cloud Gateway: batcher, alarm publisher, outbox, heartbeat) is next.
 
 - **Cloud-agnostic rule**: no AWS SDK (or any single-cloud SDK) may be
   imported outside `/src/adapters/aws`. Everything else — config

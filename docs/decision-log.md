@@ -333,3 +333,8 @@ companion project chat and recorded in the workplan/design docs there).
   `INJECT_EVENT` "EVENT" status shape RECOVERY CONTROLLER uses), not
   inferred. No consumer wired yet (`links: []` on every new tap) -
   Slice 5's Cloud Gateway is expected to add matching `link in` nodes.
+
+- **2026-07-10** — **Slice 4 confirmed done.** Deployed, new link-out
+  taps visible in the editor, HMI/historian/email behavior confirmed
+  unchanged. Moving to Slice 5 (Cloud Gateway: batcher, alarm
+  publisher, outbox, heartbeat).
