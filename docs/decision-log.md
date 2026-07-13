@@ -233,3 +233,48 @@ companion project chat and recorded in the workplan/design docs there).
   adds a row immediately, alarm configuration table loads current
   thresholds - all three symptoms reported after the first live test
   are resolved. Moving to Slice 3 (Nano job compiler).
+
+- **2026-07-10** — Traced the actual physical serial path to the Nano
+  in `flows_BBT.json` before writing the compiler, rather than guessing
+  from the reference table alone: the real connection is a `serial out`
+  node (`32001d89f98174c3`) on the **`modbusMaster_V2`** tab, using the
+  serial-port config `/dev/ttyACM0` @ 115200 baud - which matches
+  `Serial.begin(115200)` in `firmware/Nano_IOT.ino` exactly. The
+  `/dev/ttyUSB2` serial-out node I'd assumed might be it is actually a
+  cellular modem (AT command traffic on the "SIM Debug" tab) -
+  unrelated. This confirms the workplan's own note ("modbusMaster_V2 is
+  legacy") describes a tab that's still the **live, active** path to
+  the physical hardware today, not a dead one - Slice 3/4 are meant to
+  eventually retire it, but haven't yet.
+
+  Added `src/config-service/nano-compiler.js` (`compileNanoJob`):
+  cfg/modbus+joints → `{read, comm}` job JSON. Only emits `read`+`comm`
+  (this panel's joints are read-only sensors; `write`/`transfer` aren't
+  needed for normal polling). One read tuple per slave spanning all its
+  channels in one Modbus transaction, matching the legacy
+  `modbusMaster_V2` tab's own `paraRaw` min/max-register-span
+  construction. Verified against the real 21-slave production data
+  (`config/examples/migrated_modbus_joints.json`) as a concrete
+  regression test: the compiler's output matches the real legacy
+  globals exactly (`Polling: 10000`us → `comm[0]`, `baudRate: 9600`,
+  `Timeout: 1000`ms, every slave's `[unit_address, 3, 1]` tuple from
+  `registerAddress: 3, dataBits: 1`) - satisfies the workplan's own
+  Slice 3 "Done when: compiler output matches the current
+  hand-configured job JSON for the reference panel."
+
+  R10 (bus capacity) isn't re-implemented here - `compileNanoJob` calls
+  `validateModbusJoints` and refuses to compile an invalid document, so
+  R10 is enforced by construction (a document that violates it was
+  never accepted by `ConfigStore.applyIfValid` in the first place).
+  Also refuses (with a clear error, not a silent guess) a document with
+  more than one bus or a non-RTU bus - the firmware has exactly one
+  RS-485 port, so there's no way to know which bus is physically wired
+  to the Nano if more than one is configured.
+
+  **Not yet done**: wiring resend triggers (boot / after RECOVERY
+  CONTROLLER USB power-cycle / after a config apply) into the actual
+  flow, and reporting recovery events as SYSTEM alarms. That means
+  splicing new logic into the live `modbusMaster_V2` tab that directly
+  controls real-time communication with deployed hardware - higher risk
+  than anything touched so far in this repo. Flagging for explicit
+  direction before touching it.

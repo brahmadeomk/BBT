@@ -54,7 +54,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | `/docs` | Design artifacts, decision log |
 | `/config/schemas` | The JSON Schemas — source of truth for `cfg/modbus`, `cfg/joints`, `cfg/alarms` |
 | `/config/examples` | Reference config instances per domain; migration snapshots (empty — Slice 2) |
-| `/src/config-service` | Config store, validator (R1–R14, A1–A10), version manager, audit writer, Nano job compiler (empty — Slice 2+) |
+| `/src/config-service` | Config store, validators (R1–R14, A1–A10), version manager, audit writer, Node-RED handlers, Nano job compiler |
 | `/src/cloud-gateway` | Batcher, alarm publisher, heartbeat, outbox, transport interface (empty — Slice 5+) |
 | `/src/adapters/aws` | AWS-specific: endpoint config, Fleet Provisioning, Basic Ingest mapping (empty — Slice 6+) |
 | `/flows` | Node-RED flow exports — `flows_BBT.json` is the current production flow |
