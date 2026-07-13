@@ -381,3 +381,15 @@ companion project chat and recorded in the workplan/design docs there).
   else changed. `alarm-publisher.js` promotes it the same way as the
   other structured fields (present for PROCESS alarms, absent for
   SYSTEM). Updated docs and tests.
+
+- **2026-07-10** — Live "Apply Config" on the real Pi surfaced the
+  expected consequence of a gap already known: the migration tool only
+  produces files in the repo (`config/examples/migrated_*.json`) - it
+  never touches the live `ConfigStore` at `/var/busduct/cfg`, so
+  `joint-master-handler.js`'s "No cfg/modbus applied yet" check
+  (correctly) fired on a panel that had never had anything applied.
+  Added `tools/apply-migrated-config.js`: a one-time bootstrap that
+  applies the already-migrated files to the live store, refusing to
+  run again once something's been applied (so it can't clobber real
+  dashboard edits made afterward). Documented as a new step 3 in
+  `docs/pi-deployment.md`, before the settings.js wiring step.

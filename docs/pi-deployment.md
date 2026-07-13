@@ -55,7 +55,26 @@ sudo mkdir -p /var/busduct/cfg
 sudo chown pi:pi /var/busduct/cfg
 ```
 
-## 3. Wire the library into Node-RED's settings.js
+## 3. Bootstrap the migrated config (first time only)
+
+The migration tool (`tools/migrate-legacy-config.js`) only produces
+files in the repo (`config/examples/migrated_modbus_joints.json`,
+`migrated_alarms.json`) - it doesn't touch the live config store. Until
+something has actually been applied to `/var/busduct/cfg`, the
+dashboard's "Apply Config" button will fail with *"No cfg/modbus
+applied yet - run the migration/commissioning step first"*. Apply the
+already-migrated config once, from the Pi:
+
+```bash
+node tools/apply-migrated-config.js
+```
+
+This refuses to run a second time if `/var/busduct/cfg` already has an
+applied config (so it can't accidentally clobber real edits made
+through the dashboard afterward) - it's a one-time bootstrap, not
+something to re-run routinely.
+
+## 4. Wire the library into Node-RED's settings.js
 
 Open Node-RED's `settings.js` (usually `~/.node-red/settings.js`) and
 add a `functionGlobalContext` entry pointing at the path you cloned to
@@ -70,7 +89,7 @@ busductConfigService: require('/home/pi/busduct-cloud-edge/src/config-service/no
 If `settings.js` already has a `functionGlobalContext` block, add this
 as one more key inside it rather than replacing the block.
 
-## 4. Restart Node-RED (not just Deploy)
+## 5. Restart Node-RED (not just Deploy)
 
 `functionGlobalContext` entries are `require()`'d once when
 `settings.js` loads at Node-RED **startup**. A plain Deploy in the
@@ -83,7 +102,7 @@ sudo systemctl restart nodered
 (or `node-red-stop && node-red-start` if that's how it's installed -
 check with `systemctl status nodered` first to see which applies.)
 
-## 5. Re-import the latest flow
+## 6. Re-import the latest flow
 
 The function node bodies in `flows/flows_BBT.json` have changed since
 you first imported it (the Config Manager / JointMasterBackEndNode
@@ -92,7 +111,7 @@ editor: Menu → Import → select `flows/flows_BBT.json` from the cloned
 repo → import, replacing the existing flow (or importing over the
 same tabs) → Deploy.
 
-## 6. Verify
+## 7. Verify
 
 - Open the joint configuration table - existing joints should load.
 - Press "Add Joint" - a new blank editable row should appear immediately.
@@ -103,8 +122,9 @@ same tabs) → Deploy.
 
 If something's still wrong, check the Node-RED debug sidebar / log
 (`journalctl -u nodered -f` if run as a service) for errors mentioning
-`busductConfigService` - that usually means step 3 or 4 wasn't
-completed.
+`busductConfigService` - that usually means step 4 or 5 wasn't
+completed. An error like *"No cfg/modbus applied yet"* means step 3
+(bootstrap) wasn't done.
 
 ## Updating later
 
