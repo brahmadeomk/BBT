@@ -202,6 +202,20 @@ unchanged"* — met). Two real bugs were caught and fixed along the way
 — see the decision log. 123 unit tests plus this live pass; **Slice 2
 is done.**
 
+**Client-side data-loss bug (found after Slice 2, fixed):**
+`JointMasterUI`/`ZoneMasterUI` (the `ui_template` nodes behind both
+tables) only sent their current `joints`/`zones` array on SAVE and
+APPLY — EDIT/ADD/ADD_BELOW/DELETE didn't. If a user typed into one row
+without saving it first, then clicked EDIT/ADD/DELETE on *any other*
+row, the server responded from its own last-persisted copy (missing
+the unsaved edit), and the template's `$watch` unconditionally
+overwrote the client's local state with that stale response — silently
+discarding the in-progress edit. Fixed by sending the current array on
+every action, not just SAVE/APPLY. This is pure client-side Angular JS
+inside a `ui_template` node — nothing in this repo's test suite
+exercises it directly, so **needs a live re-test on the Pi** like any
+other flow change.
+
 ## Nano job protocol (from `firmware/Nano_IOT.ino`)
 
 The Nano job compiler must emit JSON the firmware already parses. Do not

@@ -407,3 +407,36 @@ companion project chat and recorded in the workplan/design docs there).
   reproducing the exact reported scenario (alarms pre-applied, verify
   `modbus_joints` still bootstraps) plus the mirror case. 184 tests
   total.
+
+- **2026-07-10** — Found and fixed a real client-side data-loss bug in
+  `JointMasterUI` (the `ui_template` node backing the joint config
+  dashboard, `flows_BBT.json` node `d58c3f80174c66df`), reported as
+  "submitted config showed old data instead of what was in the live
+  table." Read the actual Angular template rather than guess: the
+  EDIT/ADD/ADD_BELOW/DELETE buttons' `send()` calls didn't include the
+  current `joints` array (only SAVE and APPLY CONFIG did) - so if a
+  user typed into one row without clicking SAVE first, then clicked
+  EDIT/ADD/DELETE on any other row, the server processed that action
+  against its own last-persisted copy (missing the unsaved edit),
+  and the template's `scope.$watch("msg", ...)` unconditionally
+  overwrites the client's local state with whatever the server just
+  returned - silently discarding the in-progress edit before the user
+  ever got to click APPLY. Confirmed this is deterministic, not a race
+  with some other periodic trigger: `JointMasterBackEndNode` is the
+  *only* node feeding `JointMasterUI`.
+
+  Fix: every button now sends `joints: msg.payload.joints` (or
+  `scope.msg.payload.joints` in the plain-JS `confirmDelete` handler),
+  matching what SAVE/APPLY already did - the client's current state is
+  now always the source of truth sent to the server, never silently
+  replaced by a stale server-side fallback. Verified by diff that only
+  those 4 `ng-click`/`send()` call sites changed - no other markup, CSS,
+  or script logic touched.
+
+  Found (not yet reported, but identical mechanism) the same bug in
+  `ZoneMasterUI` (node `bb73f897eaeabb2f`) - EDIT/ADD/DELETE there also
+  didn't send `zones`. Fixed the same way, same verification. 184 tests
+  still passing (this is pure client-side JS inside two `ui_template`
+  nodes - nothing in this repo's Node.js test suite exercises Angular
+  template code directly, so this needs a live re-test on the Pi, same
+  as any other flow change).
