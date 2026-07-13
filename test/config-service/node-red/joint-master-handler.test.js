@@ -197,6 +197,7 @@ describe('handleJointMasterMessage - apply', () => {
       { joints, slaveList: legacySlaveList(), zones: legacyZones(), store, user: 'alice' }
     );
     assert.equal(result.msg.payload.success, 'Configuration saved');
+    assert.equal(result.resendNeeded, true);
 
     const { doc } = store.readDomain('modbus_joints');
     assert.equal(doc.config_domain_versions.modbus, 2);
@@ -204,6 +205,23 @@ describe('handleJointMasterMessage - apply', () => {
     assert.equal(doc.joints.length, 2);
     assert.deepEqual(doc.modbus.ambient_sensor, { slave_id: 'sl21', channel: 1 });
     assert.ok(doc.joints.every((j) => !j.ambient_sensor)); // everyone agrees with the panel default
+  });
+
+  test('does not flag a resend for a rejected apply', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const joints = [
+      { joint_name: 'J01', joint_id: 'J01', slaveID: 1, ambientSlaveID: 101, zone_id: 'Z1', editing: false },
+      { joint_name: 'J01', joint_id: 'J01', slaveID: 2, ambientSlaveID: 101, zone_id: 'Z1', editing: false }, // duplicate joint_id
+    ];
+    const result = handleJointMasterMessage({ payload: { action: 'apply' } }, { joints, slaveList: legacySlaveList(), zones: legacyZones(), store });
+    assert.ok(!result.resendNeeded);
+  });
+
+  test('does not flag a resend for draft-only actions (add/edit/delete/save)', () => {
+    const store = freshStore();
+    const result = handleJointMasterMessage({ payload: { action: 'add' } }, { joints: [], slaveList: legacySlaveList(), zones: legacyZones(), store });
+    assert.ok(!result.resendNeeded);
   });
 
   test('sets a joint-level ambient override for an outlier joint referencing a dedicated ambient probe', () => {

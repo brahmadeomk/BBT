@@ -5,6 +5,7 @@ const { validateModbusJoints } = require('../validate-modbus-joints');
 const { validateAlarms } = require('../validate-alarms');
 const { handleConfigManagerMessage } = require('./config-manager-handler');
 const { handleJointMasterMessage } = require('./joint-master-handler');
+const { buildNanoJobMessage } = require('./nano-resend-handler');
 
 const DEFAULT_ROOT = '/var/busduct/cfg';
 
@@ -19,4 +20,4 @@ function createStore(root = DEFAULT_ROOT) {
   return new ConfigStore({ root, validators: { modbus_joints: validateModbusJoints, alarms: validateAlarms } });
 }
 
-module.exports = { createStore, handleConfigManagerMessage, handleJointMasterMessage };
+module.exports = { createStore, handleConfigManagerMessage, handleJointMasterMessage, buildNanoJobMessage };

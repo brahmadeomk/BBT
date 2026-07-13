@@ -278,3 +278,33 @@ companion project chat and recorded in the workplan/design docs there).
   controls real-time communication with deployed hardware - higher risk
   than anything touched so far in this repo. Flagging for explicit
   direction before touching it.
+
+- **2026-07-10** — Drafted the resend wiring (user chose "draft it, I
+  review before deploying" over pausing). Added *alongside* the legacy
+  `modbusMaster_V2` internals rather than rewriting them, to minimize
+  risk to the working path: a new `Send Nano Job` function node feeds
+  into the *same* `json` node the legacy read-job path already uses
+  before the serial write, so the final-mile plumbing to the Nano is
+  untouched. Three triggers (boot, after RECOVERY CONTROLLER's USB
+  power-cycle + a 3s settle delay, after a successful
+  `JointMasterBackEndNode` apply via a new 2nd output) reach it through
+  a `link in`/`link out` pair, since the trigger sources live on a
+  different tab. Recovery-event alarm reporting needed no new code -
+  the existing `RECOVERY CONTROLLER` node already emits a
+  `SYSTEM|MODULE|RESET_N` alarm.
+
+  `resendNeeded` added to `handleJointMasterMessage`'s return value
+  (true only after a successful apply) rather than deciding this in the
+  Node-RED function node itself, keeping the decision in the
+  unit-tested library per the thin-function-node rule.
+
+  Added `test/flows-integrity.test.js`: checks every `wires`/`links`
+  reference in `flows_BBT.json` resolves to a real node id and that
+  `link in`/`link out` pairs are mutually consistent. Cheap regression
+  guard for hand-editing this 537KB file (which is how these changes
+  were made - a targeted Python script, verified to change only the
+  intended ~6 new nodes and 2 modified ones, not reformat the rest).
+
+  **Full details, and the pre-deploy test checklist, are in
+  `CLAUDE.md`'s "Nano job resend wiring" section - this has NOT been
+  run against real hardware or a live Node-RED instance yet.**

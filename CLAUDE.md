@@ -110,6 +110,62 @@ units (R11/R12 govern `cfg/modbus`/`cfg/joints`; A6 governs `cfg/alarms`):
 The Nano job compiler (Slice 3) only touches `cfg/modbus`/`cfg/joints` —
 it must not need the alarms schema.
 
+## Nano job resend wiring (Slice 3, NOT YET BENCH-TESTED)
+
+`compileNanoJob` (`src/config-service/nano-compiler.js`) turns the
+applied `cfg/modbus+joints` doc into `{read, comm}`. The actual serial
+write to the Nano lives on the **`modbusMaster_V2`** tab (`serial out`
+node, `/dev/ttyACM0` @ 115200 baud — matches `Serial.begin(115200)` in
+`firmware/Nano_IOT.ino`). That tab is legacy per the workplan, but it's
+the live path to the real hardware, so the new resend logic was added
+*alongside* it rather than rewriting its internals:
+
+- **`Send Nano Job`** (new function node, `modbusMaster_V2` tab): calls
+  `buildNanoJobMessage(store)` (`src/config-service/node-red/nano-resend-handler.js`),
+  sets `msg.payload` to the compiled job, and feeds into the *same*
+  `json` node the legacy read-job path already uses before the serial
+  write — so the final-mile plumbing to the Nano is unchanged.
+- **Three triggers**, wired via a `link in`/`link out` pair (the
+  trigger sources live on a different tab than `Send Nano Job`):
+  1. **Boot**: new inject node (`once`, 5s delay) on `modbusMaster_V2`,
+     wired directly to `Send Nano Job`.
+  2. **After RECOVERY CONTROLLER's USB power-cycle**: the existing
+     `exec` node's return-code output (fires once `uhubctl ... off &&
+     sleep 3 && uhubctl ... on` completes) now also feeds a new 3s
+     `delay` node ("Wait for Nano Reboot" — the Nano needs time to
+     finish `setup()` after power is restored), then a `link out` to
+     `Send Nano Job`.
+  3. **After a config apply**: `JointMasterBackEndNode` now has 2
+     outputs instead of 1. Its thin wrapper returns
+     `[outMsg, resendNeeded ? {payload:'apply'} : null]` — `resendNeeded`
+     comes from `handleJointMasterMessage`'s return value, true only
+     after a successful `apply`. Output 2 feeds a `link out` to the
+     same `Send Nano Job` trigger.
+  Recovery events themselves are already reported as SYSTEM alarms by
+  the existing `RECOVERY CONTROLLER` node (`SYSTEM|MODULE|RESET_N`,
+  `INFO` level, to Alarm Manager) — nothing new was needed there.
+
+`test/flows-integrity.test.js` checks every `wires`/`links` reference
+in `flows_BBT.json` resolves to a real node id and that `link in`/`link
+out` pairs are mutually consistent — a cheap regression guard against
+hand-editing mistakes in this 537KB file, not a substitute for actually
+running it.
+
+**This has NOT been tested against real hardware or even a live
+Node-RED instance.** Before deploying, ideally on a bench setup first:
+
+1. Confirm `Send Nano Job`'s output actually reaches the serial port
+   (e.g. temporarily enable the debug node already wired alongside the
+   `json`→serial-out path) and that the Nano accepts it (watch its
+   Serial monitor for `"Info: Modbus Packets received"`).
+2. Trigger each of the 3 paths and confirm a resend happens: restart
+   Node-RED (boot), manually fire the RECOVERY CONTROLLER's USB
+   power-cycle path (or force `commActive` in its context), and apply a
+   joint config change.
+3. Confirm `Send Nano Job`'s `node.warn(...)` fires (visible in the
+   debug sidebar / `journalctl -u nodered`) if no `cfg/modbus+joints`
+   has been applied yet, instead of silently doing nothing.
+
 ## Node-RED integration
 
 `flows/flows_BBT.json`'s two config-editing function nodes now call the

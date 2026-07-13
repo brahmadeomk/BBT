@@ -50,7 +50,8 @@ function withPayload(msg, payload) {
  * @param {Array} deps.zones - legacy zone_master
  * @param {import('../store').ConfigStore} deps.store
  * @param {string} [deps.user]
- * @returns {{msg: object|null, draft: Array|null}} draft is null when nothing needs persisting
+ * @returns {{msg: object|null, draft: Array|null, resendNeeded?: boolean}} draft is null when nothing
+ *   needs persisting; resendNeeded is true only after a successful 'apply' (cfg/modbus+joints changed)
  */
 function handleJointMasterMessage(msg, deps) {
   const { slaveList, zones, store, user = 'UI' } = deps;
@@ -209,7 +210,11 @@ function applyJoints(msg, joints, zones, slaveList, store, user) {
   }
 
   const savedJoints = joints.map((j) => ({ ...j, editing: false }));
-  return { msg: withPayload(msg, { joints: savedJoints, zones, success: 'Configuration saved', action: 'apply' }), draft: savedJoints };
+  return {
+    msg: withPayload(msg, { joints: savedJoints, zones, success: 'Configuration saved', action: 'apply' }),
+    draft: savedJoints,
+    resendNeeded: true, // cfg/modbus+joints changed - the Nano job compiler (Slice 3) needs to recompile and resend
+  };
 }
 
 module.exports = { handleJointMasterMessage };
