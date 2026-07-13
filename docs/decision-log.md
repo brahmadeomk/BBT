@@ -308,3 +308,28 @@ companion project chat and recorded in the workplan/design docs there).
   **Full details, and the pre-deploy test checklist, are in
   `CLAUDE.md`'s "Nano job resend wiring" section - this has NOT been
   run against real hardware or a live Node-RED instance yet.**
+
+- **2026-07-10** — **Slice 3 confirmed done** (compiler + resend
+  wiring both tested and working on the real Pi). Moving to Slice 4
+  (internal bus refactor): link-out taps at ProcessLogic/Alarm
+  Manager outputs, no logic changes, document the message contracts.
+
+- **2026-07-10** — Slice 4: read `ProcessLogic` (node
+  `39dad91df0c15744`, 3 outputs) and `Alarm Manager` (node
+  `de6fcc55794afd9e`, 4 outputs) function source directly rather than
+  guess at "the KPI stream" / "the alarm events" the workplan's
+  parenthetical shorthand implies. Given the ambiguity over which
+  specific output(s) counted as "the" stream, and that tapping every
+  output is a strict superset with zero added risk (a `link out` with
+  an empty `links` array is inert - Node-RED just drops the message,
+  no side effects), added a tap to **all 7 outputs** rather than guess
+  which subset Slice 5 will actually need: `ProcessLogic` → joint /
+  ambient / unassigned; `Alarm Manager` → active / cleared / historian
+  / email. Verified byte-identical function bodies before/after (both
+  nodes' `func` fields untouched - only new nodes appended to the
+  existing `wires` arrays). Documented every output's exact message
+  shape in `docs/internal-message-contracts.md`, sourced from the
+  actual code (e.g. `buildOutputs`'s change-detection semantics, the
+  `INJECT_EVENT` "EVENT" status shape RECOVERY CONTROLLER uses), not
+  inferred. No consumer wired yet (`links: []` on every new tap) -
+  Slice 5's Cloud Gateway is expected to add matching `link in` nodes.

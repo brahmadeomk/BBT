@@ -16,13 +16,13 @@ across all of them.**
 
 - **Work in the slice order the workplan defines** (Slice 1 → Slice 8).
   Each slice has a "Done when" acceptance line — don't start the next
-  slice until the current one meets it. Slice 1 and Slice 2 (config
-  service: store, validators, migration tool, Node-RED refactor) are
-  **done** — the Node-RED refactor has been live-verified on the real
-  Pi (dashboard save/apply/restore/load paths all confirmed working
-  after the two bug fixes; see decision log). Slice 3 (Nano job
-  compiler) is next and touches existing edge behavior directly, so it
-  needs the most care and the most tests.
+  slice until the current one meets it. Slice 1, Slice 2 (config
+  service), and Slice 3 (Nano job compiler + resend wiring) are
+  **done** — all live-verified on the real Pi. Slice 4 (internal bus:
+  link-out taps at ProcessLogic/Alarm Manager, message contracts
+  documented) is drafted, additive-only, and awaiting deploy
+  confirmation — see decision log. Slice 5 (Cloud Gateway) is next
+  after that's confirmed.
 
 - **Cloud-agnostic rule**: no AWS SDK (or any single-cloud SDK) may be
   imported outside `/src/adapters/aws`. Everything else — config
@@ -110,7 +110,7 @@ units (R11/R12 govern `cfg/modbus`/`cfg/joints`; A6 governs `cfg/alarms`):
 The Nano job compiler (Slice 3) only touches `cfg/modbus`/`cfg/joints` —
 it must not need the alarms schema.
 
-## Nano job resend wiring (Slice 3, NOT YET BENCH-TESTED)
+## Nano job resend wiring (Slice 3, live-verified)
 
 `compileNanoJob` (`src/config-service/nano-compiler.js`) turns the
 applied `cfg/modbus+joints` doc into `{read, comm}`. The actual serial
@@ -151,20 +151,7 @@ out` pairs are mutually consistent — a cheap regression guard against
 hand-editing mistakes in this 537KB file, not a substitute for actually
 running it.
 
-**This has NOT been tested against real hardware or even a live
-Node-RED instance.** Before deploying, ideally on a bench setup first:
-
-1. Confirm `Send Nano Job`'s output actually reaches the serial port
-   (e.g. temporarily enable the debug node already wired alongside the
-   `json`→serial-out path) and that the Nano accepts it (watch its
-   Serial monitor for `"Info: Modbus Packets received"`).
-2. Trigger each of the 3 paths and confirm a resend happens: restart
-   Node-RED (boot), manually fire the RECOVERY CONTROLLER's USB
-   power-cycle path (or force `commActive` in its context), and apply a
-   joint config change.
-3. Confirm `Send Nano Job`'s `node.warn(...)` fires (visible in the
-   debug sidebar / `journalctl -u nodered`) if no `cfg/modbus+joints`
-   has been applied yet, instead of silently doing nothing.
+**Tested and working on the real Pi** — Slice 3 is done.
 
 ## Node-RED integration
 
@@ -241,6 +228,17 @@ change this wire format without updating the firmware in lockstep:
   `{"t":"r"|"w"|"x", ...}` with `"st":"ok"|"err"` (`"err_read"`/
   `"err_write"` for transfers). The Cloud Gateway / Node-RED side needs
   to parse this framing, not assume a single batched response.
+
+## Internal bus (Slice 4)
+
+`ProcessLogic` (KPI stream, 3 outputs) and `Alarm Manager` (alarm
+events, 4 outputs) — both on the `BusbarTherMo` tab — now have a `link
+out` tap on every output, purely additive (new node appended to each
+output's existing wire list; the two function nodes' code is
+byte-identical to before). These taps have no consumer yet (`links: []`
+on each) — Slice 5's Cloud Gateway batcher/alarm publisher are meant to
+add matching `link in` nodes. **Full message shapes for every output:
+`docs/internal-message-contracts.md`.**
 
 ## Working agreements
 
