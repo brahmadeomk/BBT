@@ -393,3 +393,17 @@ companion project chat and recorded in the workplan/design docs there).
   run again once something's been applied (so it can't clobber real
   dashboard edits made afterward). Documented as a new step 3 in
   `docs/pi-deployment.md`, before the settings.js wiring step.
+
+- **2026-07-10** — Fixed a real bug in the bootstrap tool itself,
+  caught on the first real run: the guard was all-or-nothing (refused
+  to touch *either* domain if *either* already had something applied).
+  On the real panel, `alarms` already had a config applied (most likely
+  a "Restore Defaults" click on the alarm screen before the bootstrap
+  tool was ever run) while `modbus_joints` didn't - so the tool refused
+  to bootstrap `modbus_joints` too, even though that was the one that
+  actually still needed it. Rewrote to check and apply each domain
+  independently - `modbus_joints` and `alarms` are separate
+  `ConfigStore` domains with no reason to be coupled here. Added a test
+  reproducing the exact reported scenario (alarms pre-applied, verify
+  `modbus_joints` still bootstraps) plus the mirror case. 184 tests
+  total.

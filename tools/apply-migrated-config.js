@@ -9,6 +9,13 @@
 // the live store, since it's an offline conversion step (see
 // tools/migrate-legacy-config.js and the decision log).
 //
+// The two domains are bootstrapped independently: a panel can easily
+// have one already applied (e.g. someone clicked "Restore Defaults" on
+// the alarm screen before this ran) and not the other. Refusing the
+// whole run in that case would block bootstrapping the domain that
+// actually still needs it - so each domain is only skipped if IT
+// specifically already has something applied.
+//
 // Usage: node tools/apply-migrated-config.js [--root=/var/busduct/cfg]
 
 const fs = require('node:fs');
@@ -17,6 +24,23 @@ const path = require('node:path');
 const { ConfigStore } = require('../src/config-service/store');
 const { validateModbusJoints } = require('../src/config-service/validate-modbus-joints');
 const { validateAlarms } = require('../src/config-service/validate-alarms');
+
+function bootstrapDomain(store, domain, migratedDoc) {
+  const { doc: existing } = store.readDomain(domain);
+  if (existing) {
+    console.log(`Skipping ${domain}: ${store.root} already has an applied config for it - use the dashboard for further changes.`);
+    return true; // not a failure - just nothing to do
+  }
+
+  const result = store.applyIfValid(domain, migratedDoc, {}, 'bootstrap');
+  if (!result.applied) {
+    console.error(`${domain} FAILED to apply:`);
+    for (const e of result.errors) console.error(' -', e.rule, e.message);
+    return false;
+  }
+  console.log(`${domain} applied at ${store.root} (versions: ${JSON.stringify(result.appliedVersions)})`);
+  return true;
+}
 
 function main() {
   const rootArg = process.argv.find((a) => a.startsWith('--root='));
@@ -35,34 +59,10 @@ function main() {
 
   const store = new ConfigStore({ root, validators: { modbus_joints: validateModbusJoints, alarms: validateAlarms } });
 
-  const { doc: existingModbusJoints } = store.readDomain('modbus_joints');
-  const { doc: existingAlarms } = store.readDomain('alarms');
-  if (existingModbusJoints || existingAlarms) {
-    console.error(
-      `Refusing to overwrite: ${root} already has an applied config (modbus_joints: ${!!existingModbusJoints}, alarms: ${!!existingAlarms}). ` +
-        'This tool is for first-time bootstrap only - use the dashboard to make further changes.'
-    );
-    process.exit(1);
-  }
+  const modbusOk = bootstrapDomain(store, 'modbus_joints', modbusJoints);
+  const alarmsOk = bootstrapDomain(store, 'alarms', alarms);
 
-  const modbusResult = store.applyIfValid('modbus_joints', modbusJoints, {}, 'bootstrap');
-  const alarmsResult = store.applyIfValid('alarms', alarms, {}, 'bootstrap');
-
-  if (!modbusResult.applied) {
-    console.error('cfg/modbus+joints FAILED to apply:');
-    for (const e of modbusResult.errors) console.error(' -', e.rule, e.message);
-  } else {
-    console.log(`cfg/modbus+joints applied at ${root} (versions: ${JSON.stringify(modbusResult.appliedVersions)})`);
-  }
-
-  if (!alarmsResult.applied) {
-    console.error('cfg/alarms FAILED to apply:');
-    for (const e of alarmsResult.errors) console.error(' -', e.rule, e.message);
-  } else {
-    console.log(`cfg/alarms applied at ${root} (versions: ${JSON.stringify(alarmsResult.appliedVersions)})`);
-  }
-
-  if (!modbusResult.applied || !alarmsResult.applied) process.exit(1);
+  if (!modbusOk || !alarmsOk) process.exit(1);
 }
 
 if (require.main === module) {
