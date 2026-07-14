@@ -121,13 +121,21 @@ same tabs) → Deploy.
   intentionally bad value, that it's rejected with a clear error).
 - Open the new **Modbus Settings** group (same "Joint Config" dashboard
   tab): the bus parameters and all commissioned slaves should load,
-  with their display names. Apply a harmless change (e.g. rename a
-  sensor) — it should succeed *without* disturbing live polling; a
-  real change (e.g. baud or a slave's unit address) should trigger a
-  Nano job resend. **Do not use the old "Parameter – Modbus
-  Configuration" / "Comm Parameters" screens any more** — they bypass
-  validation and are scheduled for removal once this table is
+  with their display names — one row per channel (the current panel's
+  units are all single-channel, so one row each). Apply a harmless
+  change (e.g. rename a sensor) — it should succeed *without*
+  disturbing live polling; a real change (e.g. baud or a slave's unit
+  address) should trigger a Nano job resend. To commission a
+  multi-channel unit, use **+CH** on its row (same unit address,
+  next channel, its own base address; model/words/scale/poll must
+  match across the unit's rows). **Do not use the old "Parameter –
+  Modbus Configuration" / "Comm Parameters" screens any more** — they
+  bypass validation and are scheduled for removal once this table is
   live-verified.
+- In the joint table, each joint now also selects a **Ch**annel of its
+  slave. Existing rows default to channel 1. Two joints may share a
+  multi-channel slave on different channels; mapping the same slave +
+  channel twice is rejected with the conflicting joint named.
 
 If something's still wrong, check the Node-RED debug sidebar / log
 (`journalctl -u nodered -f` if run as a service) for errors mentioning

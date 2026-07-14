@@ -262,6 +262,57 @@ describe('R14 - ambient_sensor references must be valid, at any level', () => {
   });
 });
 
+describe('R15 - per-channel register integrity (channel_addrs / channel_labels)', () => {
+  test('accepts valid channel_addrs and channel_labels (length == channels, unique, spaced, min == base)', () => {
+    const doc = validModbusJointsDoc();
+    doc.modbus.slaves[0].registers.channel_addrs = [100, 105, 110, 115]; // sl01 has 4 channels, base 100
+    doc.modbus.slaves[0].registers.channel_labels = ['A', 'B', 'C', 'D'];
+    const result = validateModbusJoints(doc);
+    assert.equal(errorsFor('R15', result).length, 0);
+  });
+
+  test('rejects channel_addrs whose length differs from channels', () => {
+    const doc = validModbusJointsDoc();
+    doc.modbus.slaves[0].registers.channel_addrs = [100, 105]; // sl01 has 4 channels
+    const result = validateModbusJoints(doc);
+    assert.equal(result.valid, false);
+    assert.match(errorsFor('R15', result)[0].message, /2 entries but channels is 4/);
+  });
+
+  test('rejects overlapping channel addresses (spacing < temp_word_count)', () => {
+    const doc = validModbusJointsDoc();
+    doc.modbus.slaves[0].registers.temp_word_count = 2;
+    doc.modbus.slaves[0].registers.channel_addrs = [100, 101, 104, 106]; // 100+2 words overlaps 101
+    const result = validateModbusJoints(doc);
+    assert.equal(result.valid, false);
+    assert.match(errorsFor('R15', result)[0].message, /overlap/);
+  });
+
+  test('rejects duplicate channel addresses', () => {
+    const doc = validModbusJointsDoc();
+    doc.modbus.slaves[0].registers.channel_addrs = [100, 100, 110, 115];
+    const result = validateModbusJoints(doc);
+    assert.equal(result.valid, false);
+    assert.equal(errorsFor('R15', result).length, 1);
+  });
+
+  test('rejects temp_base_addr that is not the lowest channel address', () => {
+    const doc = validModbusJointsDoc();
+    doc.modbus.slaves[0].registers.channel_addrs = [102, 105, 110, 115]; // base stays 100
+    const result = validateModbusJoints(doc);
+    assert.equal(result.valid, false);
+    assert.match(errorsFor('R15', result)[0].message, /temp_base_addr 100 must equal the lowest channel address 102/);
+  });
+
+  test('rejects channel_labels whose length differs from channels', () => {
+    const doc = validModbusJointsDoc();
+    doc.modbus.slaves[0].registers.channel_labels = ['only one'];
+    const result = validateModbusJoints(doc);
+    assert.equal(result.valid, false);
+    assert.match(errorsFor('R15', result)[0].message, /channel_labels has 1 entries but channels is 4/);
+  });
+});
+
 describe('R10 - worst-case bus scan time must fit poll interval', () => {
   test('accepts a light bus load at the default poll interval', () => {
     const result = validateModbusJoints(validModbusJointsDoc());

@@ -163,7 +163,7 @@ describe('handleModbusSettingsMessage - draft bookkeeping', () => {
 describe('handleModbusSettingsMessage - apply', () => {
   test('rejects when cfg/modbus has not been provisioned yet', () => {
     const store = freshStore();
-    const row = { slave_id: '', label: 'S1', unit_address: 1, model: 'M', channels: 1, temp_base_addr: 3, temp_word_count: 1, temp_scale: 0.1, poll_interval_s: 30, editing: false };
+    const row = { slave_id: '', label: 'S1', unit_address: 1, channel: 1, base_addr: 3, model: 'M', temp_word_count: 1, temp_scale: 0.1, poll_interval_s: 30, editing: false };
     const result = handleModbusSettingsMessage(
       { payload: { action: 'apply', slaves: [row], bus: { port: '/dev/ttyUSB0', baud: 9600, parity: 'N', stop_bits: 1, timeout_ms: 1000, retries: 2, inter_frame_ms: 10 } } },
       { store, legacySlaveList: [] }
@@ -208,7 +208,7 @@ describe('handleModbusSettingsMessage - apply', () => {
     const store = freshStore();
     seedModbusJoints(store);
     const state = loadState(store);
-    state.slaves.push({ slave_id: '', label: 'Sensor3', unit_address: 3, model: 'BT-SCM-4', channels: 1, temp_base_addr: 3, temp_word_count: 1, temp_scale: 0.1, poll_interval_s: 30, editing: false });
+    state.slaves.push({ slave_id: '', label: 'Sensor3', unit_address: 3, channel: 1, base_addr: 3, model: 'BT-SCM-4', temp_word_count: 1, temp_scale: 0.1, poll_interval_s: 30, editing: false });
     const result = handleModbusSettingsMessage(
       { payload: { action: 'apply', slaves: state.slaves, bus: state.bus } },
       { store, legacySlaveList: legacySlaveList() }
@@ -246,16 +246,119 @@ describe('handleModbusSettingsMessage - apply', () => {
     assert.match(result.msg.payload.error, /ambient reference/);
   });
 
-  test('rejects duplicate unit addresses before touching the store', () => {
+  test('rejects two rows claiming the same channel of one unit', () => {
     const store = freshStore();
     seedModbusJoints(store);
     const state = loadState(store);
-    state.slaves[1].unit_address = 1;
+    state.slaves[1].unit_address = 1; // both rows now unit 1, both channel 1
     const result = handleModbusSettingsMessage(
       { payload: { action: 'apply', slaves: state.slaves, bus: state.bus } },
       { store, legacySlaveList: legacySlaveList() }
     );
-    assert.match(result.msg.payload.error, /Duplicate unit address 1/);
+    assert.match(result.msg.payload.error, /Unit 1: channels must be 1\.\.2/);
+  });
+
+  test('rejects two channels of one unit sharing a base address', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const state = loadState(store);
+    state.slaves[1].unit_address = 1;
+    state.slaves[1].channel = 2; // channels now 1..2, but both at base 3
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'apply', slaves: state.slaves, bus: state.bus } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.match(result.msg.payload.error, /Unit 1: duplicate base address 3/);
+  });
+
+  test('rejects mismatched poll intervals across one unit\'s channels (polling is per slave)', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const state = loadState(store);
+    state.slaves[1].unit_address = 1;
+    state.slaves[1].channel = 2;
+    state.slaves[1].base_addr = 4;
+    state.slaves[1].poll_interval_s = 60; // row 0 stays at 30
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'apply', slaves: state.slaves, bus: state.bus } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.match(result.msg.payload.error, /Unit 1: poll interval must match across its channels/);
+  });
+
+  test('commissions a multi-channel unit: rows grouped into one slave with channel_addrs/channel_labels', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const state = loadState(store);
+    state.slaves.push(
+      { slave_id: '', label: 'Joint7-Top', unit_address: 7, channel: 1, base_addr: 10, model: 'BT-SCM-2', temp_word_count: 1, temp_scale: 0.1, poll_interval_s: 30, editing: false },
+      { slave_id: '', label: 'Joint7-Bottom', unit_address: 7, channel: 2, base_addr: 12, model: 'BT-SCM-2', temp_word_count: 1, temp_scale: 0.1, poll_interval_s: 30, editing: false }
+    );
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'apply', slaves: state.slaves, bus: state.bus } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.equal(result.msg.payload.success, 'Modbus configuration applied');
+    assert.equal(result.resendNeeded, true);
+
+    const { doc } = store.readDomain('modbus_joints');
+    const unit7 = doc.modbus.slaves.find((s) => s.unit_address === 7);
+    assert.equal(unit7.channels, 2);
+    assert.equal(unit7.registers.temp_base_addr, 10);
+    assert.deepEqual(unit7.registers.channel_addrs, [10, 12]);
+    assert.deepEqual(unit7.registers.channel_labels, ['Joint7-Top', 'Joint7-Bottom']);
+    assert.equal(unit7.label, undefined); // per-channel labels carry the names
+
+    // round trip: reload explodes it back into two rows
+    const reloaded = loadState(store);
+    const rows7 = reloaded.slaves.filter((r) => r.unit_address === 7);
+    assert.deepEqual(
+      rows7.map((r) => [r.channel, r.base_addr, r.label, r.slave_id]),
+      [[1, 10, 'Joint7-Top', unit7.slave_id], [2, 12, 'Joint7-Bottom', unit7.slave_id]]
+    );
+  });
+
+  test('add_channel pre-fills a new row for the same unit with the next channel number', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const state = loadState(store);
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'add_channel', index: 0, slaves: state.slaves, bus: state.bus } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    const added = result.msg.payload.slaves[1];
+    assert.equal(added.unit_address, state.slaves[0].unit_address);
+    assert.equal(added.channel, 2);
+    assert.equal(added.model, state.slaves[0].model);
+    assert.equal(added.editing, true);
+  });
+
+  test('refuses to remove a channel still mapped to a joint', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    // remap J01 to channel 2 of a two-channel unit first
+    const state0 = loadState(store);
+    state0.slaves.push(
+      { slave_id: '', label: 'U7-A', unit_address: 7, channel: 1, base_addr: 10, model: 'M', temp_word_count: 1, temp_scale: 0.1, poll_interval_s: 30, editing: false },
+      { slave_id: '', label: 'U7-B', unit_address: 7, channel: 2, base_addr: 11, model: 'M', temp_word_count: 1, temp_scale: 0.1, poll_interval_s: 30, editing: false }
+    );
+    handleModbusSettingsMessage({ payload: { action: 'apply', slaves: state0.slaves, bus: state0.bus } }, { store, legacySlaveList: legacySlaveList() });
+    const { doc } = store.readDomain('modbus_joints');
+    const unit7Id = doc.modbus.slaves.find((s) => s.unit_address === 7).slave_id;
+    doc.joints.push({ joint_id: 'J07', slave_id: unit7Id, channel: 2, zone_id: 'z1', enabled: true, threshold_profile: 'default' });
+    doc.config_domain_versions.modbus++;
+    doc.config_domain_versions.joints++;
+    assert.ok(store.applyIfValid('modbus_joints', doc).applied);
+
+    // now try to drop channel 2 of unit 7
+    const state = loadState(store);
+    const idx = state.slaves.findIndex((r) => r.unit_address === 7 && r.channel === 2);
+    state.slaves.splice(idx, 1);
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'apply', slaves: state.slaves, bus: state.bus } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.match(result.msg.payload.error, /channel still mapped to a joint: J07 \(channel 2\)/);
   });
 
   test('surfaces real validator rule errors and does not flag a resend on rejection', () => {
@@ -305,16 +408,20 @@ describe('handleModbusSettingsMessage - legacy bridge', () => {
     ];
     const load = handleModbusSettingsMessage({ payload: {} }, { store, legacySlaveList: mixedLegacy });
     const state = load.msg.payload;
-    state.slaves.push({ slave_id: '', label: 'NewOne', unit_address: 7, model: 'BT-SCM-4', channels: 2, temp_base_addr: 10, temp_word_count: 2, temp_scale: 0.1, poll_interval_s: 30, editing: false });
+    state.slaves.push(
+      { slave_id: '', label: 'New-A', unit_address: 7, channel: 1, base_addr: 10, model: 'BT-SCM-4', temp_word_count: 2, temp_scale: 0.1, poll_interval_s: 30, editing: false },
+      { slave_id: '', label: 'New-B', unit_address: 7, channel: 2, base_addr: 12, model: 'BT-SCM-4', temp_word_count: 2, temp_scale: 0.1, poll_interval_s: 30, editing: false }
+    );
     const { legacy } = handleModbusSettingsMessage(
       { payload: { action: 'apply', slaves: state.slaves, bus: state.bus } },
       { store, legacySlaveList: mixedLegacy }
     );
     assert.equal(legacy.SlaveIDList[1].id, '9'); // carried by unit_address
-    const added = legacy.SlaveIDList.find((ls) => ls.slaveID === 7);
-    assert.equal(added.id, '6'); // panel-dominant type
-    assert.equal(added.dataBits, 4); // channels(2) * words(2)
-    assert.deepEqual(legacy.paraRaw.find((t) => t[0] === 7), [7, 10, 4]);
+    const addedRows = legacy.SlaveIDList.filter((ls) => ls.slaveID === 7);
+    assert.equal(addedRows.length, 2); // one legacy entry per channel
+    assert.ok(addedRows.every((ls) => ls.id === '6')); // panel-dominant type
+    assert.deepEqual(addedRows.map((ls) => [ls.parameterName, ls.registerAddress, ls.dataBits]), [['New-A', 10, 2], ['New-B', 12, 2]]);
+    assert.deepEqual(legacy.paraRaw.find((t) => t[0] === 7), [7, 10, 4]); // span 10..13 = (12-10)+2 words
   });
 
   test('writeLegacyModbusGlobals writes every global the decode pipeline reads (and not paraRaw)', () => {

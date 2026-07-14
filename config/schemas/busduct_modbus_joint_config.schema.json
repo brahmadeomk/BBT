@@ -87,6 +87,8 @@
                   "function_code":   { "enum": [3, 4], "description": "3 = holding, 4 = input registers" },
                   "temp_base_addr":  { "type": "integer", "minimum": 0, "maximum": 65535 },
                   "temp_word_count": { "type": "integer", "minimum": 1, "maximum": 2, "default": 1 },
+                  "channel_addrs":   { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "integer", "minimum": 0, "maximum": 65535 }, "description": "Per-channel start address (index k = channel k+1) for modules whose channels are not consecutive words from temp_base_addr. Length must equal channels, addresses unique and non-overlapping, min must equal temp_base_addr (R15). Absent = channels are consecutive: channel k at temp_base_addr + (k-1)*temp_word_count." },
+                  "channel_labels":  { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "maxLength": 48 }, "description": "Per-channel display name (index k = channel k+1), e.g. the probe location. Length must equal channels when present (R15)." },
                   "temp_scale":      { "type": "number", "enum": [1, 0.1, 0.01], "description": "Multiplier raw->degC" },
                   "temp_offset":     { "type": "number", "default": 0 },
                   "byte_order":      { "enum": ["AB", "BA", "ABCD", "DCBA", "BADC", "CDAB"], "default": "AB" },
@@ -153,7 +155,8 @@
       "R11 Version monotonicity: incoming config_domain_versions.{modbus|joints} must be > currently applied version for that domain.",
       "R12 Maintenance gate: remote (cloud-originated) changes to modbus or joints domains are accepted only when panel is in maintenance mode; local UI/commissioning tool changes are exempt.",
       "R13 On any accepted change: write before/after to audit trail, publish applied versions on ack/reported channel, keep last-known-good snapshot for boot fallback.",
-      "R14 Referential integrity: any ambient_sensor set at panel (modbus), zone, or joint level must reference an existing slave_id, and its channel must be within that slave's channel count. Checked whenever the field is present, independent of R9/alarms usage."
+      "R14 Referential integrity: any ambient_sensor set at panel (modbus), zone, or joint level must reference an existing slave_id, and its channel must be within that slave's channel count. Checked whenever the field is present, independent of R9/alarms usage.",
+      "R15 Per-channel register integrity: when registers.channel_addrs is present its length must equal channels, addresses must be unique and spaced >= temp_word_count apart (no overlapping reads), and min(channel_addrs) must equal temp_base_addr; when registers.channel_labels is present its length must equal channels."
     ]
   },
 

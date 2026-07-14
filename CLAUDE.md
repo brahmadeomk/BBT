@@ -29,7 +29,7 @@ across all of them.**
   rule or grep check in the test script (per the workplan's Working
   Agreement), not just by convention.
 
-- **Edge validation rules R1–R14** (`cfg/modbus` + `cfg/joints`, in
+- **Edge validation rules R1–R15** (`cfg/modbus` + `cfg/joints`, in
   `config/schemas/busduct_modbus_joint_config.schema.json`) and **A1–A10**
   (`cfg/alarms`, in `config/schemas/busduct_alarms_config.schema.json`)
   are mandatory. Every rule needs at least one passing and one failing
@@ -52,7 +52,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | `/docs` | Design artifacts, decision log |
 | `/config/schemas` | The JSON Schemas — source of truth for `cfg/modbus`, `cfg/joints`, `cfg/alarms` |
 | `/config/examples` | Reference config instances per domain; migration snapshots (empty — Slice 2) |
-| `/src/config-service` | Config store, validators (R1–R14, A1–A10), version manager, audit writer, Node-RED handlers, Nano job compiler |
+| `/src/config-service` | Config store, validators (R1–R15, A1–A10), version manager, audit writer, Node-RED handlers, Nano job compiler |
 | `/src/cloud-gateway` | Batcher, alarm publisher, heartbeat, outbox, transport interface (empty — Slice 5+) |
 | `/src/adapters/aws` | AWS-specific: endpoint config, Fleet Provisioning, Basic Ingest mapping (empty — Slice 6+) |
 | `/flows` | Node-RED flow exports — `flows_BBT.json` is the current production flow |
@@ -67,7 +67,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | Edge Implementation Work Plan (this plan) | `docs/BusductTherMo_Edge_Implementation_WorkPlan.md` (+ original `.docx`) | present |
 | Edge Cloud Readiness Workplan (phase-level plan this one maps to; referenced in §1, §4 Slice 8, needed for the final acceptance checklist) | — | **missing** |
 | Edge node config spec | `docs/busduct_edge_config.yaml` | present |
-| Modbus/joint schema (R1–R14) | `config/schemas/busduct_modbus_joint_config.schema.json` | present |
+| Modbus/joint schema (R1–R15) | `config/schemas/busduct_modbus_joint_config.schema.json` | present |
 | Alarms schema (A1–A10) | `config/schemas/busduct_alarms_config.schema.json` | present |
 | Existing Node-RED flow | `flows/flows_BBT.json` | present |
 | Arduino Nano firmware | `firmware/Nano_IOT.ino` | present |
@@ -186,15 +186,33 @@ The replacement, on the **Joint Config** dashboard tab (`ui_group`
   (thin wrapper, 3 outputs) →
   `src/config-service/node-red/modbus-settings-handler.js`.
 - Bus form (single RTU bus — the firmware has one RS-485 port and
-  `compileNanoJob` enforces it) + slaves table (name/label, unit
-  address, model, channels, base addr, words, scale, poll interval).
-  `slave_id` is carried invisibly so joint mappings survive edits; new
-  rows get the lowest unused `slNN` at apply. `function_code` is always
-  3 (firmware only implements holding-register reads).
+  `compileNanoJob` enforces it) + a slaves table with **one row per
+  channel** (user requirement 2026-07-14: one slave unit can carry
+  several temperature channels, so the unit address may repeat across
+  rows; each channel has its own base address). At apply, rows are
+  grouped by unit address into one schema slave: `channels` = row
+  count, per-channel addresses/names stored in
+  `registers.channel_addrs`/`channel_labels` (multi-channel; new
+  optional schema fields governed by **R15** — length == channels,
+  addresses unique/non-overlapping, min == `temp_base_addr`);
+  single-channel slaves keep the plain migrated shape. Slave-level
+  fields (model, words, scale, **poll interval**) repeat on every row
+  but must match across a unit's rows — the firmware reads all of a
+  slave's channels in ONE Modbus transaction (`compileNanoJob` emits
+  one min..max span read per unit, via the shared `readSpan` helper
+  the R10 timing math also uses), so there is exactly one poll
+  interval per slave, not per channel; a mismatch is a friendly apply
+  error. `slave_id` is carried invisibly so joint mappings survive
+  edits; new units get the lowest unused `slNN` at apply.
+  `function_code` is always 3 (firmware only implements
+  holding-register reads). A `+CH` row button pre-fills the next
+  channel row for the same unit.
 - `apply` validates through `validateModbusJoints` + `applyIfValid`
-  (R1-R14 for real), with friendly pre-checks: duplicate unit address,
-  deleting a slave still mapped to a joint or used as an ambient
-  reference (panel/zone/joint level) is rejected by name.
+  (R1-R15 for real), with friendly pre-checks: channel numbers within
+  a unit must be 1..N with no gaps/repeats, base addresses within a
+  unit unique and non-overlapping, and deleting a slave *or a channel*
+  still mapped to a joint or used as an ambient reference
+  (panel/zone/joint level) is rejected by name.
 - Output 2 → `link out` → the same `Resend Nano Job (in)` trigger as
   the joint table; `resendNeeded` is content-aware via `nanoJobsEqual`
   (a label-only edit doesn't resend; a bus/slave change does).
@@ -258,9 +276,17 @@ not re-deriving `slave_id` from scratch, since `slave_id` must stay
 stable across edits) and pushes it through `validateModbusJoints` +
 `ConfigStore.applyIfValid`. If a joint references a `slaveID` that
 hasn't been provisioned into the applied `cfg/modbus` yet, `apply`
-rejects with a clear error — this refactor doesn't add a way to
-commission new slaves from the dashboard; that's still a separate,
-untouched flow.
+rejects with a clear error — commissioning slaves happens in the
+Modbus Settings dashboard (above), not here.
+
+**Joint channel mapping (user requirement 2026-07-14):** the joint
+table has a `Ch` column — each joint maps one dedicated channel of a
+slave (`joints[].channel`; drafts predating the column default to 1).
+Two joints may share a slave on *different* channels; the same
+(slave, channel) pair repeating across joints is rejected by a
+friendly pre-check naming the conflicting joint (and by R7 for real),
+and selecting a channel the commissioned slave doesn't have is
+rejected by a pre-check naming the slave's channel count (and by R6).
 
 **Live-verified on the Pi**: dashboard save/apply/restore/load paths
 for both the joint table and the alarm config table all confirmed

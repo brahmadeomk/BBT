@@ -1,44 +1,50 @@
 'use strict';
 
 const { nanoJobsEqual } = require('../nano-compiler');
+const { DEFAULTS } = require('../validate-modbus-joints');
 
 /**
  * Thin Node-RED handler behind the new schema-backed "Modbus Settings"
  * dashboard - the replacement for the legacy "Parameter - Modbus
  * Configuration" + "Comm Parameters" pair, which built Nano jobs from
  * raw dashboard input with no schema/R-rule validation and no
- * connection to cfg/modbus in the ConfigStore (see the OPEN DESIGN GAP
- * note in CLAUDE.md; the user has since decided this schema-backed
- * path is authoritative).
+ * connection to cfg/modbus in the ConfigStore (see CLAUDE.md; the user
+ * decided this schema-backed path is authoritative).
+ *
+ * Table model: **one row per channel**, matching the hardware reality
+ * that one slave unit (one Modbus unit address) can carry several
+ * temperature channels. The unit address may therefore repeat across
+ * rows; within one unit address every channel number and every base
+ * address must be unique. At apply time the rows for a unit address
+ * are grouped into a single schema slave entry:
+ *   channels       = number of rows for that unit address
+ *   channel_addrs  = per-channel base addresses (stored explicitly
+ *                    when channels > 1; single-channel slaves keep the
+ *                    plain temp_base_addr shape the migration produced)
+ *   channel_labels = per-channel display names (channels > 1)
+ *   label          = the row's display name (single-channel slaves)
+ *
+ * Slave-level fields (model, words/channel, scale, poll interval) are
+ * shown on every row but belong to the slave, not the channel - the
+ * firmware reads all of a slave's channels in ONE Modbus transaction,
+ * so there is exactly one poll interval per slave. Rows of the same
+ * unit address must agree on these; a mismatch is a friendly apply
+ * error rather than silently picking one.
  *
  * Editing model mirrors joint-master-handler: add/edit/delete/save are
- * draft bookkeeping on an intentionally-incomplete in-progress table
- * (can't be schema-validated mid-edit); only 'apply' builds a full
- * cfg/modbus+joints document and pushes it through the real validator
- * + ConfigStore. The client sends its current {slaves, bus} state on
- * every action (lesson from the JointMasterUI data-loss bug - the
- * server must never respond from a stale server-side copy).
- *
- * UI row shape (draft, not the schema shape):
- *   { slave_id?, label, unit_address, model, channels, temp_base_addr,
- *     temp_word_count, temp_scale, poll_interval_s, editing }
- * slave_id is carried invisibly for existing slaves so joint mappings
- * survive edits (schema: "Stable even if unit_address changes"); new
- * rows get the lowest unused one at apply time.
- *
- * Bus form shape (single RTU bus - the firmware has one RS-485 port,
- * and compileNanoJob rejects multi-bus docs for the same reason):
- *   { port, baud, parity, stop_bits, timeout_ms, retries, inter_frame_ms }
+ * draft bookkeeping on an intentionally-incomplete in-progress table;
+ * only 'apply' builds a full cfg/modbus+joints document and pushes it
+ * through the real validator + ConfigStore (R1-R15). The client sends
+ * its current {slaves, bus} state on every action (lesson from the
+ * JointMasterUI data-loss bug).
  *
  * On a successful apply this also derives the legacy global-context
  * values (SlaveIDList, slaveLength, parameterName{i}/parameterID{i}/
  * sID{i}/sregisterAddress{i}/sdataBits{i}, the comm globals, and
- * paraRaw) that the existing sensor-decode pipeline on the
- * modbusMaster_V2 tab still consumes - ~40 function nodes read those,
- * and they keep working unchanged. parameterID (the legacy decode-type
- * selector) has no schema equivalent; it's carried over per
- * unit_address from the current SlaveIDList, and new slaves default to
- * the panel's most common existing type.
+ * paraRaw) that the existing sensor-decode pipeline still consumes -
+ * one legacy entry per CHANNEL row, exactly the shape the legacy
+ * per-parameter table produced, with paraRaw grouped per unit address
+ * (min addr, span) the same way the legacy SetVal grouped it.
  *
  * @param {object} msg - Node-RED msg; msg.payload = {action?, index?, slaves?, bus?}
  * @param {object} deps
@@ -47,9 +53,6 @@ const { nanoJobsEqual } = require('../nano-compiler');
  * @param {Array} [deps.legacySlaveList] - current global SlaveIDList, for parameterID carry-over and label recovery
  * @param {string} [deps.user]
  * @returns {{msg: object|null, draft: {slaves: Array, bus: object}|null, resendNeeded?: boolean, legacy?: object}}
- *   draft is null when nothing needs persisting; resendNeeded is true only after a successful
- *   'apply' whose compiled Nano job actually differs (nanoJobsEqual); legacy is the bridge
- *   payload for the wrapper to write into global/flow context, present only on successful apply
  */
 function handleModbusSettingsMessage(msg, deps) {
   const { store, draft = null, legacySlaveList = [], user = 'UI' } = deps;
@@ -67,6 +70,21 @@ function handleModbusSettingsMessage(msg, deps) {
 
   if (action === 'add') {
     slaves.push(EMPTY_ROW());
+  }
+
+  if (action === 'add_channel' && slaves[index]) {
+    // convenience: pre-fill a new channel row for the same physical unit
+    const src = slaves[index];
+    slaves.splice(index + 1, 0, {
+      ...EMPTY_ROW(),
+      slave_id: src.slave_id,
+      unit_address: src.unit_address,
+      channel: Number(src.channel) + 1 || '',
+      model: src.model,
+      temp_word_count: src.temp_word_count,
+      temp_scale: src.temp_scale,
+      poll_interval_s: src.poll_interval_s,
+    });
   }
 
   if (action === 'edit' && slaves[index]) {
@@ -93,7 +111,7 @@ function handleModbusSettingsMessage(msg, deps) {
     return { msg: null, draft: null }; // safe refresh: don't clobber an in-progress edit
   }
 
-  const mutatingActions = new Set(['add', 'edit', 'delete']);
+  const mutatingActions = new Set(['add', 'add_channel', 'edit', 'delete']);
   return {
     msg: withPayload(msg, { slaves, bus }),
     draft: mutatingActions.has(action) ? { slaves, bus } : null,
@@ -104,9 +122,9 @@ const EMPTY_ROW = () => ({
   slave_id: '',
   label: '',
   unit_address: '',
+  channel: 1,
+  base_addr: '',
   model: '',
-  channels: 1,
-  temp_base_addr: '',
   temp_word_count: 1,
   temp_scale: 0.1,
   poll_interval_s: 30,
@@ -134,24 +152,35 @@ function currentState(msg, draft, store, legacySlaveList) {
   return stateFromApplied(store, legacySlaveList);
 }
 
+/** Explodes each schema slave into one row per channel. */
 function stateFromApplied(store, legacySlaveList) {
   const { doc } = store.readDomain('modbus_joints');
   if (!doc) return { slaves: [], bus: DEFAULT_BUS() };
 
   const legacyNameByAddress = new Map((legacySlaveList || []).map((ls) => [Number(ls.slaveID), ls.parameterName]));
-  const slaves = doc.modbus.slaves.map((s) => ({
-    slave_id: s.slave_id,
-    // migrated docs predate the label field - recover the display name from the legacy list
-    label: s.label ?? legacyNameByAddress.get(s.unit_address) ?? '',
-    unit_address: s.unit_address,
-    model: s.model,
-    channels: s.channels ?? 4,
-    temp_base_addr: s.registers.temp_base_addr,
-    temp_word_count: s.registers.temp_word_count ?? 1,
-    temp_scale: s.registers.temp_scale,
-    poll_interval_s: s.poll_interval_s ?? 30,
-    editing: false,
-  }));
+  const slaves = [];
+  for (const s of doc.modbus.slaves) {
+    const channels = s.channels ?? DEFAULTS.channels;
+    const wordCount = s.registers.temp_word_count ?? 1;
+    for (let k = 0; k < channels; k++) {
+      slaves.push({
+        slave_id: s.slave_id,
+        label:
+          s.registers.channel_labels?.[k] ??
+          (channels === 1
+            ? s.label ?? legacyNameByAddress.get(s.unit_address) ?? ''
+            : `${s.label ?? s.model} ch${k + 1}`),
+        unit_address: s.unit_address,
+        channel: k + 1,
+        base_addr: s.registers.channel_addrs?.[k] ?? s.registers.temp_base_addr + k * wordCount,
+        model: s.model,
+        temp_word_count: wordCount,
+        temp_scale: s.registers.temp_scale,
+        poll_interval_s: s.poll_interval_s ?? 30,
+        editing: false,
+      });
+    }
+  }
 
   const b = doc.modbus.buses[0];
   const bus = {
@@ -172,9 +201,9 @@ function rowError(row) {
   if (!row.label || String(row.label).trim() === '') return 'Missing sensor name';
   if (!row.model || String(row.model).trim() === '') return 'Missing model';
   if (!Number.isInteger(ua) || ua < 1 || ua > 247) return 'Unit address must be 1-247';
-  const ch = Number(row.channels);
-  if (!Number.isInteger(ch) || ch < 1 || ch > 8) return 'Channels must be 1-8';
-  const base = Number(row.temp_base_addr);
+  const ch = Number(row.channel);
+  if (!Number.isInteger(ch) || ch < 1 || ch > 8) return 'Channel must be 1-8';
+  const base = Number(row.base_addr);
   if (!Number.isInteger(base) || base < 0 || base > 65535) return 'Base address must be 0-65535';
   const words = Number(row.temp_word_count);
   if (!Number.isInteger(words) || words < 1 || words > 2) return 'Words/channel must be 1 or 2';
@@ -198,6 +227,82 @@ function busError(bus) {
   return null;
 }
 
+/**
+ * Groups per-channel rows by unit address into schema slave entries.
+ * Returns { slaves } or { error } with a friendly message.
+ */
+function groupRowsIntoSlaves(rows) {
+  const byAddress = new Map();
+  for (const row of rows) {
+    const ua = Number(row.unit_address);
+    if (!byAddress.has(ua)) byAddress.set(ua, []);
+    byAddress.get(ua).push(row);
+  }
+
+  const groups = [];
+  for (const [ua, groupRows] of byAddress) {
+    const name = (r) => r.label || `unit ${ua}`;
+
+    // channel numbers must be exactly 1..N, no gaps or duplicates
+    const channelNumbers = groupRows.map((r) => Number(r.channel)).sort((a, b) => a - b);
+    for (let i = 0; i < channelNumbers.length; i++) {
+      if (channelNumbers[i] !== i + 1) {
+        return {
+          error: `Unit ${ua}: channels must be 1..${groupRows.length} with no gaps or repeats (got ${channelNumbers.join(', ')})`,
+        };
+      }
+    }
+
+    // slave-level fields must agree across the unit's rows
+    const first = groupRows[0];
+    for (const r of groupRows.slice(1)) {
+      if (String(r.model).trim() !== String(first.model).trim()) {
+        return { error: `Unit ${ua}: model must match across its channels ('${first.model}' vs '${r.model}')` };
+      }
+      if (Number(r.poll_interval_s) !== Number(first.poll_interval_s)) {
+        return { error: `Unit ${ua}: poll interval must match across its channels - the slave is polled as one transaction` };
+      }
+      if (Number(r.temp_word_count) !== Number(first.temp_word_count)) {
+        return { error: `Unit ${ua}: words/channel must match across its channels` };
+      }
+      if (Number(r.temp_scale) !== Number(first.temp_scale)) {
+        return { error: `Unit ${ua}: scale must match across its channels` };
+      }
+    }
+
+    // base addresses unique and non-overlapping within the unit
+    const wordCount = Number(first.temp_word_count);
+    const inChannelOrder = [...groupRows].sort((a, b) => Number(a.channel) - Number(b.channel));
+    const addrs = inChannelOrder.map((r) => Number(r.base_addr));
+    const sortedAddrs = [...addrs].sort((a, b) => a - b);
+    for (let i = 1; i < sortedAddrs.length; i++) {
+      if (sortedAddrs[i] === sortedAddrs[i - 1]) {
+        return { error: `Unit ${ua}: duplicate base address ${sortedAddrs[i]} - each channel needs its own register` };
+      }
+      if (sortedAddrs[i] - sortedAddrs[i - 1] < wordCount) {
+        return { error: `Unit ${ua}: base addresses ${sortedAddrs[i - 1]} and ${sortedAddrs[i]} overlap (each channel reads ${wordCount} words)` };
+      }
+    }
+
+    const carriedId = inChannelOrder.map((r) => r.slave_id).find((id) => /^sl[0-9]{2}$/.test(id)) || '';
+    groups.push({
+      unit_address: ua,
+      slave_id: carriedId,
+      rows: inChannelOrder,
+      channels: inChannelOrder.length,
+      model: String(first.model).trim(),
+      poll_interval_s: Number(first.poll_interval_s),
+      temp_word_count: wordCount,
+      temp_scale: Number(first.temp_scale),
+      base_addr: sortedAddrs[0],
+      channel_addrs: addrs,
+      channel_labels: inChannelOrder.map((r) => String(r.label).trim()),
+      _firstLabel: name(first),
+    });
+  }
+  return { groups };
+}
+
 function applyModbusSettings(msg, state, store, legacySlaveList, user) {
   const rows = state.slaves;
   const bus = state.bus;
@@ -208,14 +313,14 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
   const busProblem = busError(bus);
   if (busProblem) return fail(busProblem);
 
-  const seenAddress = new Set();
   for (const row of rows) {
     const problem = rowError(row);
     if (problem) return fail(`${problem} (${row.label || 'unnamed row'})`);
-    const ua = Number(row.unit_address);
-    if (seenAddress.has(ua)) return fail(`Duplicate unit address ${ua}`);
-    seenAddress.add(ua);
   }
+
+  const grouped = groupRowsIntoSlaves(rows);
+  if (grouped.error) return fail(grouped.error);
+  const { groups } = grouped;
 
   const { doc: current } = store.readDomain('modbus_joints');
   const { doc: currentAlarms } = store.readDomain('alarms');
@@ -223,8 +328,8 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
     return fail('No cfg/modbus applied yet - run the migration/commissioning step first');
   }
 
-  // Stable slave_id: keep the one each row carries; allocate the lowest unused for new rows.
-  const carried = new Set(rows.map((r) => r.slave_id).filter((id) => /^sl[0-9]{2}$/.test(id)));
+  // Stable slave_id per unit: keep the carried one; allocate the lowest unused for new units.
+  const carried = new Set(groups.map((g) => g.slave_id).filter(Boolean));
   const nextFreeId = () => {
     for (let i = 1; i <= 64; i++) {
       const candidate = `sl${String(i).padStart(2, '0')}`;
@@ -238,44 +343,57 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
 
   const existingById = new Map(current.modbus.slaves.map((s) => [s.slave_id, s]));
   const newSlaves = [];
-  for (const row of rows) {
-    const slaveId = /^sl[0-9]{2}$/.test(row.slave_id) ? row.slave_id : nextFreeId();
+  for (const g of groups) {
+    const slaveId = g.slave_id || nextFreeId();
     if (!slaveId) return fail('No free slave IDs left (max 64 slaves)');
+    g.slave_id = slaveId;
     const existing = existingById.get(slaveId);
+    const singleChannel = g.channels === 1;
     newSlaves.push({
       slave_id: slaveId,
       bus_id: 'bus1',
-      unit_address: Number(row.unit_address),
-      model: String(row.model).trim(),
-      label: String(row.label).trim(),
+      unit_address: g.unit_address,
+      model: g.model,
+      // single-channel slaves keep the plain shape the migration produced;
+      // multi-channel slaves store explicit per-channel addresses/labels
+      ...(singleChannel ? { label: g.channel_labels[0] } : {}),
       ...(existing?.hw_serial ? { hw_serial: existing.hw_serial } : {}),
-      channels: Number(row.channels),
-      poll_interval_s: Number(row.poll_interval_s),
+      channels: g.channels,
+      poll_interval_s: g.poll_interval_s,
       registers: {
         // firmware/Nano_IOT.ino always calls readHoldingRegisters - FC3 is the only implementable choice
         function_code: 3,
-        temp_base_addr: Number(row.temp_base_addr),
-        temp_word_count: Number(row.temp_word_count),
-        temp_scale: Number(row.temp_scale),
+        temp_base_addr: g.base_addr,
+        temp_word_count: g.temp_word_count,
+        temp_scale: g.temp_scale,
+        ...(singleChannel ? {} : { channel_addrs: g.channel_addrs, channel_labels: g.channel_labels }),
       },
     });
   }
 
-  // Friendly referential pre-check before the validator: a slave still mapped
-  // to a joint (or used as an ambient reference) can't be deleted.
-  const newIds = new Set(newSlaves.map((s) => s.slave_id));
-  const mappedJoints = current.joints.filter((j) => !newIds.has(j.slave_id));
-  if (mappedJoints.length > 0) {
-    return fail(`Cannot delete a slave still mapped to a joint: ${mappedJoints.map((j) => j.joint_id).join(', ')} - unmap it in the joint table first`);
+  // Friendly referential pre-checks before the validator: a slave (or channel)
+  // still mapped to a joint or ambient reference can't be deleted/shrunk.
+  const newById = new Map(newSlaves.map((s) => [s.slave_id, s]));
+  const missingJoints = current.joints.filter((j) => !newById.has(j.slave_id));
+  if (missingJoints.length > 0) {
+    return fail(`Cannot delete a slave still mapped to a joint: ${missingJoints.map((j) => j.joint_id).join(', ')} - unmap it in the joint table first`);
+  }
+  const shrunkJoints = current.joints.filter((j) => (j.channel ?? 1) > newById.get(j.slave_id).channels);
+  if (shrunkJoints.length > 0) {
+    return fail(
+      `Cannot remove a channel still mapped to a joint: ${shrunkJoints.map((j) => `${j.joint_id} (channel ${j.channel})`).join(', ')} - unmap it in the joint table first`
+    );
   }
   const ambientRefs = [
     ...(current.modbus.ambient_sensor ? [['panel default', current.modbus.ambient_sensor]] : []),
     ...current.zones.filter((z) => z.ambient_sensor).map((z) => [`zone ${z.zone_id}`, z.ambient_sensor]),
     ...current.joints.filter((j) => j.ambient_sensor).map((j) => [`joint ${j.joint_id}`, j.ambient_sensor]),
   ];
-  const brokenAmbient = ambientRefs.filter(([, ref]) => !newIds.has(ref.slave_id));
+  const brokenAmbient = ambientRefs.filter(
+    ([, ref]) => !newById.has(ref.slave_id) || (ref.channel ?? 1) > newById.get(ref.slave_id).channels
+  );
   if (brokenAmbient.length > 0) {
-    return fail(`Cannot delete a slave used as an ambient reference (${brokenAmbient.map(([where]) => where).join(', ')}) - reassign it in the joint table first`);
+    return fail(`Cannot delete a slave/channel used as an ambient reference (${brokenAmbient.map(([where]) => where).join(', ')}) - reassign it in the joint table first`);
   }
 
   const newDoc = {
@@ -309,7 +427,8 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
     return fail(result.errors.map((e) => `${e.rule}: ${e.message}`).join('; '));
   }
 
-  const savedRows = rows.map((r, i) => ({ ...r, slave_id: newSlaves[i].slave_id, editing: false }));
+  const idByAddress = new Map(groups.map((g) => [g.unit_address, g.slave_id]));
+  const savedRows = rows.map((r) => ({ ...r, slave_id: idByAddress.get(Number(r.unit_address)), editing: false }));
   return {
     msg: withPayload(msg, { slaves: savedRows, bus, success: 'Modbus configuration applied', action: 'apply' }),
     draft: { slaves: savedRows, bus },
@@ -320,24 +439,37 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
 
 /**
  * Everything the legacy sensor-decode pipeline still reads, derived
- * from the just-applied document so the new table is the single source
- * of truth. The wrapper function node writes these into context:
- * global scope for everything except paraRaw, which is flow-scoped on
- * the modbusMaster_V2 tab (delivered there via a link node).
+ * from the just-applied document: one legacy entry per CHANNEL (the
+ * legacy table was per-parameter rows), with paraRaw grouped per unit
+ * address as [unit, min addr, span] - the same min/max grouping the
+ * legacy SetVal computed. parameterID carry-over matches by
+ * (unit address, register address) first, then unit address, then the
+ * panel's most common existing type.
  */
 function deriveLegacyBridge(newDoc, legacySlaveList) {
-  const idByAddress = new Map((legacySlaveList || []).map((ls) => [Number(ls.slaveID), ls.id]));
-  const defaultTypeId = mostCommon((legacySlaveList || []).map((ls) => ls.id)) ?? '6';
+  const list = legacySlaveList || [];
+  const idByAddrReg = new Map(list.map((ls) => [`${Number(ls.slaveID)}:${Number(ls.registerAddress)}`, ls.id]));
+  const idByAddress = new Map(list.map((ls) => [Number(ls.slaveID), ls.id]));
+  const defaultTypeId = mostCommon(list.map((ls) => ls.id)) ?? '6';
 
-  const slaves = newDoc.modbus.slaves;
-  const slaveIdList = slaves.map((s) => ({
-    id: idByAddress.get(s.unit_address) ?? defaultTypeId,
-    parameterName: s.label ?? s.model,
-    slaveID: s.unit_address,
-    registerAddress: s.registers.temp_base_addr,
-    dataBits: s.channels * (s.registers.temp_word_count ?? 1),
-    enabled: true,
-  }));
+  const slaveIdList = [];
+  const paraRaw = [];
+  for (const s of newDoc.modbus.slaves) {
+    const wordCount = s.registers.temp_word_count ?? 1;
+    const channels = s.channels ?? DEFAULTS.channels;
+    const addrs = s.registers.channel_addrs ?? Array.from({ length: channels }, (_, k) => s.registers.temp_base_addr + k * wordCount);
+    for (let k = 0; k < channels; k++) {
+      slaveIdList.push({
+        id: idByAddrReg.get(`${s.unit_address}:${addrs[k]}`) ?? idByAddress.get(s.unit_address) ?? defaultTypeId,
+        parameterName: s.registers.channel_labels?.[k] ?? s.label ?? s.model,
+        slaveID: s.unit_address,
+        registerAddress: addrs[k],
+        dataBits: wordCount,
+        enabled: true,
+      });
+    }
+    paraRaw.push([s.unit_address, Math.min(...addrs), Math.max(...addrs) - Math.min(...addrs) + wordCount]);
+  }
 
   const bus = newDoc.modbus.buses[0];
   return {
@@ -358,7 +490,7 @@ function deriveLegacyBridge(newDoc, legacySlaveList) {
       Polling: bus.inter_frame_ms * 1000,
       Timeout: bus.timeout_ms,
     },
-    paraRaw: slaveIdList.map((ls) => [ls.slaveID, ls.registerAddress, ls.dataBits]),
+    paraRaw,
   };
 }
 

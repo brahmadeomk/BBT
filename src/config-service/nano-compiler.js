@@ -1,6 +1,6 @@
 'use strict';
 
-const { validateModbusJoints } = require('./validate-modbus-joints');
+const { validateModbusJoints, readSpan } = require('./validate-modbus-joints');
 
 /**
  * Compiles a cfg/modbus+joints document into the job JSON
@@ -43,10 +43,11 @@ function compileNanoJob(doc) {
   }
 
   const slaves = doc.modbus.slaves;
-  const readTuples = slaves.map((s) => {
-    const registerCount = (s.channels ?? 4) * (s.registers.temp_word_count ?? 1);
-    return [s.unit_address, s.registers.temp_base_addr, registerCount];
-  });
+  // One contiguous read per slave. readSpan handles both layouts:
+  // consecutive channels (channels * temp_word_count from base) and
+  // sparse channel_addrs (min..max span, R15 guarantees min == base) -
+  // shared with the validator's R10 timing math so they never disagree.
+  const readTuples = slaves.map((s) => [s.unit_address, s.registers.temp_base_addr, readSpan(s)]);
 
   const read = [readTuples.length, ...readTuples];
   const comm = [Math.round(bus.inter_frame_ms * 1000), bus.baud, bus.timeout_ms];

@@ -48,6 +48,13 @@ describe('compileNanoJob - structure', () => {
     }
   });
 
+  test('sparse channel_addrs compile to one contiguous span read (min..max+words), like the legacy min/max grouping', () => {
+    const doc = validModbusJointsDoc();
+    doc.modbus.slaves[0].registers.channel_addrs = [100, 105, 110, 115]; // 4 channels, 1 word each
+    const { job } = compileNanoJob(doc);
+    assert.deepEqual(job.read[1], [1, 100, 16]); // span 100..115 inclusive = 16 registers
+  });
+
   test('comm converts inter_frame_ms to microseconds and passes baud/timeout through', () => {
     const doc = validModbusJointsDoc();
     doc.modbus.buses[0].inter_frame_ms = 20;

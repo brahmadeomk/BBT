@@ -20,6 +20,26 @@ function err(rule, message) {
  * time at the configured baud, no timeout. This is what every slave
  * costs on every scan cycle in steady state.
  */
+/**
+ * Number of registers one read transaction covers for this slave.
+ * Consecutive layout (no channel_addrs): channels * temp_word_count
+ * from temp_base_addr. Sparse layout (channel_addrs present): the
+ * contiguous span from the lowest to the highest channel address plus
+ * its word count - the firmware reads one block per slave, so gaps
+ * between channel addresses are read (and ignored) too, exactly like
+ * the legacy paraRaw min/max span. Shared with the Nano job compiler
+ * so the R10 timing math and the compiled job can never disagree.
+ */
+function readSpan(slave) {
+  const wordCount = slave.registers?.temp_word_count ?? DEFAULTS.temp_word_count;
+  const addrs = slave.registers?.channel_addrs;
+  if (Array.isArray(addrs) && addrs.length > 0) {
+    return Math.max(...addrs) - Math.min(...addrs) + wordCount;
+  }
+  const channels = slave.channels ?? DEFAULTS.channels;
+  return channels * wordCount;
+}
+
 function normalFrameMs(bus, slave) {
   const interFrameMs = bus.inter_frame_ms ?? DEFAULTS.inter_frame_ms;
 
@@ -27,9 +47,7 @@ function normalFrameMs(bus, slave) {
     return interFrameMs;
   }
 
-  const channels = slave.channels ?? DEFAULTS.channels;
-  const wordCount = slave.registers?.temp_word_count ?? DEFAULTS.temp_word_count;
-  const registerCount = channels * wordCount;
+  const registerCount = readSpan(slave);
 
   const reqBytes = 8; // addr(1) + func(1) + startAddr(2) + count(2) + crc(2)
   const respBytes = 5 + 2 * registerCount; // addr(1) + func(1) + bytecount(1) + data(2*n) + crc(2)
@@ -60,7 +78,7 @@ function worstCaseSlaveMs(bus, slave) {
 
 /**
  * Validates a cfg/modbus + cfg/joints document: JSON Schema, then the
- * mandatory cross-field rules R1-R12 and R14 (R13 is an apply-time
+ * mandatory cross-field rules R1-R12, R14 and R15 (R13 is an apply-time
  * workflow requirement enforced by the config store, not a document
  * validation rule - see src/config-service/store.js).
  *
@@ -280,6 +298,43 @@ function validateModbusJoints(doc, context = {}) {
     }
   }
 
+  // R15: per-channel register integrity (channel_addrs / channel_labels)
+  for (const slave of slaves) {
+    const channels = slave.channels ?? DEFAULTS.channels;
+    const wordCount = slave.registers?.temp_word_count ?? DEFAULTS.temp_word_count;
+    const addrs = slave.registers?.channel_addrs;
+    if (Array.isArray(addrs)) {
+      if (addrs.length !== channels) {
+        errors.push(err('R15', `slave '${slave.slave_id}' channel_addrs has ${addrs.length} entries but channels is ${channels}`));
+      } else {
+        const sorted = [...addrs].sort((a, b) => a - b);
+        for (let i = 1; i < sorted.length; i++) {
+          if (sorted[i] - sorted[i - 1] < wordCount) {
+            errors.push(
+              err(
+                'R15',
+                `slave '${slave.slave_id}' channel addresses ${sorted[i - 1]} and ${sorted[i]} overlap (each channel reads ${wordCount} word${wordCount > 1 ? 's' : ''})`
+              )
+            );
+            break;
+          }
+        }
+        if (sorted[0] !== slave.registers.temp_base_addr) {
+          errors.push(
+            err(
+              'R15',
+              `slave '${slave.slave_id}' temp_base_addr ${slave.registers.temp_base_addr} must equal the lowest channel address ${sorted[0]}`
+            )
+          );
+        }
+      }
+    }
+    const labels = slave.registers?.channel_labels;
+    if (Array.isArray(labels) && labels.length !== channels) {
+      errors.push(err('R15', `slave '${slave.slave_id}' channel_labels has ${labels.length} entries but channels is ${channels}`));
+    }
+  }
+
   // R10: worst-case scan time per bus must fit within the shortest poll_interval_s on that bus
   {
     const slavesByBus = new Map();
@@ -325,4 +380,4 @@ function validateModbusJoints(doc, context = {}) {
   return { valid: errors.length === 0, errors };
 }
 
-module.exports = { validateModbusJoints, worstCaseSlaveMs, normalFrameMs, stragglerMs, DEFAULTS };
+module.exports = { validateModbusJoints, worstCaseSlaveMs, normalFrameMs, stragglerMs, readSpan, DEFAULTS };

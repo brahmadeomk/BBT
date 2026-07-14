@@ -36,6 +36,25 @@ function seedModbusJoints(store) {
   store.applyIfValid('modbus_joints', doc);
 }
 
+/** Same seed, but slave sl03 (unit 3) is a 2-channel module at addresses 3 and 4. */
+function seedMultiChannelSlave(store) {
+  const doc = {
+    config_domain_versions: { modbus: 1, joints: 1 },
+    modbus: {
+      buses: [{ bus_id: 'bus1', type: 'rtu', port: '/dev/ttyUSB0', baud: 9600, parity: 'N', stop_bits: 2, timeout_ms: 1000, retries: 2, inter_frame_ms: 10 }],
+      slaves: [
+        { slave_id: 'sl03', bus_id: 'bus1', unit_address: 3, model: 'LEGACY-2CH', channels: 2, poll_interval_s: 30, registers: { function_code: 3, temp_base_addr: 3, temp_word_count: 1, temp_scale: 0.1, channel_addrs: [3, 4], channel_labels: ['S3-A', 'S3-B'] } },
+        { slave_id: 'sl21', bus_id: 'bus1', unit_address: 101, model: 'LEGACY-1CH', channels: 1, poll_interval_s: 30, registers: { function_code: 3, temp_base_addr: 3, temp_word_count: 1, temp_scale: 0.1 } },
+      ],
+      ambient_sensor: { slave_id: 'sl21', channel: 1 },
+    },
+    joints: [{ joint_id: 'J01', slave_id: 'sl03', channel: 1, zone_id: 'z1', enabled: true, threshold_profile: 'default' }],
+    zones: [{ zone_id: 'z1', name: 'Zone1' }],
+  };
+  const result = store.applyIfValid('modbus_joints', doc);
+  assert.ok(result.applied, `multi-channel seed must apply: ${JSON.stringify(result.errors)}`);
+}
+
 const legacySlaveList = () => [
   { slaveID: 1, parameterName: 'Sensor1' },
   { slaveID: 2, parameterName: 'Sensor2' },
@@ -268,19 +287,59 @@ describe('handleJointMasterMessage - apply', () => {
     assert.equal(doc.config_domain_versions.joints, 1); // unchanged from seed
   });
 
-  test('rejects a schema-level violation (e.g. R6 channel range) surfaced from the real validator', () => {
+  test('rejects two joints claiming the same (slave, channel) pair, naming the conflict', () => {
     const store = freshStore();
     seedModbusJoints(store);
-    // slave sl01 has channels:1; nothing in the legacy draft can express channel>1 today
-    // since channel is always fixed to 1 by this handler - this test instead exercises
-    // R7 (double mapping) by reusing the same slave twice via two different joints,
-    // which the legacy "Duplicate Slave ID" pre-check already blocks - confirming
-    // both layers agree.
     const joints = [
       { joint_name: 'J01', joint_id: 'J01', slaveID: 1, ambientSlaveID: 101, zone_id: 'Z1', editing: false },
       { joint_name: 'J02', joint_id: 'J02', slaveID: 1, ambientSlaveID: 101, zone_id: 'Z1', editing: false },
     ];
     const result = handleJointMasterMessage({ payload: { action: 'apply' } }, { joints, slaveList: legacySlaveList(), zones: legacyZones(), store });
-    assert.equal(result.msg.payload.error, 'Duplicate Slave ID');
+    assert.equal(result.msg.payload.error, 'Slave 1 channel 1 is already mapped to joint J01');
+  });
+
+  test('accepts two joints on different channels of the same multi-channel slave', () => {
+    const store = freshStore();
+    seedMultiChannelSlave(store);
+    const joints = [
+      { joint_name: 'J01', joint_id: 'J01', slaveID: 3, channel: 1, ambientSlaveID: 101, zone_id: 'Z1', editing: false },
+      { joint_name: 'J02', joint_id: 'J02', slaveID: 3, channel: 2, ambientSlaveID: 101, zone_id: 'Z1', editing: false },
+    ];
+    const result = handleJointMasterMessage({ payload: { action: 'apply' } }, { joints, slaveList: legacySlaveList(), zones: legacyZones(), store });
+    assert.equal(result.msg.payload.success, 'Configuration saved');
+
+    const { doc } = store.readDomain('modbus_joints');
+    assert.deepEqual(
+      doc.joints.map((j) => [j.joint_id, j.slave_id, j.channel]),
+      [['J01', 'sl03', 1], ['J02', 'sl03', 2]]
+    );
+  });
+
+  test('rejects a joint selecting a channel the slave does not have, with a friendly message', () => {
+    const store = freshStore();
+    seedModbusJoints(store); // slave 1 has a single channel
+    const joints = [{ joint_name: 'J01', joint_id: 'J01', slaveID: 1, channel: 2, ambientSlaveID: 101, zone_id: 'Z1', editing: false }];
+    const result = handleJointMasterMessage({ payload: { action: 'apply' } }, { joints, slaveList: legacySlaveList(), zones: legacyZones(), store });
+    assert.equal(result.msg.payload.error, 'Slave 1 only has 1 channel - joint J01 selects channel 2');
+  });
+
+  test('save rejects an out-of-range channel', () => {
+    const store = freshStore();
+    const joints = [{ joint_name: 'J01', joint_id: 'J01', slaveID: 1, channel: 9, zone_id: 'Z1', editing: true }];
+    const result = handleJointMasterMessage(
+      { payload: { action: 'save', index: 0 } },
+      { joints, slaveList: legacySlaveList(), zones: legacyZones(), store }
+    );
+    assert.equal(result.msg.payload.error, 'Channel must be 1-8');
+  });
+
+  test('legacy draft rows without a channel field still apply as channel 1', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const joints = [{ joint_name: 'J01', joint_id: 'J01', slaveID: 1, ambientSlaveID: 101, zone_id: 'Z1', editing: false }];
+    const result = handleJointMasterMessage({ payload: { action: 'apply' } }, { joints, slaveList: legacySlaveList(), zones: legacyZones(), store });
+    assert.equal(result.msg.payload.success, 'Configuration saved');
+    const { doc } = store.readDomain('modbus_joints');
+    assert.equal(doc.joints[0].channel, 1);
   });
 });

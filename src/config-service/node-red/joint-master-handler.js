@@ -12,7 +12,13 @@ function findZone(zones, id) {
   return zones.find((z) => z.zone_id == id); // eslint-disable-line eqeqeq
 }
 
-const EMPTY_ROW = () => ({ joint_name: '', joint_id: '', slaveID: '', ambientSlaveID: '', zone_id: '', editing: true });
+const EMPTY_ROW = () => ({ joint_name: '', joint_id: '', slaveID: '', channel: 1, ambientSlaveID: '', zone_id: '', editing: true });
+
+/** Legacy draft rows predate the channel column - treat a missing/blank channel as 1. */
+function rowChannel(j) {
+  const ch = Number(j.channel);
+  return Number.isInteger(ch) && ch >= 1 ? ch : 1;
+}
 
 /** Preserves the incoming msg's other properties (topic, req/res, socketid, _msgid, ...) - only payload changes. */
 function withPayload(msg, payload) {
@@ -91,10 +97,15 @@ function handleJointMasterMessage(msg, deps) {
     if (!s) {
       return { msg: withPayload(msg, { joints, zones, error: 'Invalid Slave', action: 'save' }), draft: null };
     }
+    const ch = Number(j.channel ?? 1);
+    if (!Number.isInteger(ch) || ch < 1 || ch > 8) {
+      return { msg: withPayload(msg, { joints, zones, error: 'Channel must be 1-8', action: 'save' }), draft: null };
+    }
     if (!z) {
       return { msg: withPayload(msg, { joints, zones, error: 'Invalid Zone', action: 'save' }), draft: null };
     }
 
+    j.channel = ch;
     j.slaveName = s.parameterName;
     j.slaveTooltip = `Slave ${s.slaveID}\n${s.parameterName}`;
     j.zone_name = z.zone_name;
@@ -120,7 +131,7 @@ function handleJointMasterMessage(msg, deps) {
 function applyJoints(msg, joints, zones, slaveList, store, user) {
   // Legacy-shape pre-checks first, for the same friendly per-row errors the dashboard already shows.
   const usedJoint = new Set();
-  const usedSlave = new Set();
+  const usedSlaveChannel = new Map();
   for (const j of joints) {
     const s = findSlave(slaveList, j.slaveID);
     const z = findZone(zones, j.zone_id);
@@ -133,11 +144,22 @@ function applyJoints(msg, joints, zones, slaveList, store, user) {
     if (usedJoint.has(j.joint_id)) {
       return { msg: withPayload(msg, { joints, zones, error: 'Duplicate Joint ID', action: 'apply' }), draft: null };
     }
-    if (usedSlave.has(j.slaveID)) {
-      return { msg: withPayload(msg, { joints, zones, error: 'Duplicate Slave ID', action: 'apply' }), draft: null };
+    // One physical probe = one joint: the same (slave, channel) pair may not
+    // repeat across joints. Different channels of the same slave are fine.
+    const pair = `${j.slaveID}:${rowChannel(j)}`;
+    if (usedSlaveChannel.has(pair)) {
+      return {
+        msg: withPayload(msg, {
+          joints,
+          zones,
+          error: `Slave ${j.slaveID} channel ${rowChannel(j)} is already mapped to joint ${usedSlaveChannel.get(pair)}`,
+          action: 'apply',
+        }),
+        draft: null,
+      };
     }
     usedJoint.add(j.joint_id);
-    usedSlave.add(j.slaveID);
+    usedSlaveChannel.set(pair, j.joint_id);
   }
 
   const { doc: currentModbusJoints } = store.readDomain('modbus_joints');
@@ -149,8 +171,8 @@ function applyJoints(msg, joints, zones, slaveList, store, user) {
     };
   }
 
-  const unitAddressToNewSlaveId = new Map(currentModbusJoints.modbus.slaves.map((s) => [s.unit_address, s.slave_id]));
-  const missingSlave = joints.find((j) => !unitAddressToNewSlaveId.has(Number(j.slaveID)));
+  const slavesByAddress = new Map(currentModbusJoints.modbus.slaves.map((s) => [s.unit_address, s]));
+  const missingSlave = joints.find((j) => !slavesByAddress.has(Number(j.slaveID)));
   if (missingSlave) {
     return {
       msg: withPayload(msg, {
@@ -163,10 +185,27 @@ function applyJoints(msg, joints, zones, slaveList, store, user) {
     };
   }
 
+  // Friendly version of R6: the selected channel must exist on the commissioned slave.
+  for (const j of joints) {
+    const slave = slavesByAddress.get(Number(j.slaveID));
+    const channels = slave.channels ?? 4;
+    if (rowChannel(j) > channels) {
+      return {
+        msg: withPayload(msg, {
+          joints,
+          zones,
+          error: `Slave ${j.slaveID} only has ${channels} channel${channels > 1 ? 's' : ''} - joint ${j.joint_id} selects channel ${rowChannel(j)}`,
+          action: 'apply',
+        }),
+        draft: null,
+      };
+    }
+  }
+
   const newJoints = joints.map((j) => ({
     joint_id: j.joint_id,
-    slave_id: unitAddressToNewSlaveId.get(Number(j.slaveID)),
-    channel: 1,
+    slave_id: slavesByAddress.get(Number(j.slaveID)).slave_id,
+    channel: rowChannel(j),
     zone_id: j.zone_id.toLowerCase(),
     enabled: true,
     threshold_profile: 'default',

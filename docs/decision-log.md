@@ -573,3 +573,62 @@ companion project chat and recorded in the workplan/design docs there).
   210 tests passing (20 new handler tests + 1 migration label test).
   Needs live verification on the Pi (library change → full Node-RED
   restart, then re-import the flow).
+
+- **2026-07-14** — Multi-channel slave support (user requirement:
+  "one slave unit is having multiple channel so unit Id can repeat
+  across records. Base address will be unique for each channel...
+  In joint configuration table, there should be provision to select
+  slave channel... same slave id and channel can not repeat across
+  joints"):
+
+  - **Modbus Settings table is now one row per channel.** A
+    multi-channel unit repeats its unit address across rows, each row
+    with its own channel number and base address. At apply the rows
+    group into ONE schema slave (`channels` = row count) — R4's
+    unique-unit-address rule is *not* relaxed, because the schema
+    still has one slave entry per unit; the per-row freedom lives in
+    the UI/handler layer. New `+CH` row button pre-fills the next
+    channel for a unit.
+  - **Schema additions (user-directed)**: optional
+    `registers.channel_addrs` (per-channel start addresses, for
+    modules whose channels aren't consecutive words from
+    `temp_base_addr`) and `registers.channel_labels` (per-channel
+    display names). New **R15** governs them: length must equal
+    `channels`, addresses unique and spaced >= `temp_word_count` (no
+    overlapping reads), min must equal `temp_base_addr`. Six new
+    R15 tests (1 passing shape, 5 failing shapes).
+  - **One read span per unit, one poll per unit**: new shared
+    `readSpan(slave)` helper (exported from the validator, used by
+    both the R10 timing math and `compileNanoJob`, so they can never
+    disagree) computes the contiguous block to read: consecutive
+    layout = channels x word_count from base; sparse layout = min..max
+    channel address + word_count — the same min/max span the legacy
+    SetVal computed into paraRaw. Because all of a unit's channels are
+    read in one Modbus transaction, the poll interval is a property of
+    the UNIT, not the channel: the table keeps the Poll column on
+    every row for visibility, but rows of the same unit must match
+    (model/words/scale likewise) — a mismatch is a friendly apply
+    error, never a silent pick.
+  - **Joint table channel mapping**: new `Ch` column in
+    `JointMasterUI`; `joints[].channel` now comes from the row
+    (drafts predating the column default to 1). The old blanket
+    "Duplicate Slave ID" pre-check became "same (slave, channel) pair
+    may not repeat" — two joints CAN now share a multi-channel slave
+    on different channels, which the old check wrongly forbade. New
+    friendly pre-check (R6's counterpart) rejects selecting a channel
+    the commissioned slave doesn't have, naming its channel count.
+    Deleting/shrinking a unit in Modbus Settings while a joint still
+    maps one of its channels is rejected by name (channel-aware
+    version of the existing referential pre-check).
+  - **Legacy bridge is per-channel**: one `SlaveIDList` entry per
+    channel row (parameterName = channel label, registerAddress = that
+    channel's address, dataBits = word count) — exactly the shape the
+    legacy per-parameter table produced — and `paraRaw` grouped per
+    unit as [unit, min, span]. `parameterID` carry-over now matches by
+    (unit address, register address) first, then unit address, then
+    the panel's most common type.
+
+  226 tests passing. The single-channel real panel's documents are
+  byte-identical under the new code (no `channel_addrs` emitted for
+  1-channel slaves), so nanoJobsEqual sees no change on migration.
+  Needs the same live verification pass as the parent feature.
