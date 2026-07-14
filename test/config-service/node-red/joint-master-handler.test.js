@@ -197,7 +197,9 @@ describe('handleJointMasterMessage - apply', () => {
       { joints, slaveList: legacySlaveList(), zones: legacyZones(), store, user: 'alice' }
     );
     assert.equal(result.msg.payload.success, 'Configuration saved');
-    assert.equal(result.resendNeeded, true);
+    // joint/zone-only edit (this scenario never touches modbus.slaves/buses) - the compiled
+    // Nano job is unchanged, so no resend should be triggered (see nano-compiler.js's nanoJobsEqual)
+    assert.equal(result.resendNeeded, false);
 
     const { doc } = store.readDomain('modbus_joints');
     assert.equal(doc.config_domain_versions.modbus, 2);
@@ -205,6 +207,18 @@ describe('handleJointMasterMessage - apply', () => {
     assert.equal(doc.joints.length, 2);
     assert.deepEqual(doc.modbus.ambient_sensor, { slave_id: 'sl21', channel: 1 });
     assert.ok(doc.joints.every((j) => !j.ambient_sensor)); // everyone agrees with the panel default
+  });
+
+  test('does not flag a resend for a joint-mapping-only apply (the reported bug: joint edits must not disturb Nano polling)', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    // Re-map J01 from slave 1 to slave 2 and change its zone/ambient - a real joint-mapping
+    // edit, the kind that triggered the bug report. It never touches modbus.slaves/buses,
+    // so the compiled Nano job (which only reads those) must be unchanged.
+    const joints = [{ joint_name: 'J01-moved', joint_id: 'J01', slaveID: 2, ambientSlaveID: 102, zone_id: 'Z1', editing: false }];
+    const result = handleJointMasterMessage({ payload: { action: 'apply' } }, { joints, slaveList: legacySlaveList(), zones: legacyZones(), store });
+    assert.equal(result.msg.payload.success, 'Configuration saved');
+    assert.equal(result.resendNeeded, false);
   });
 
   test('does not flag a resend for a rejected apply', () => {

@@ -136,12 +136,24 @@ the live path to the real hardware, so the new resend logic was added
   3. **After a config apply**: `JointMasterBackEndNode` now has 2
      outputs instead of 1. Its thin wrapper returns
      `[outMsg, resendNeeded ? {payload:'apply'} : null]` — `resendNeeded`
-     comes from `handleJointMasterMessage`'s return value, true only
-     after a successful `apply`. Output 2 feeds a `link out` to the
-     same `Send Nano Job` trigger.
+     comes from `handleJointMasterMessage`'s return value. Output 2
+     feeds a `link out` to the same `Send Nano Job` trigger.
   Recovery events themselves are already reported as SYSTEM alarms by
   the existing `RECOVERY CONTROLLER` node (`SYSTEM|MODULE|RESET_N`,
   `INFO` level, to Alarm Manager) — nothing new was needed there.
+
+**`resendNeeded` is content-aware, not "any successful apply."**
+Fixed after a live bug report: joint-mapping edits (assigning a sensor
+to a joint/zone) were triggering a resend even though `compileNanoJob`
+only ever reads `modbus.slaves`/`modbus.buses` — never `joints[]` — and
+`applyJoints()` always carries `modbus` through unchanged for a
+joint-only edit. A resend isn't a harmless no-op: the firmware re-inits
+`Serial1` and the Modbus timeout on *every* job update, so an
+unnecessary resend briefly disrupts live polling. `applyJoints()` now
+sets `resendNeeded: !nanoJobsEqual(currentModbusJoints, newDoc)`
+(`nanoJobsEqual`, `src/config-service/nano-compiler.js`, compiles both
+documents and compares the result) — only a change to `modbus.slaves`/
+`modbus.buses` actually triggers a resend.
 
 `test/flows-integrity.test.js` checks every `wires`/`links` reference
 in `flows_BBT.json` resolves to a real node id and that `link in`/`link
@@ -150,6 +162,26 @@ hand-editing mistakes in this 537KB file, not a substitute for actually
 running it.
 
 **Tested and working on the real Pi** — Slice 3 is done.
+
+**OPEN DESIGN GAP — flagged, not fixed here:** the legacy "Parameter –
+Modbus Configuration" dashboard (`ui_template` node `51c4bed3d56ec39f`,
+`RecipDetails`/`SlaveIDList`/`paraRaw`) and "Comm Parameters" dashboard
+(`ui_template` node `9f459a1e.89fae8`, port/baud/parity/Polling/Timeout
+via `/home/pi/Desktop/commParameters.txt`) are a second, complete,
+**unvalidated** (no R1-R14) job-building pipeline that feeds the *same*
+serial-out node (`32001d89f98174c3`) as `Send Nano Job` — and neither
+reads from nor writes to `cfg/modbus.slaves`/`cfg/modbus.buses` in
+`ConfigStore`. The two pipelines are unsynchronized: committing a slave
+via the legacy table does not update `cfg/modbus.slaves`, so a later
+boot/USB-recovery/joint-apply resend can overwrite the Nano with a
+stale `cfg/modbus.slaves` snapshot; conversely, the legacy path's own
+inject/rbe/trigger nodes can fire independently and overwrite a job the
+new path just sent, with data that was never schema- or rule-checked.
+This predates this refactor and isn't something the workplan currently
+schedules a fix for (Slice 6's "commissioning helper" is Fleet
+Provisioning/certs, not modbus slave commissioning) — needs a decision
+in the companion design chat on which path stays authoritative before
+it's touched.
 
 ## Node-RED integration
 

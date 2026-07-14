@@ -54,4 +54,27 @@ function compileNanoJob(doc) {
   return { job: { read, comm } };
 }
 
-module.exports = { compileNanoJob };
+/**
+ * Whether two cfg/modbus+joints documents would compile to the same
+ * Nano job. Used to decide whether a config apply actually needs to
+ * resend anything to the Nano - joint/zone-only edits (the only kind
+ * JointMasterBackEndNode's apply can make; it always spreads
+ * modbus.buses/modbus.slaves through unchanged) never change the
+ * compiled job, since compileNanoJob only reads modbus.slaves/buses,
+ * never joints[]. Resending a job the Nano already has is not a
+ * harmless no-op: the firmware re-inits Serial1 and its Modbus timeout
+ * on every job update, briefly disrupting live polling - so this
+ * isn't just an optimization, it avoids a real polling glitch on every
+ * unrelated joint-mapping edit.
+ *
+ * A compile error on either side is treated as "changed" (report it
+ * rather than silently skip a resend that might matter).
+ */
+function nanoJobsEqual(docA, docB) {
+  const a = compileNanoJob(docA);
+  const b = compileNanoJob(docB);
+  if (a.error || b.error) return false;
+  return JSON.stringify(a.job) === JSON.stringify(b.job);
+}
+
+module.exports = { compileNanoJob, nanoJobsEqual };

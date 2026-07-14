@@ -440,3 +440,80 @@ companion project chat and recorded in the workplan/design docs there).
   nodes - nothing in this repo's Node.js test suite exercises Angular
   template code directly, so this needs a live re-test on the Pi, same
   as any other flow change).
+
+- **2026-07-14** — Fixed a real design flaw reported from the live
+  panel: "joint mapping is only to assign sensor to actual field
+  location... modbus polling should be affected only if modbus
+  configuration table [changes]," yet every joint-only edit was
+  triggering a Nano resend. Root cause: `applyJoints()` in
+  `joint-master-handler.js` set `resendNeeded: true` unconditionally
+  after *any* successful apply, but `compileNanoJob` only ever reads
+  `doc.modbus.slaves`/`doc.modbus.buses` - never `joints[]` - and
+  `applyJoints()` always spreads `modbus` through unchanged for a
+  joint/zone-only edit. So the compiled job is provably identical
+  before/after such an edit, yet was being resent anyway. This isn't
+  just a wasted resend: `firmware/Nano_IOT.ino` re-inits `Serial1` and
+  the Modbus timeout on *every* job update, so each needless resend was
+  a real (if brief) live-polling disruption caused by an edit that
+  should have been polling-invisible.
+
+  Fix: added `nanoJobsEqual(docA, docB)` to `nano-compiler.js` (compiles
+  both documents and compares the resulting job by value; a compile
+  error on either side is conservatively treated as "changed").
+  `applyJoints()` now sets `resendNeeded: !nanoJobsEqual(currentModbusJoints, newDoc)`
+  instead of hardcoding `true`. Updated the existing test that asserted
+  `resendNeeded === true` for a joints/ambient-only apply (now correctly
+  `false`) and added a dedicated regression test naming the reported
+  bug directly (re-mapping a joint to a different slave/zone/ambient
+  probe - still `modbus.slaves`/`buses`-invariant - must not flag a
+  resend), plus direct unit tests for `nanoJobsEqual` itself (equal when
+  only joints/zones differ; not-equal when a slave's `unit_address` or a
+  bus comm parameter changes; not-equal on a compile error). 189 tests
+  passing.
+
+- **2026-07-14** — Investigated the user's follow-up question ("check
+  modbus setting table linkages with nano jobs") - whether the legacy
+  Modbus commissioning dashboard has any relationship to the new
+  `cfg/modbus.slaves` document the Nano job compiler reads. It does
+  not, and this is a real, currently-unaddressed gap, not just a naming
+  coincidence:
+
+  The panel has a legacy "Parameter – Modbus Configuration" dashboard
+  (`ui_template` node `51c4bed3d56ec39f`) whose APPLY button sends
+  `{RecipDetails, NoOfRecip, Dropdown}` to `Data Filter` →
+  `SetVal` (`67efb06527f2e7a0`), which sets `SlaveIDList` and a family
+  of `global` vars (`sID<i>`, `sregisterAddress<i>`, ...) and derives
+  `flow.paraRaw` (per-slave register spans) directly from the submitted
+  rows. A second legacy dashboard, "Comm Parameters"
+  (`ui_template` node `9f459a1e.89fae8`), writes bus settings
+  (port/baud/parity/stopBits/Polling/Timeout) to a flat file
+  (`/home/pi/Desktop/commParameters.txt`), which a second `SetVal`
+  (`41d97a02.dc0964`) reads back into `global` vars on file write. Three
+  more function nodes (`fd729d0af6e67cac`, `9f8ca9579d2932de`,
+  `7130fe6f4f01d9b0`), triggered by their own inject/rbe/trigger/link-in
+  nodes, assemble `{read,comm}`/`{write,comm}`/`{transfer,comm}` jobs
+  straight from those `paraRaw`/`global` values and feed them into the
+  *same* `json` nodes (`49aad217cfab3178`/`6dc874787132a275`) that lead
+  to the real serial-out node (`32001d89f98174c3`, `/dev/ttyACM0`) - the
+  identical final-mile path Slice 3's "Send Nano Job" also uses.
+
+  None of this legacy path touches `ConfigStore` or the
+  `cfg/modbus`+`cfg/joints` schema in any way - it is a complete,
+  independent, unvalidated (no R1-R14) pipeline for the same physical
+  job, built years before this refactor and never wired to it. That
+  means: (1) committing a slave via the legacy "Parameter – Modbus
+  Configuration" table does **not** update `cfg/modbus.slaves`, so a
+  boot/USB-recovery/joint-apply resend from the new path will overwrite
+  the Nano with whatever's in `cfg/modbus.slaves` - which may be stale
+  relative to whatever was most recently commissioned live via the
+  legacy table; and (2) conversely, nothing keeps the legacy path from
+  firing (its inject/rbe/trigger nodes are independent of the new
+  resend triggers) and silently overwriting a job the new path just
+  sent, with data that was never validated against R1-R14 at all.
+
+  This is an architecture-level gap, not a bug introduced by this
+  refactor, and per the working agreement ("architecture decisions...
+  happen in the companion project chat, not here... flag it instead of
+  deciding unilaterally") it has not been fixed here. Flagged to the
+  user directly rather than silently bridged or one of the two paths
+  disabled.

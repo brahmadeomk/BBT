@@ -2,6 +2,7 @@
 
 const { validateModbusJoints } = require('../validate-modbus-joints');
 const { resolveAmbientChain } = require('../ambient-resolution');
+const { nanoJobsEqual } = require('../nano-compiler');
 
 function findSlave(slaveList, id) {
   return slaveList.find((s) => s.slaveID == id); // eslint-disable-line eqeqeq -- legacy draft rows store slaveID as either string or number
@@ -51,7 +52,9 @@ function withPayload(msg, payload) {
  * @param {import('../store').ConfigStore} deps.store
  * @param {string} [deps.user]
  * @returns {{msg: object|null, draft: Array|null, resendNeeded?: boolean}} draft is null when nothing
- *   needs persisting; resendNeeded is true only after a successful 'apply' (cfg/modbus+joints changed)
+ *   needs persisting; resendNeeded is true only after a successful 'apply' whose compiled Nano job
+ *   actually differs from what's currently applied (see nano-compiler.js's nanoJobsEqual) - a
+ *   joint/zone-only edit leaves modbus.slaves/buses untouched, so it does NOT trigger a resend
  */
 function handleJointMasterMessage(msg, deps) {
   const { slaveList, zones, store, user = 'UI' } = deps;
@@ -213,7 +216,11 @@ function applyJoints(msg, joints, zones, slaveList, store, user) {
   return {
     msg: withPayload(msg, { joints: savedJoints, zones, success: 'Configuration saved', action: 'apply' }),
     draft: savedJoints,
-    resendNeeded: true, // cfg/modbus+joints changed - the Nano job compiler (Slice 3) needs to recompile and resend
+    // joint/zone-only edits always spread modbus.slaves/buses through unchanged, so most
+    // applies don't actually change what the Nano needs to poll - only resend when the
+    // compiled job itself differs, since a resend briefly disrupts live polling (the
+    // firmware re-inits Serial1/timeout on every job update - see nano-compiler.js).
+    resendNeeded: !nanoJobsEqual(currentModbusJoints, newDoc),
   };
 }
 

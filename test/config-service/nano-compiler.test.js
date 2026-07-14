@@ -3,7 +3,7 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { compileNanoJob } = require('../../src/config-service/nano-compiler');
+const { compileNanoJob, nanoJobsEqual } = require('../../src/config-service/nano-compiler');
 const { validModbusJointsDoc } = require('./fixtures');
 const migratedRealDoc = require('../../config/examples/migrated_modbus_joints.json');
 
@@ -100,5 +100,38 @@ describe('compileNanoJob - guardrails', () => {
     };
     const result = compileNanoJob(tcpDoc);
     assert.ok(result.error.includes('RTU'));
+  });
+});
+
+describe('nanoJobsEqual', () => {
+  test('true when modbus.slaves/buses are identical, even if joints/zones differ entirely', () => {
+    const docA = validModbusJointsDoc();
+    const docB = {
+      ...docA,
+      joints: [{ joint_id: 'J99', slave_id: docA.modbus.slaves[0].slave_id, channel: 1, zone_id: 'z9', enabled: true, threshold_profile: 'default' }],
+      zones: [{ zone_id: 'z9', name: 'Somewhere else' }],
+    };
+    assert.ok(nanoJobsEqual(docA, docB));
+  });
+
+  test('false when a slave unit_address changes', () => {
+    const docA = validModbusJointsDoc();
+    const docB = JSON.parse(JSON.stringify(docA));
+    docB.modbus.slaves[0].unit_address += 1;
+    assert.ok(!nanoJobsEqual(docA, docB));
+  });
+
+  test('false when a bus comm parameter changes (baud/timeout/inter_frame_ms)', () => {
+    const docA = validModbusJointsDoc();
+    const docB = JSON.parse(JSON.stringify(docA));
+    docB.modbus.buses[0].baud = 9600;
+    assert.ok(!nanoJobsEqual(docA, docB));
+  });
+
+  test('false when either document fails to compile', () => {
+    const docA = validModbusJointsDoc();
+    const docB = validModbusJointsDoc();
+    delete docB.modbus.slaves;
+    assert.ok(!nanoJobsEqual(docA, docB));
   });
 });
