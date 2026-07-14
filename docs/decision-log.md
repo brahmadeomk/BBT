@@ -517,3 +517,59 @@ companion project chat and recorded in the workplan/design docs there).
   deciding unilaterally") it has not been fixed here. Flagged to the
   user directly rather than silently bridged or one of the two paths
   disabled.
+
+- **2026-07-14** — User decision on the gap above: build a **new
+  schema-backed Modbus Settings dashboard** and make it authoritative;
+  the legacy "Parameter – Modbus Configuration"/"Comm Parameters" pair
+  is "not aligned to our goal" and is deprecated (left wired for now,
+  to be removed after the new table is live-verified). Implementation:
+
+  - `src/config-service/node-red/modbus-settings-handler.js` — mirrors
+    the joint-master-handler editing model (add/edit/delete/save are
+    draft bookkeeping; only `apply` builds a full cfg/modbus+joints doc
+    and pushes it through `validateModbusJoints` + `applyIfValid`).
+    Friendly pre-checks: per-row bounds matching the schema, duplicate
+    unit address, and refusing to delete a slave still mapped to a
+    joint or used as an ambient reference (panel/zone/joint level),
+    naming the offender. `slave_id` stays stable across edits (rows
+    carry it invisibly); new rows get the lowest unused `slNN` at
+    apply. `function_code` is pinned to 3 — the firmware only
+    implements holding-register reads. `resendNeeded` uses
+    `nanoJobsEqual`, so a label-only edit doesn't disturb polling but a
+    real bus/slave change resends.
+  - **Legacy bridge** (`deriveLegacyBridge`/`writeLegacyModbusGlobals`):
+    investigation showed ~40 function nodes (the whole sensor-decode
+    pipeline on modbusMaster_V2, plus alert/SMS nodes) read the legacy
+    globals that only the legacy table's SetVal used to write
+    (`SlaveIDList`, `slaveLength`, `parameterName{i}`, `parameterID{i}`,
+    `sID{i}`, `sregisterAddress{i}`, `sdataBits{i}`, and the comm
+    globals). A successful apply now rewrites all of them from the
+    just-applied document, and ships `paraRaw` (flow-scoped on
+    modbusMaster_V2) via a link pair to a new `Sync Legacy ParaRaw`
+    function node — so even a stray legacy trigger now sends the same
+    job content the compiler would. `parameterID` (decode-type
+    selector, no schema equivalent) is carried over per unit_address
+    from the current SlaveIDList; new slaves default to the panel's
+    most common existing type ('6' on the real panel — every slave
+    uses one type).
+  - **Schema change (user-authorized: "You can change it")**: optional
+    `slaves[].label` (maxLength 48), the display name the legacy
+    `parameterName` provided — it's load-bearing across dashboards and
+    alerts and had no schema home (the migration had dropped it with a
+    warning). The migration tool now populates it; the committed
+    migrated example was backfilled with the real panel's names
+    (Sensor1..20/AmbientT, already public in the test fixture); and
+    for already-migrated stores the handler recovers labels from the
+    live SlaveIDList at load and persists them on first apply.
+  - Flow additions (`7f3a1c9e2b5d4a01`–`08`): ui_group "Modbus
+    Settings" on the Joint Config tab, `ModbusSettingsUI` (sends full
+    `{slaves, bus}` on every action — the JointMasterUI data-loss-bug
+    lesson applied from day one), `ModbusSettingsBackEndNode` (thin,
+    3 outputs: UI / resend link / paraRaw link), boot inject, and the
+    link nodes. The resend output feeds the *same* `Resend Nano Job
+    (in)` used by the joint table. Verified only the 8 new nodes plus
+    one `links` append changed in flows_BBT.json.
+
+  210 tests passing (20 new handler tests + 1 migration label test).
+  Needs live verification on the Pi (library change → full Node-RED
+  restart, then re-import the flow).

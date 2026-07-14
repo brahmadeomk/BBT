@@ -36,6 +36,12 @@ describe('migrateLegacyConfig - structural mapping', () => {
     assert.ok(modbusJoints.modbus.slaves.every((s) => s.registers.function_code === 3));
   });
 
+  test('preserves legacy parameterName as slaves[].label', () => {
+    const { modbusJoints } = migrateLegacyConfig(legacyContext());
+    assert.equal(modbusJoints.modbus.slaves[0].label, 'Sensor1');
+    assert.equal(modbusJoints.modbus.slaves[20].label, 'AmbientT');
+  });
+
   test('maps 20 joints, one channel each, zone_id lowercased', () => {
     const { modbusJoints } = migrateLegacyConfig(legacyContext());
     assert.equal(modbusJoints.joints.length, 20);

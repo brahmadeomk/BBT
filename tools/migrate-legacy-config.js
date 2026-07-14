@@ -50,6 +50,7 @@ function migrateLegacyConfig(legacy, options = {}) {
       bus_id: 'bus1',
       unit_address: ls.slaveID,
       model: 'LEGACY-1CH',
+      ...(ls.parameterName ? { label: String(ls.parameterName).slice(0, 48) } : {}),
       channels: 1,
       poll_interval_s: 30,
       registers: {

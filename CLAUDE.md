@@ -163,25 +163,62 @@ running it.
 
 **Tested and working on the real Pi** — Slice 3 is done.
 
-**OPEN DESIGN GAP — flagged, not fixed here:** the legacy "Parameter –
-Modbus Configuration" dashboard (`ui_template` node `51c4bed3d56ec39f`,
-`RecipDetails`/`SlaveIDList`/`paraRaw`) and "Comm Parameters" dashboard
-(`ui_template` node `9f459a1e.89fae8`, port/baud/parity/Polling/Timeout
-via `/home/pi/Desktop/commParameters.txt`) are a second, complete,
-**unvalidated** (no R1-R14) job-building pipeline that feeds the *same*
-serial-out node (`32001d89f98174c3`) as `Send Nano Job` — and neither
-reads from nor writes to `cfg/modbus.slaves`/`cfg/modbus.buses` in
-`ConfigStore`. The two pipelines are unsynchronized: committing a slave
-via the legacy table does not update `cfg/modbus.slaves`, so a later
-boot/USB-recovery/joint-apply resend can overwrite the Nano with a
-stale `cfg/modbus.slaves` snapshot; conversely, the legacy path's own
-inject/rbe/trigger nodes can fire independently and overwrite a job the
-new path just sent, with data that was never schema- or rule-checked.
-This predates this refactor and isn't something the workplan currently
-schedules a fix for (Slice 6's "commissioning helper" is Fleet
-Provisioning/certs, not modbus slave commissioning) — needs a decision
-in the companion design chat on which path stays authoritative before
-it's touched.
+## Modbus Settings dashboard (schema-backed, replaces legacy commissioning)
+
+**Design decision (user, 2026-07-14):** the schema-backed path is
+authoritative for Modbus commissioning. The legacy "Parameter – Modbus
+Configuration" dashboard (`ui_template` `51c4bed3d56ec39f`) and "Comm
+Parameters" dashboard (`ui_template` `9f459a1e.89fae8`) were a second,
+complete, **unvalidated** (no R1-R14) job-building pipeline feeding the
+same serial-out node as `Send Nano Job`, with no connection to
+`cfg/modbus` in `ConfigStore` — "not aligned to our goal." They are now
+**deprecated: do not commission slaves or change comm settings through
+them.** They're left wired for now (their `SetVal` globals feed the
+whole sensor-decode pipeline) and should be removed/disconnected in a
+follow-up once the new table is live-verified.
+
+The replacement, on the **Joint Config** dashboard tab (`ui_group`
+"Modbus Settings", nodes `7f3a1c9e2b5d4a01`–`08`):
+
+- **`ModbusSettingsUI`** (`ui_template`, same client-side rules as the
+  joint/zone tables: sends its full `{slaves, bus}` state on *every*
+  action — the data-loss-bug lesson) → **`ModbusSettingsBackEndNode`**
+  (thin wrapper, 3 outputs) →
+  `src/config-service/node-red/modbus-settings-handler.js`.
+- Bus form (single RTU bus — the firmware has one RS-485 port and
+  `compileNanoJob` enforces it) + slaves table (name/label, unit
+  address, model, channels, base addr, words, scale, poll interval).
+  `slave_id` is carried invisibly so joint mappings survive edits; new
+  rows get the lowest unused `slNN` at apply. `function_code` is always
+  3 (firmware only implements holding-register reads).
+- `apply` validates through `validateModbusJoints` + `applyIfValid`
+  (R1-R14 for real), with friendly pre-checks: duplicate unit address,
+  deleting a slave still mapped to a joint or used as an ambient
+  reference (panel/zone/joint level) is rejected by name.
+- Output 2 → `link out` → the same `Resend Nano Job (in)` trigger as
+  the joint table; `resendNeeded` is content-aware via `nanoJobsEqual`
+  (a label-only edit doesn't resend; a bus/slave change does).
+- **Legacy bridge**: on successful apply, the wrapper calls
+  `writeLegacyModbusGlobals(global, legacy)` to rewrite everything the
+  legacy sensor-decode pipeline (~40 function nodes on `modbusMaster_V2`
+  + alert/SMS nodes) still reads: `SlaveIDList`, `slaveLength`,
+  `parameterName{i}`/`parameterID{i}`/`sID{i}`/`sregisterAddress{i}`/
+  `sdataBits{i}`, and the comm globals (`port`/`baudRate`/`parity`/
+  `stopBits`/`Polling`/`Timeout`). `paraRaw` is flow-scoped on
+  `modbusMaster_V2`, so output 3 ships it there via a `link out`/`link
+  in` pair to a tiny `Sync Legacy ParaRaw` function node — so even if a
+  legacy trigger still fires, it sends the same job content the
+  compiler would. `parameterID` (legacy decode-type selector, no schema
+  equivalent) is carried over per `unit_address`; new slaves default to
+  the panel's most common existing type.
+- Schema addition (user-authorized): optional `slaves[].label`
+  (display name, legacy `parameterName`). The migration tool now
+  populates it; on panels migrated before this field existed, the
+  handler recovers labels from the live `SlaveIDList` at load and
+  persists them on the first apply.
+
+**Needs live verification on the Pi** (new `ui_template` + restart for
+the library change) before the legacy dashboards are removed.
 
 ## Node-RED integration
 

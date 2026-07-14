@@ -119,6 +119,15 @@ same tabs) → Deploy.
   deltaT/ror/persistence values should load (not blank).
 - Save/apply a change on each and confirm it's accepted (or, for an
   intentionally bad value, that it's rejected with a clear error).
+- Open the new **Modbus Settings** group (same "Joint Config" dashboard
+  tab): the bus parameters and all commissioned slaves should load,
+  with their display names. Apply a harmless change (e.g. rename a
+  sensor) — it should succeed *without* disturbing live polling; a
+  real change (e.g. baud or a slave's unit address) should trigger a
+  Nano job resend. **Do not use the old "Parameter – Modbus
+  Configuration" / "Comm Parameters" screens any more** — they bypass
+  validation and are scheduled for removal once this table is
+  live-verified.
 
 If something's still wrong, check the Node-RED debug sidebar / log
 (`journalctl -u nodered -f` if run as a service) for errors mentioning
