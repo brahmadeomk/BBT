@@ -20,8 +20,16 @@
  * tests flip connection state to simulate link loss/recovery.
  */
 class LoopbackTransport {
-  constructor() {
+  /**
+   * @param {object} [opts]
+   * @param {number} [opts.maxPublished] - cap on the recorded publish log (oldest dropped
+   *   beyond it). Tests default to unbounded; long-running production loopback use (the
+   *   Node-RED gateway until Slice 6's AWS adapter lands) MUST set this, or the record
+   *   grows without bound for the life of the process.
+   */
+  constructor({ maxPublished = Infinity } = {}) {
     this.published = [];
+    this.maxPublished = maxPublished;
     this.subscribers = new Map();
     this.connectionListeners = [];
     this.connected = true;
@@ -32,6 +40,9 @@ class LoopbackTransport {
       return Promise.reject(new Error('transport is disconnected'));
     }
     this.published.push({ topic, payload, qos, publishedAt: Date.now() });
+    if (this.published.length > this.maxPublished) {
+      this.published.splice(0, this.published.length - this.maxPublished);
+    }
     for (const handler of this.subscribers.get(topic) || []) handler(payload);
     return Promise.resolve();
   }

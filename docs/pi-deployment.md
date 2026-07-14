@@ -51,9 +51,13 @@ and make sure the user Node-RED runs as can write to it (usually `pi`,
 but check with `ps aux | grep node-red` if unsure):
 
 ```bash
-sudo mkdir -p /var/busduct/cfg
-sudo chown pi:pi /var/busduct/cfg
+sudo mkdir -p /var/busduct/cfg /var/busduct/outbox
+sudo chown pi:pi /var/busduct/cfg /var/busduct/outbox
 ```
+
+(`/var/busduct/outbox` is the Cloud Gateway's disk-backed
+store-and-forward queue — Slice 5. Harmless if created before that
+flow version is deployed.)
 
 ## 3. Bootstrap the migrated config (first time only)
 
@@ -84,10 +88,11 @@ this repo for the exact snippet. Using the path from step 1, the
 
 ```js
 busductConfigService: require('/home/pi/busduct-cloud-edge/src/config-service/node-red'),
+busductCloudGateway: require('/home/pi/busduct-cloud-edge/src/cloud-gateway/node-red'),
 ```
 
-If `settings.js` already has a `functionGlobalContext` block, add this
-as one more key inside it rather than replacing the block.
+If `settings.js` already has a `functionGlobalContext` block, add these
+as more keys inside it rather than replacing the block.
 
 ## 5. Restart Node-RED (not just Deploy)
 
@@ -139,6 +144,15 @@ same tabs) → Deploy.
   slave. Existing rows default to channel 1. Two joints may share a
   multi-channel slave on different channels; mapping the same slave +
   channel twice is rejected with the conflicting joint named.
+- Open the new **Cloud Gateway** flow tab (editor, not dashboard) and
+  watch the debug sidebar: "gateway telemetry" fires every 10 minutes
+  with `flushed_chunks` ≥ 1 (once sensors are reporting) and outbox
+  counts, "gateway heartbeat" fires hourly (and once ~30s after
+  startup) with the firmware and applied config versions. Messages
+  drain to the loopback transport for now — nothing leaves the panel
+  until Slice 6's AWS adapter. If both debugs stay silent, the
+  `busductCloudGateway` entry in settings.js (step 4) is missing or
+  Node-RED wasn't restarted (step 5).
 
 If something's still wrong, check the Node-RED debug sidebar / log
 (`journalctl -u nodered -f` if run as a service) for errors mentioning

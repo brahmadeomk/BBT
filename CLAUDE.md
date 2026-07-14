@@ -19,8 +19,14 @@ across all of them.**
   slice until the current one meets it. Slice 1, Slice 2 (config
   service), Slice 3 (Nano job compiler + resend wiring), and Slice 4
   (internal bus link-out taps) are **done** — all live-verified on the
-  real Pi, HMI/historian/email behavior confirmed unchanged. Slice 5
-  (Cloud Gateway: batcher, alarm publisher, outbox, heartbeat) is next.
+  real Pi, HMI/historian/email behavior confirmed unchanged. The
+  schema-backed Modbus Settings dashboard (multi-channel, R15) and the
+  legacy commissioning removal are also **live-verified**. Slice 5
+  (Cloud Gateway) modules are built, unit-tested, and now wired into a
+  new "Cloud Gateway" flow tab on the loopback transport — its "Done
+  when" (24h bench soak: aggregates vs historian, alarm parity, outbox
+  growth/drain under link pulls) is still open. Slice 6 (AWS adapter +
+  provisioning) is next after that soak.
 
 - **Cloud-agnostic rule**: no AWS SDK (or any single-cloud SDK) may be
   imported outside `/src/adapters/aws`. Everything else — config
@@ -249,8 +255,10 @@ The replacement, on the **Joint Config** dashboard tab (`ui_group`
   handler recovers labels from the live `SlaveIDList` at load and
   persists them on the first apply.
 
-**Needs live verification on the Pi** (new `ui_template` + restart for
-the library change) before the legacy dashboards are removed.
+**Live-verified on the Pi (2026-07-14)** — table load/apply confirmed
+working, including the multi-channel row model; the legacy dashboards
+were then removed (see decision log for the exact 32-node deletion and
+what was deliberately kept).
 
 ## Node-RED integration
 
@@ -356,10 +364,42 @@ change this wire format without updating the firmware in lockstep:
 events, 4 outputs) — both on the `BusbarTherMo` tab — now have a `link
 out` tap on every output, purely additive (new node appended to each
 output's existing wire list; the two function nodes' code is
-byte-identical to before). These taps have no consumer yet (`links: []`
-on each) — Slice 5's Cloud Gateway batcher/alarm publisher are meant to
-add matching `link in` nodes. **Full message shapes for every output:
+byte-identical to before). **Full message shapes for every output:
 `docs/internal-message-contracts.md`.**
+
+## Cloud Gateway tab (Slice 5, wired — soak pending)
+
+New "Cloud Gateway" flow tab (nodes `8a1b2c3d4e5f6a10`–`22`) consumes
+three of the Slice 4 taps: KPI joint (`18f56266a8967320`), alarms
+active (`f0f308d026bba2a9`), alarms cleared (`f4b8cd205f84810e`). The
+ambient/unassigned KPI streams and historian/email alarm taps stay
+unconsumed (batcher reads each joint's ambient from inside the joint
+message; historian/email stay local-only). Thin function nodes call
+`src/cloud-gateway/node-red/` (exposed as **`busductCloudGateway`** in
+`functionGlobalContext` — settings.js.example updated; same
+restart-not-Deploy rule applies):
+
+- `getGateway()` builds a **process-wide singleton** (batch
+  accumulators and the alarm publisher's RAISE dedupe must survive
+  across messages): `Outbox` at `/var/busduct/outbox` (dir must exist,
+  see pi-deployment §2) draining 5 msg/s into a `LoopbackTransport`
+  capped at 500 recorded publishes (no MQTT until Slice 6 swaps in the
+  AWS adapter behind the same transport interface), `Batcher` +
+  `AlarmPublisher` + `Heartbeat` on topics resolved from the edge
+  config templates with placeholder identity `c0000/s0000/p0000`
+  (Slice 6 provisioning supplies the real one). Heartbeat publishes on
+  the telemetry topic — the yaml defines no separate heartbeat topic.
+- Telemetry flush: inject every **600s** → `flushTelemetry(gw, 10)` —
+  the `10` (interval_min, stamped into payloads) must be kept in sync
+  with the inject period by hand. Heartbeat: hourly inject (+once at
+  boot +30s) sends fw version (`global.fwVersion`, 'unknown' until
+  something sets it) and applied config versions from the ConfigStore.
+- Debug nodes on both show flush/outbox/publish counts in the sidebar
+  — that's the live bench-verification surface until Slice 6.
+
+Slice 5's "Done when" (24h bench soak vs historian + link-pull drill)
+is **not yet run** — the workplan's soak scripts under `/test` are
+still to be written when the bench is available.
 
 ## Working agreements
 

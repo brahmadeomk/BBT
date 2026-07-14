@@ -30,5 +30,10 @@ module.exports = {
   functionGlobalContext: {
     // ...any existing entries...
     busductConfigService: require('/home/pi/busduct-cloud-edge/src/config-service/node-red'),
+    // Slice 5 - Cloud Gateway tab (batcher/alarm publisher/outbox/heartbeat,
+    // loopback transport until Slice 6's AWS adapter). The outbox persists to
+    // /var/busduct/outbox - create it with the same ownership as /var/busduct/cfg
+    // (see docs/pi-deployment.md).
+    busductCloudGateway: require('/home/pi/busduct-cloud-edge/src/cloud-gateway/node-red'),
   },
 };

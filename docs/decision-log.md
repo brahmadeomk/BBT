@@ -677,3 +677,49 @@ companion project chat and recorded in the workplan/design docs there).
   screens no longer exist as a fallback, so the new table must be
   verified first thing after this deploys. 226 tests passing
   (flows-integrity confirms every remaining wire/link resolves).
+
+- **2026-07-14** — User confirmed live on the Pi: the schema-backed
+  Modbus Settings table (multi-channel row model) and the joint
+  table's channel column work, with the legacy commissioning screens
+  removed ("It's working"). Marked live-verified in CLAUDE.md.
+
+- **2026-07-14** — Slice 5 Node-RED wiring: new "Cloud Gateway" flow
+  tab consuming the Slice 4 taps, completing the loop the taps were
+  built for. Design decisions:
+
+  - Consumes exactly three taps: KPI joint, alarms active, alarms
+    cleared. The ambient/unassigned KPI streams are NOT consumed - the
+    batcher reads each joint's ambient from inside the joint message
+    (`kpi.ambient.val`), so a separate ambient subscription would
+    double-count; unassigned sensors aren't part of the telemetry
+    contract. Historian/email alarm taps stay local-only.
+  - `src/cloud-gateway/node-red/` (gateway-handler.js + index.js):
+    thin handlers (`ingestKpiTap`/`ingestAlarmActiveTap`/
+    `ingestAlarmClearedTap`/`flushTelemetry`/`sendHeartbeat`) plus a
+    `getGateway()` singleton - the batcher's interval accumulators and
+    the alarm publisher's RAISE dedupe set are process state that must
+    survive across messages, so function nodes share one instance via
+    `functionGlobalContext.busductCloudGateway` (settings.js.example
+    updated; the restart-not-Deploy rule applies to this library too).
+  - Transport is the loopback until Slice 6 (workplan: "no MQTT yet").
+    Added a `maxPublished` cap to `LoopbackTransport` (500 in the
+    gateway) - its publish record was unbounded, which is fine for
+    tests but a slow memory leak on a weeks-long Pi deployment.
+  - Outbox persists at `/var/busduct/outbox` (pi-deployment §2 now
+    creates it alongside /var/busduct/cfg) and drains 5 msg/s.
+  - Telemetry flush: 600s inject calling `flushTelemetry(gw, 10)` -
+    interval_min matches busduct_edge_config.yaml
+    publish.telemetry.interval_min; the inject period and the `10`
+    argument must be kept in sync by hand (documented in the function
+    node). Heartbeat: hourly (+30s-after-boot) with
+    `global.fwVersion || 'unknown'` and the ConfigStore's applied
+    versions. Topics resolve from the yaml templates with placeholder
+    identity c0000/s0000/p0000 until Slice 6 provisioning; heartbeat
+    shares the telemetry topic (the yaml defines no heartbeat topic).
+  - Debug nodes ("gateway telemetry"/"gateway heartbeat") surface
+    flush chunk counts, outbox counts/bytes, and the loopback publish
+    total in the sidebar - the bench verification surface until MQTT.
+
+  234 tests passing (8 new). Slice 5's "Done when" (24h bench soak,
+  link-pull drill) remains open - soak scripts under /test are the
+  next Slice 5 work item once the bench is available.
