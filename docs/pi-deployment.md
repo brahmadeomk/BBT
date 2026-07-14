@@ -128,10 +128,13 @@ same tabs) → Deploy.
   address) should trigger a Nano job resend. To commission a
   multi-channel unit, use **+CH** on its row (same unit address,
   next channel, its own base address; model/words/scale/poll must
-  match across the unit's rows). **Do not use the old "Parameter –
-  Modbus Configuration" / "Comm Parameters" screens any more** — they
-  bypass validation and are scheduled for removal once this table is
-  live-verified.
+  match across the unit's rows). **The old "Parameter – Modbus
+  Configuration" and "Comm Parameters" screens have been removed from
+  the flow** — the new table is the only commissioning path, so verify
+  it loads correctly immediately after importing this flow version.
+  (The "Slave Config" dashboard tab keeps the Read/Transfer selector
+  and the SLAVE Active status display; the "Communication Settings"
+  dashboard tab is gone.)
 - In the joint table, each joint now also selects a **Ch**annel of its
   slave. Existing rows default to channel 1. Two joints may share a
   multi-channel slave on different channels; mapping the same slave +

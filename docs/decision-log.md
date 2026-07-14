@@ -632,3 +632,48 @@ companion project chat and recorded in the workplan/design docs there).
   byte-identical under the new code (no `channel_addrs` emitted for
   1-channel slaves), so nanoJobsEqual sees no change on migration.
   Needs the same live verification pass as the parent feature.
+
+- **2026-07-14** — Removed the deprecated legacy Modbus commissioning
+  subsystem from `flows_BBT.json` (user-directed: "delete unused flows
+  and function, ui template"; the follow-up CLAUDE.md had planned
+  after live verification, pulled forward on the user's instruction).
+  32 nodes deleted, boundary-verified so nothing kept lost an input or
+  output it needed:
+
+  - The "Parameter – Modbus Configuration" (`modbus slaves`)
+    ui_template and its whole chain on modbusMaster_V2: boot/refresh
+    injects, `modbusSlave.txt` file reader/writer, `Data Filter`,
+    `SetVal` (the legacy SlaveIDList/paraRaw/indexed-globals writer),
+    `Para2DropUpdated`, debugs, and the 'Read' link-out (its id
+    cleaned out of the kept link-in `4580cb246b849844`).
+  - The duplicate `modbusSlave.txt` boot-restore chain on the config
+    tab (inject → file in → json → Data Filter → SetVal → debugs).
+  - The "Comm Parameters" ui_template chain on Advanced Settings:
+    inject, `commParameters.txt` reader/writer, settings obj, json,
+    `SetVal` (comm globals writer), debug — plus its now-empty
+    "Communication Parameters" ui_group and the "Communication
+    Settings" ui_tab.
+
+  **Deliberately kept:** the Read/Transfer `ui_dropdown` and "SLAVE
+  Active" ui_template (their "Modbus Settings" legacy ui_group on the
+  "Slave Config" dashboard tab survives with just those two); the
+  legacy read/write/transfer job builders (`9f8ca9579d2932de`,
+  `fd729d0af6e67cac`, `7130fe6f4f01d9b0`) and their triggers — the
+  serial-silence watchdog (`trigger` 30s fed by `serial in`) that
+  re-kicks the Nano through `9f8ca9579d2932de` is a live polling
+  recovery mechanism, not dead code, and the write/transfer paths may
+  still serve calibration screens. Those builders now emit content
+  identical to the compiler's because the new table's bridge keeps
+  `flow.paraRaw` and the comm globals in sync on every apply.
+
+  Consequence of deleting the boot-restore chains: the legacy globals
+  (SlaveIDList, slaveLength, parameterName{i}, ..., port/baudRate/...)
+  are no longer re-seeded from the Desktop txt files at startup. They
+  persist in the Pi's localfilesystem context store (the same store
+  context.zip was exported from) and are rewritten on every Modbus
+  Settings apply - and the txt files would have gone stale anyway once
+  the new table became the only writer, making the old boot-restore a
+  stale-data overwrite hazard rather than a safety net. The old
+  screens no longer exist as a fallback, so the new table must be
+  verified first thing after this deploys. 226 tests passing
+  (flows-integrity confirms every remaining wire/link resolves).

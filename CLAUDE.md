@@ -171,11 +171,25 @@ Configuration" dashboard (`ui_template` `51c4bed3d56ec39f`) and "Comm
 Parameters" dashboard (`ui_template` `9f459a1e.89fae8`) were a second,
 complete, **unvalidated** (no R1-R14) job-building pipeline feeding the
 same serial-out node as `Send Nano Job`, with no connection to
-`cfg/modbus` in `ConfigStore` — "not aligned to our goal." They are now
-**deprecated: do not commission slaves or change comm settings through
-them.** They're left wired for now (their `SetVal` globals feed the
-whole sensor-decode pipeline) and should be removed/disconnected in a
-follow-up once the new table is live-verified.
+`cfg/modbus` in `ConfigStore` — "not aligned to our goal."
+
+**Removed (user-directed, 2026-07-14, ahead of live verification):**
+both dashboards and their exclusive chains — 32 nodes: the
+commissioning UI + `modbusSlave.txt` read/write/boot-restore chains
+(both copies: `modbusMaster_V2` and the config tab), the
+`commParameters.txt` chain, their `SetVal` global-writers, the 'Read'
+link-out, and the emptied "Communication Parameters" `ui_group` +
+"Communication Settings" `ui_tab`. **Kept**: the Read/Transfer
+`ui_dropdown` + "SLAVE Active" template (their group survives on the
+"Slave Config" dashboard tab), and the legacy read/write/transfer job
+builders with their serial-silence watchdog trigger — that's the live
+polling recovery path; it now sends content identical to the compiler
+because the new table's bridge keeps `paraRaw`/comm globals in sync.
+Legacy globals are no longer boot-restored from txt files: they live
+in the Pi's persistent (localfilesystem) context store and are
+rewritten on every Modbus Settings apply. Because the old screens no
+longer exist as a fallback, the new table **must** be verified first
+thing after this deploys.
 
 The replacement, on the **Joint Config** dashboard tab (`ui_group`
 "Modbus Settings", nodes `7f3a1c9e2b5d4a01`–`08`):
