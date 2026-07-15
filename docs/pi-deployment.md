@@ -148,11 +148,25 @@ same tabs) → Deploy.
   watch the debug sidebar: "gateway telemetry" fires every 10 minutes
   with `flushed_chunks` ≥ 1 (once sensors are reporting) and outbox
   counts, "gateway heartbeat" fires hourly (and once ~30s after
-  startup) with the firmware and applied config versions. Messages
-  drain to the loopback transport for now — nothing leaves the panel
-  until Slice 6's AWS adapter. If both debugs stay silent, the
+  startup) with the firmware and applied config versions. The
+  telemetry status includes `transport_mode`: `"loopback"` until the
+  panel is provisioned against AWS IoT, `"aws"` (plus
+  `connected: true/false`) afterwards. If both debugs stay silent, the
   `busductCloudGateway` entry in settings.js (step 4) is missing or
-  Node-RED wasn't restarted (step 5).
+  Node-RED wasn't restarted (step 5). Note this flow version needs
+  `npm ci` after pulling (new dependencies: mqtt, js-yaml).
+
+## 8. Connect to AWS IoT (Slice 6, once the AWS account is ready)
+
+Follow `docs/aws/README.md`: an admin registers the per-device policy
++ provisioning template once, then per panel you write
+`/etc/busduct/edge-config.yaml` (identity + ATS endpoint), run
+`node tools/provision-panel.js --template=... --claim-cert=... --claim-key=...`,
+delete the claim material, and restart Node-RED. The gateway detects
+the certs at startup and switches from loopback to the AWS transport
+automatically — no flow change needed. Verify `transport_mode: "aws"`
+and `connected: true` in the "gateway telemetry" debug, and the panel's
+messages arriving in AWS IoT Core's MQTT test client.
 
 If something's still wrong, check the Node-RED debug sidebar / log
 (`journalctl -u nodered -f` if run as a service) for errors mentioning

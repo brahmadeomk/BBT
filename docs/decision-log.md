@@ -723,3 +723,74 @@ companion project chat and recorded in the workplan/design docs there).
   234 tests passing (8 new). Slice 5's "Done when" (24h bench soak,
   link-pull drill) remains open - soak scripts under /test are the
   next Slice 5 work item once the bench is available.
+
+- **2026-07-15** — User confirmed the Cloud Gateway loopback path
+  flowing live on the Pi (debug snapshot: flushed_chunks 1, outbox
+  telemetry 1 draining, published_total 2 = boot heartbeat + prior
+  flush - all healthy). **Sequencing decision (user)**: Slice 5's
+  standalone loopback soak is NOT run separately; it merges into
+  Slice 6's soak - one combined 24h soak on the real AWS transport
+  covering both slices' "Done when" (aggregates vs historian, alarm
+  parity, real 1h/24h link pulls, router reboot, outbox recovery).
+  Rationale: Slice 6's own acceptance already repeats most of the
+  loopback soak on a strictly more realistic transport, and the
+  loopback gateway running live on the panel accumulates the same
+  evidence passively. Recorded as an explicit deviation from the
+  workplan's slice-gating rule.
+
+- **2026-07-15** — Slice 6 built: AWS IoT adapter + Fleet Provisioning,
+  all under src/adapters/aws (the only AWS-permitted directory).
+  Design decisions:
+
+  - **mqtt.js, not the AWS IoT Device SDK**: pure JS (no native
+    aws-crt build on ARM), no AWS SDK import anywhere so the
+    cloud-agnostic grep stays trivially green, and - because AWS IoT
+    is plain MQTT over TLS 1.2 mutual auth on 8883 - the same
+    transport doubles as the Slice 8 portability-drill transport
+    (point mqtt.endpoint at Mosquitto, everything works). Fleet
+    Provisioning is also just MQTT topics, so provisioning needs no
+    SDK either. Dependencies added: mqtt@5, js-yaml@4 (edge config).
+  - **aws-iot-transport.js**: transport-interface implementation with
+    self-managed reconnect - mqtt.js's fixed reconnectPeriod is
+    disabled in favor of full-jitter exponential backoff
+    (random(0, min(300, 2*2^attempt))s per the edge config spec; AWS
+    throttles thundering-herd reconnects). Subscriptions replay on
+    every reconnect (clean session). publish() rejects while
+    disconnected, which is exactly what the outbox's
+    stop-on-first-failure drain expects. LWT = {lwt:true, thing_name}
+    QoS 1 on the telemetry topic - the yaml defines no status topic;
+    flagged as a cloud-side design question for the companion chat
+    (heartbeat/2-missed stays the primary offline detector).
+  - **provisioning.js + tools/provision-panel.js**: claim-cert
+    connect, $aws/certificates/create/json ->
+    $aws/provisioning-templates/{t}/provision/json, operational key
+    written 0600; CLI refuses re-provisioning without --force. The
+    provisioning timeout timer is deliberately NOT unref'd - it keeps
+    the short-lived commissioning process alive until AWS answers (an
+    unref'd timer let the process exit with the promise pending,
+    caught by the timeout unit test).
+  - **Automatic transport selection**: getGateway() ->
+    createGatewayFromEdgeConfig(): edge config + all three cert files
+    present -> AWS transport, else loopback with a human-readable
+    reason surfaced in the flush status (transport_mode/connected
+    fields added; published_total only exists in loopback mode). A
+    provisioning problem degrades to bench mode, never takes down
+    local monitoring. This composition root is the one sanctioned
+    require() of src/adapters/aws from outside it - gateway logic
+    still sees only the transport interface, and the require is lazy
+    so unprovisioned panels never load mqtt.
+  - Cloud-side deliverables (workplan Slice 6): per-device IoT policy
+    template locking each panel to its own namespace via thing
+    attributes (client id must equal thing name), provisioning
+    template deriving bt-{customer}-{site}-{panel} thing names, and
+    docs/aws/README.md with the one-time admin setup + per-panel
+    commissioning runbook.
+
+  253 tests passing (19 new: transport dial options/LWT, connection
+  state, publish/subscribe semantics, jittered backoff + resubscribe
+  after reconnect, close() semantics, provisioning happy/rejected/
+  timeout paths, credential file modes, edge-config parsing incl.
+  basic-ingest rewrite, loopback fallback reasons). Remaining for
+  Slice 6 "Done when": real AWS account inputs (ATS endpoint, claim
+  certs, registered template), first live connect, then the combined
+  24h soak.

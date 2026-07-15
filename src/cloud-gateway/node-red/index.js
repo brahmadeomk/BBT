@@ -52,13 +52,14 @@ function resolveTopic(template, identity) {
  * @param {object} [opts]
  * @param {string} [opts.outboxDir]
  * @param {{customer_id: string, site_id: string, panel_id: string}} [opts.identity]
+ * @param {{telemetry: string, alarm: string}} [opts.topics] - pre-resolved topics (override identity templates)
  * @param {object} [opts.transport] - custom transport (tests); default capped LoopbackTransport
  */
-function createGateway({ outboxDir = DEFAULT_OUTBOX_DIR, identity = DEFAULT_IDENTITY, transport } = {}) {
+function createGateway({ outboxDir = DEFAULT_OUTBOX_DIR, identity = DEFAULT_IDENTITY, topics, transport } = {}) {
   const t = transport ?? new LoopbackTransport({ maxPublished: 500 });
   const outbox = new Outbox({ dir: outboxDir, transport: t });
-  const telemetryTopic = resolveTopic(TOPIC_TEMPLATES.telemetry, identity);
-  const alarmTopic = resolveTopic(TOPIC_TEMPLATES.alarm, identity);
+  const telemetryTopic = topics?.telemetry ?? resolveTopic(TOPIC_TEMPLATES.telemetry, identity);
+  const alarmTopic = topics?.alarm ?? resolveTopic(TOPIC_TEMPLATES.alarm, identity);
 
   const gateway = {
     transport: t,
@@ -67,17 +68,86 @@ function createGateway({ outboxDir = DEFAULT_OUTBOX_DIR, identity = DEFAULT_IDEN
     alarmPublisher: new AlarmPublisher({ outbox, topic: alarmTopic }),
     heartbeat: new Heartbeat({ outbox, topic: telemetryTopic }),
     topics: { telemetry: telemetryTopic, alarm: alarmTopic },
+    mode: transport ? 'custom' : 'loopback', // createGatewayFromEdgeConfig overwrites with 'aws'
   };
   outbox.start(); // drain loop (5 msg/s); harmless with the loopback, required with a real transport
   return gateway;
 }
 
-let singleton = null;
+/**
+ * Composition root for the real panel (Slice 6): if a provisioned
+ * edge config + operational certs exist, build the gateway on the AWS
+ * IoT transport; otherwise fall back to the loopback (bench mode,
+ * exactly as Slice 5 ran). This is the ONE place allowed to reach
+ * into src/adapters/aws - the gateway logic itself still only sees
+ * the transport interface (cloud-agnostic rule; the require is lazy
+ * so bench setups never load mqtt at all).
+ *
+ * Returns { gateway, mode, reason } - reason says why loopback was
+ * chosen, for the status debug in the flow.
+ */
+function createGatewayFromEdgeConfig() {
+  const fs = require('node:fs');
+  let cfg;
+  try {
+    const { loadEdgeConfig } = require('../../adapters/aws/edge-config');
+    cfg = loadEdgeConfig();
+  } catch (err) {
+    return { gateway: createGateway(), mode: 'loopback', reason: `no usable edge config: ${err.message}` };
+  }
 
-/** The process-wide gateway instance the Cloud Gateway tab's function nodes share. */
+  const missing = [cfg.mqtt.cert_path, cfg.mqtt.key_path, cfg.mqtt.root_ca_path].filter((p) => !fs.existsSync(p));
+  if (missing.length > 0) {
+    return {
+      gateway: createGateway({ outboxDir: cfg.buffer.path, identity: cfg.identity, topics: cfg.topics }),
+      mode: 'loopback',
+      reason: `panel not provisioned yet - missing ${missing.join(', ')} (run tools/provision-panel.js)`,
+    };
+  }
+
+  const { AwsIotTransport } = require('../../adapters/aws/aws-iot-transport');
+  const transport = new AwsIotTransport({
+    endpoint: cfg.mqtt.endpoint,
+    port: cfg.mqtt.port,
+    certPath: cfg.mqtt.cert_path,
+    keyPath: cfg.mqtt.key_path,
+    caPath: cfg.mqtt.root_ca_path,
+    clientId: cfg.identity.thing_name,
+    keepAliveSec: cfg.mqtt.keep_alive_sec,
+    backoff: { initialSec: cfg.mqtt.reconnect_backoff.initial_sec, maxSec: cfg.mqtt.reconnect_backoff.max_sec },
+    will: { topic: cfg.topics.telemetry, payload: { lwt: true, thing_name: cfg.identity.thing_name } },
+  });
+  transport.connect();
+  const gateway = createGateway({ outboxDir: cfg.buffer.path, identity: cfg.identity, topics: cfg.topics, transport });
+  gateway.mode = 'aws';
+  return { gateway, mode: 'aws', reason: `connected as ${cfg.identity.thing_name} to ${cfg.mqtt.endpoint}` };
+}
+
+let singleton = null;
+let singletonInfo = null;
+
+/**
+ * The process-wide gateway instance the Cloud Gateway tab's function
+ * nodes share. On first call, picks the AWS transport when the panel
+ * is provisioned (edge config + certs present), else loopback.
+ */
 function getGateway(opts) {
-  if (!singleton) singleton = createGateway(opts);
+  if (!singleton) {
+    if (opts) {
+      singleton = createGateway(opts);
+      singletonInfo = { mode: singleton.mode, reason: 'explicit options' };
+    } else {
+      const { gateway, mode, reason } = createGatewayFromEdgeConfig();
+      singleton = gateway;
+      singletonInfo = { mode, reason };
+    }
+  }
   return singleton;
 }
 
-module.exports = { createGateway, getGateway, resolveTopic, ...handlers };
+/** Why the singleton is on the transport it's on - surfaced by the flow's status debug. */
+function getGatewayInfo() {
+  return singletonInfo;
+}
+
+module.exports = { createGateway, createGatewayFromEdgeConfig, getGateway, getGatewayInfo, resolveTopic, ...handlers };

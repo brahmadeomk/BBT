@@ -1,0 +1,39 @@
+{
+  "__comment": "AWS IoT Fleet Provisioning template (Slice 6 deliverable). Register as e.g. 'bt-panel-provisioning' with a pre-provisioning Lambda hook if allow-listing serials. tools/provision-panel.js sends parameters CustomerId/SiteId/PanelId/SerialNumber; the thing name and topic namespace derive from them. Attach the per-device policy (iot-policy-panel.template.json, registered as 'bt-panel-policy').",
+  "Parameters": {
+    "CustomerId": { "Type": "String" },
+    "SiteId": { "Type": "String" },
+    "PanelId": { "Type": "String" },
+    "SerialNumber": { "Type": "String" },
+    "AWS::IoT::Certificate::Id": { "Type": "String" }
+  },
+  "Resources": {
+    "certificate": {
+      "Type": "AWS::IoT::Certificate",
+      "Properties": {
+        "CertificateId": { "Ref": "AWS::IoT::Certificate::Id" },
+        "Status": "ACTIVE"
+      }
+    },
+    "policy": {
+      "Type": "AWS::IoT::Policy",
+      "Properties": {
+        "PolicyName": "bt-panel-policy"
+      }
+    },
+    "thing": {
+      "Type": "AWS::IoT::Thing",
+      "Properties": {
+        "ThingName": {
+          "Fn::Join": ["", ["bt-", { "Ref": "CustomerId" }, "-", { "Ref": "SiteId" }, "-", { "Ref": "PanelId" }]]
+        },
+        "AttributePayload": {
+          "customer_id": { "Ref": "CustomerId" },
+          "site_id": { "Ref": "SiteId" },
+          "panel_id": { "Ref": "PanelId" },
+          "hw_serial": { "Ref": "SerialNumber" }
+        }
+      }
+    }
+  }
+}

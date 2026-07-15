@@ -1,0 +1,42 @@
+{
+  "__comment": "Per-device IoT policy (Slice 6 deliverable). Attach via the provisioning template. Locks each panel to its own namespace using policy variables - the thing name (bt-{customer}-{site}-{panel}) is the client ID, and every topic the panel may touch is derived from it. Replace REGION and ACCOUNT_ID.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "iot:Connect",
+      "Resource": "arn:aws:iot:REGION:ACCOUNT_ID:client/${iot:Connection.Thing.ThingName}"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iot:Publish",
+      "Resource": [
+        "arn:aws:iot:REGION:ACCOUNT_ID:topic/dt/${iot:Connection.Thing.Attributes[customer_id]}/${iot:Connection.Thing.Attributes[site_id]}/${iot:Connection.Thing.Attributes[panel_id]}/tel",
+        "arn:aws:iot:REGION:ACCOUNT_ID:topic/dt/${iot:Connection.Thing.Attributes[customer_id]}/${iot:Connection.Thing.Attributes[site_id]}/${iot:Connection.Thing.Attributes[panel_id]}/alarm",
+        "arn:aws:iot:REGION:ACCOUNT_ID:topic/$aws/rules/btTelemetry/dt/${iot:Connection.Thing.Attributes[customer_id]}/${iot:Connection.Thing.Attributes[site_id]}/${iot:Connection.Thing.Attributes[panel_id]}/tel",
+        "arn:aws:iot:REGION:ACCOUNT_ID:topic/cmd/${iot:Connection.Thing.Attributes[customer_id]}/${iot:Connection.Thing.Attributes[site_id]}/${iot:Connection.Thing.Attributes[panel_id]}/config/ack"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iot:Subscribe",
+      "Resource": [
+        "arn:aws:iot:REGION:ACCOUNT_ID:topicfilter/cmd/${iot:Connection.Thing.Attributes[customer_id]}/${iot:Connection.Thing.Attributes[site_id]}/${iot:Connection.Thing.Attributes[panel_id]}/config",
+        "arn:aws:iot:REGION:ACCOUNT_ID:topicfilter/$aws/things/${iot:Connection.Thing.ThingName}/shadow/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iot:Receive",
+      "Resource": [
+        "arn:aws:iot:REGION:ACCOUNT_ID:topic/cmd/${iot:Connection.Thing.Attributes[customer_id]}/${iot:Connection.Thing.Attributes[site_id]}/${iot:Connection.Thing.Attributes[panel_id]}/config",
+        "arn:aws:iot:REGION:ACCOUNT_ID:topic/$aws/things/${iot:Connection.Thing.ThingName}/shadow/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["iot:GetThingShadow", "iot:UpdateThingShadow"],
+      "Resource": "arn:aws:iot:REGION:ACCOUNT_ID:thing/${iot:Connection.Thing.ThingName}"
+    }
+  ]
+}

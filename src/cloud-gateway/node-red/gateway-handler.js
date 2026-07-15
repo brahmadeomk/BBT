@@ -47,7 +47,10 @@ function flushTelemetry(gateway, intervalMin) {
     flushed_chunks: chunks,
     outbox: gateway.outbox.counts(),
     outbox_bytes: gateway.outbox.totalSizeBytes(),
-    published_total: gateway.transport.published.length,
+    transport_mode: gateway.mode,
+    connected: gateway.transport.isConnected(),
+    // loopback only - the AWS transport keeps no publish record (the cloud does)
+    ...(gateway.transport.published ? { published_total: gateway.transport.published.length } : {}),
   };
 }
 

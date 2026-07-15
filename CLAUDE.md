@@ -22,11 +22,16 @@ across all of them.**
   real Pi, HMI/historian/email behavior confirmed unchanged. The
   schema-backed Modbus Settings dashboard (multi-channel, R15) and the
   legacy commissioning removal are also **live-verified**. Slice 5
-  (Cloud Gateway) modules are built, unit-tested, and now wired into a
-  new "Cloud Gateway" flow tab on the loopback transport — its "Done
-  when" (24h bench soak: aggregates vs historian, alarm parity, outbox
-  growth/drain under link pulls) is still open. Slice 6 (AWS adapter +
-  provisioning) is next after that soak.
+  (Cloud Gateway) is wired into a "Cloud Gateway" flow tab and
+  confirmed flowing live on the loopback (debug counts healthy).
+  **User decision (2026-07-15): Slice 5's standalone loopback soak is
+  merged into Slice 6's soak** — one combined 24h soak on the real
+  transport covers both slices' "Done when" (aggregates vs historian,
+  alarm parity, real link pull 1h/24h, router reboot, outbox
+  recovery). Slice 6 (AWS adapter + Fleet Provisioning) code is built
+  and unit-tested; it needs real AWS-side inputs (ATS endpoint, claim
+  certs, provisioning template — see docs/aws/README.md) before the
+  panel can connect and the combined soak can run.
 
 - **Cloud-agnostic rule**: no AWS SDK (or any single-cloud SDK) may be
   imported outside `/src/adapters/aws`. Everything else — config
@@ -398,8 +403,54 @@ restart-not-Deploy rule applies):
   — that's the live bench-verification surface until Slice 6.
 
 Slice 5's "Done when" (24h bench soak vs historian + link-pull drill)
-is **not yet run** — the workplan's soak scripts under `/test` are
-still to be written when the bench is available.
+is merged into Slice 6's combined soak (user decision, 2026-07-15) —
+the soak scripts under `/test` are still to be written.
+
+## AWS adapter & provisioning (Slice 6, built — awaiting AWS account)
+
+All under `src/adapters/aws/` (the only place allowed to be
+AWS-specific), built on **mqtt.js** — pure JS, no AWS SDK anywhere
+(the cloud-agnostic grep stays trivially green), no native aws-crt
+build on ARM, and because it's plain MQTT+TLS it doubles as the
+Slice 8 portability-drill transport (point `mqtt.endpoint` at
+Mosquitto):
+
+- **`edge-config.js`**: loads/validates the per-panel
+  `/etc/busduct/edge-config.yaml` (spec: `docs/busduct_edge_config.yaml`,
+  overridable via `BUSDUCT_EDGE_CONFIG`), resolves topics from the
+  identity block; `use_basic_ingest: true` rewrites only the telemetry
+  *publish* topic to the `$aws/rules/btTelemetry/...` form.
+- **`aws-iot-transport.js`**: implements the transport interface
+  (publish/subscribe/isConnected/onConnectionChange) — TLS 1.2 mutual
+  auth on 8883, thing name = client ID, keep-alive 300s, LWT
+  (`{lwt:true, thing_name}` on the telemetry topic, QoS 1 — the yaml
+  defines no status topic; flagged as a cloud-side design question),
+  and **self-managed reconnect** with full-jitter exponential backoff
+  2→300s (mqtt.js built-in reconnect disabled; subscriptions replayed
+  on every reconnect). `publish` rejects while disconnected — that's
+  what makes the outbox hold-and-drain behave correctly.
+- **`provisioning.js` + `tools/provision-panel.js`**: Fleet
+  Provisioning by claim over plain MQTT topics
+  (`$aws/certificates/create/json` → `$aws/provisioning-templates/{t}/provision/json`),
+  writing the operational cert/key to the config's paths (key 0600).
+  The CLI refuses to run on an already-provisioned panel without
+  `--force`. Cloud-side deliverables: `docs/aws/iot-policy-panel.template.json`
+  (per-device policy locking each panel to its own namespace via thing
+  attributes), `docs/aws/provisioning-template.json`, `docs/aws/README.md`
+  (admin runbook + per-panel commissioning steps).
+- **Transport selection is automatic**: `getGateway()` (no args) calls
+  `createGatewayFromEdgeConfig()` — if the edge config loads and the
+  cert/key/CA files exist, it builds the AWS transport and connects;
+  otherwise it falls back to the loopback with a `reason` string
+  (surfaced via `getGatewayInfo()` and the flush status's
+  `transport_mode`/`connected` fields). A provisioning problem never
+  takes down local monitoring. This composition root is the ONE place
+  that may require from `src/adapters/aws` — gateway logic still sees
+  only the transport interface.
+
+**Not yet done**: real AWS account inputs (endpoint, claim certs,
+template registration), live connect from the panel, Slice 7's
+shadow/cmd config channel subscription, and the combined 24h soak.
 
 ## Working agreements
 
