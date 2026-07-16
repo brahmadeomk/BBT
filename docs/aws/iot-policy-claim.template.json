@@ -1,0 +1,35 @@
+{
+  "__comment": "Policy for the CLAIM certificate (Fleet Provisioning bootstrap only). Attach to the claim cert, never to a panel's operational cert. It can connect and run the provisioning exchange for the bt-panel-provisioning template - nothing else: no telemetry, no alarms, no shadow. Replace REGION and ACCOUNT_ID.",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "iot:Connect",
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iot:Publish",
+      "Resource": [
+        "arn:aws:iot:REGION:ACCOUNT_ID:topic/$aws/certificates/create/json",
+        "arn:aws:iot:REGION:ACCOUNT_ID:topic/$aws/provisioning-templates/bt-panel-provisioning/provision/json"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iot:Subscribe",
+      "Resource": [
+        "arn:aws:iot:REGION:ACCOUNT_ID:topicfilter/$aws/certificates/create/json/*",
+        "arn:aws:iot:REGION:ACCOUNT_ID:topicfilter/$aws/provisioning-templates/bt-panel-provisioning/provision/json/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iot:Receive",
+      "Resource": [
+        "arn:aws:iot:REGION:ACCOUNT_ID:topic/$aws/certificates/create/json/*",
+        "arn:aws:iot:REGION:ACCOUNT_ID:topic/$aws/provisioning-templates/bt-panel-provisioning/provision/json/*"
+      ]
+    }
+  ]
+}
