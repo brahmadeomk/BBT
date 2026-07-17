@@ -40,6 +40,15 @@ const CREATE_TOPIC = '$aws/certificates/create/json';
 function provisionOverMqtt({ transport, templateName, identity, timeoutMs = 30000 }) {
   const provisionTopic = `$aws/provisioning-templates/${templateName}/provision/json`;
 
+  // SUBACK-aware when the transport supports it (AwsIotTransport does):
+  // the request must not be published until the broker has ACKed both
+  // response subscriptions, or the response can be silently lost -
+  // seen live as intermittent "no response within 30000ms" timeouts.
+  const subscribeReady = (topic, handler) =>
+    typeof transport.subscribeAsync === 'function'
+      ? transport.subscribeAsync(topic, handler)
+      : Promise.resolve(transport.subscribe(topic, handler));
+
   const waitFor = (acceptedTopic, rejectedTopic, publishTopic, payload, stage) =>
     new Promise((resolve, reject) => {
       // deliberately NOT unref'd: this timer is what keeps the short-lived
@@ -48,18 +57,21 @@ function provisionOverMqtt({ transport, templateName, identity, timeoutMs = 3000
         () => reject(new Error(`${stage}: no response from AWS IoT within ${timeoutMs}ms`)),
         timeoutMs
       );
-      transport.subscribe(acceptedTopic, (msg) => {
-        clearTimeout(timer);
-        resolve(msg);
-      });
-      transport.subscribe(rejectedTopic, (msg) => {
-        clearTimeout(timer);
-        reject(new Error(`${stage} rejected: ${JSON.stringify(msg)}`));
-      });
-      transport.publish(publishTopic, payload, 1).catch((err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
+      Promise.all([
+        subscribeReady(acceptedTopic, (msg) => {
+          clearTimeout(timer);
+          resolve(msg);
+        }),
+        subscribeReady(rejectedTopic, (msg) => {
+          clearTimeout(timer);
+          reject(new Error(`${stage} rejected: ${JSON.stringify(msg)}`));
+        }),
+      ])
+        .then(() => transport.publish(publishTopic, payload, 1))
+        .catch((err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
     });
 
   return waitFor(`${CREATE_TOPIC}/accepted`, `${CREATE_TOPIC}/rejected`, CREATE_TOPIC, {}, 'certificate create').then(

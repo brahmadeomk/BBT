@@ -1,5 +1,5 @@
 {
-  "__comment": "AWS IoT Fleet Provisioning template (Slice 6 deliverable). Register as e.g. 'bt-panel-provisioning' with a pre-provisioning Lambda hook if allow-listing serials. tools/provision-panel.js sends parameters CustomerId/SiteId/PanelId/SerialNumber; the thing name and topic namespace derive from them. Attach the per-device policy (iot-policy-panel.template.json, registered as 'bt-panel-policy').",
+  "__comment": "AWS IoT Fleet Provisioning template (Slice 6 deliverable). Register as e.g. 'bt-panel-provisioning' with a pre-provisioning Lambda hook if allow-listing serials. tools/provision-panel.js sends parameters CustomerId/SiteId/PanelId/SerialNumber; the thing name and topic namespace derive from them. Attach the per-device policy (iot-policy-panel.template.json, registered as 'bt-panel-policy'). REQUIRES the thing type 'bt-panel' to exist first (aws iot create-thing-type --thing-type-name bt-panel) - AWS allows at most 3 attributes on an untyped thing, and this template sets 4.",
   "Parameters": {
     "CustomerId": { "Type": "String" },
     "SiteId": { "Type": "String" },
@@ -27,6 +27,7 @@
         "ThingName": {
           "Fn::Join": ["", ["bt-", { "Ref": "CustomerId" }, "-", { "Ref": "SiteId" }, "-", { "Ref": "PanelId" }]]
         },
+        "ThingTypeName": "bt-panel",
         "AttributePayload": {
           "customer_id": { "Ref": "CustomerId" },
           "site_id": { "Ref": "SiteId" },

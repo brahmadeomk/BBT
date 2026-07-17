@@ -794,3 +794,26 @@ companion project chat and recorded in the workplan/design docs there).
   Slice 6 "Done when": real AWS account inputs (ATS endpoint, claim
   certs, registered template), first live connect, then the combined
   24h soak.
+
+- **2026-07-16** — First live Fleet Provisioning run (real AWS
+  account, real claim cert - the connection itself worked) surfaced
+  two fixes:
+  - **AWS rejects >3 attributes on an untyped thing** ("To use more
+    than 3 attributes, a thing must have a type specified") - our
+    template stamps 4 (customer/site/panel/serial). Chose a thing
+    type over dropping hw_serial: `bt-panel` thing type added to the
+    template (ThingTypeName) and as runbook step A4, keeping the
+    serial in the registry for commissioning audits. Existing
+    registrations upgrade via create-provisioning-template-version
+    --set-as-default (documented in A5).
+  - **Intermittent "no response within 30000ms" timeouts** (some runs
+    timed out where later identical runs got a real response): the
+    provisioning flow published its request immediately after calling
+    subscribe(), before the broker SUBACKed the response
+    subscriptions - a classic MQTT request/response race, invisible
+    on the loopback (synchronous) and only manifest against the real
+    broker. Added AwsIotTransport.subscribeAsync (resolves on SUBACK)
+    and provisionOverMqtt now awaits BOTH response subscriptions
+    before publishing each request. Regression tests: SUBACK-ordering
+    asserted via an event-sequenced fake transport; subscribeAsync
+    accept/reject paths.

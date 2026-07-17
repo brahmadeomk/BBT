@@ -77,7 +77,21 @@ managed policy **`AWSIoTThingsRegistration`** is attached → name it
 `bt-provisioning-role` → create. Note its ARN
 (`arn:aws:iam::<account>:role/bt-provisioning-role`).
 
-### A4. Register the provisioning template (`bt-panel-provisioning`)
+### A4. Create the thing type (`bt-panel`)
+
+AWS allows at most **3 attributes on a thing without a thing type**,
+and our template stamps 4 (customer/site/panel/serial) — skipping this
+step makes registration fail with *"To use more than 3 attributes, a
+thing must have a type specified"*.
+
+Console: **AWS IoT Core → All devices → Thing types → Create thing
+type** → name `bt-panel`. CLI:
+
+```bash
+aws iot create-thing-type --thing-type-name bt-panel --region ap-south-1
+```
+
+### A5. Register the provisioning template (`bt-panel-provisioning`)
 
 Console: **AWS IoT Core → Connect many devices → Provisioning
 templates → Create provisioning template** →
@@ -85,7 +99,7 @@ templates → Create provisioning template** →
 
 - Name: `bt-panel-provisioning`
 - Provisioning role: `bt-provisioning-role`
-- Claim certificate policy: you'll attach it in A5 (skip auto-create
+- Claim certificate policy: you'll attach it in A6 (skip auto-create
   here if the wizard offers, or let it create one and replace its
   document with `iot-policy-claim.template.json` after)
 - Status: **Active**
@@ -107,7 +121,18 @@ aws iot create-provisioning-template \
     --enabled
 ```
 
-### A5. Create the claim certificate (what technicians carry)
+**Already registered the template with an older body?** Templates are
+versioned — push the current body as a new default version (console:
+open the template → *Edit template document* → paste → save; or CLI):
+
+```bash
+aws iot create-provisioning-template-version \
+    --template-name bt-panel-provisioning \
+    --template-body file:///tmp/template-body.json \
+    --set-as-default
+```
+
+### A6. Create the claim certificate (what technicians carry)
 
 1. Console: **AWS IoT Core → Security → Certificates → Add
    certificate → Create certificate** (auto-generate) → **Download**
@@ -179,7 +204,7 @@ warns if it doesn't.
 
 ### B3. Copy the claim material and provision
 
-Copy `claim.pem.crt`/`claim.pem.key` (from A5) to
+Copy `claim.pem.crt`/`claim.pem.key` (from A6) to
 `/etc/busduct/claim/`, then:
 
 ```bash
@@ -331,7 +356,8 @@ Don't enable it before the rule exists — messages published to
 | Connects, then drops every few seconds | Another client using the same client ID (AWS kicks the older one) — is the panel provisioned twice, or a test client connected as the thing? |
 | `provision-panel.js`: "certificate create rejected" | Claim cert inactive, or `bt-claim-policy` not attached to it |
 | `provision-panel.js`: "register thing rejected" | Template not Active, name mismatch in `--template=`, or provisioning role missing `AWSIoTThingsRegistration` |
-| `provision-panel.js`: "no response within 30000ms" | Endpoint/port unreachable (firewall must allow outbound TCP 8883), or wrong region endpoint |
+| `provision-panel.js`: "register thing rejected ... To use more than 3 attributes, a thing must have a type specified" | The `bt-panel` thing type is missing (step A4), or the registered template predates `ThingTypeName` — create the thing type and push a new default template version (see A5) |
+| `provision-panel.js`: "no response within 30000ms" | Endpoint/port unreachable (firewall must allow outbound TCP 8883), or wrong region endpoint. (Older repo versions also had a subscribe/publish race causing this intermittently — `git pull` if you see it with a reachable endpoint) |
 | Telemetry visible in test client but nothing in your data store | That's Part D — the test client shows broker traffic; routing to storage needs an IoT Rule |
 | Messages stop after enabling Basic Ingest | `btTelemetry` rule doesn't exist/enabled in that region — flip `use_basic_ingest` back to `false` until it does |
 

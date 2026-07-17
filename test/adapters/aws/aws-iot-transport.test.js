@@ -21,8 +21,9 @@ class FakeMqttClient extends EventEmitter {
     this.published.push({ topic, body, qos: opts.qos });
     cb(null);
   }
-  subscribe(topic) {
+  subscribe(topic, opts, cb) {
     this.subscribedTopics.push(topic);
+    if (typeof cb === 'function') setImmediate(() => cb(this.subackError ?? null)); // SUBACK
   }
   end() {
     this.ended = true;
@@ -100,6 +101,28 @@ describe('AwsIotTransport - publish/subscribe', () => {
     dials[0].client.emit('connect');
     await transport.publish('dt/c1024/s02/p07/tel', { joints: {} }, 1);
     assert.deepEqual(dials[0].client.published, [{ topic: 'dt/c1024/s02/p07/tel', body: '{"joints":{}}', qos: 1 }]);
+    transport.close();
+  });
+
+  test('subscribeAsync resolves only after the broker SUBACKs (request/response safety)', async () => {
+    const { transport, dials } = makeTransport();
+    transport.connect();
+    dials[0].client.emit('connect');
+    let acked = false;
+    const p = transport.subscribeAsync('$aws/certificates/create/json/accepted', () => {}).then(() => (acked = true));
+    assert.equal(acked, false, 'not resolved before the SUBACK callback fires');
+    await p;
+    assert.equal(acked, true);
+    assert.ok(dials[0].client.subscribedTopics.includes('$aws/certificates/create/json/accepted'));
+    transport.close();
+  });
+
+  test('subscribeAsync surfaces a broker subscription rejection', async () => {
+    const { transport, dials } = makeTransport();
+    transport.connect();
+    dials[0].client.emit('connect');
+    dials[0].client.subackError = new Error('not authorized');
+    await assert.rejects(() => transport.subscribeAsync('forbidden/topic', () => {}), /not authorized/);
     transport.close();
   });
 

@@ -87,6 +87,46 @@ describe('provisionOverMqtt', () => {
     );
   });
 
+  test('publishes each request only after BOTH response subscriptions are SUBACKed (the live race)', async () => {
+    const events = [];
+    const handlers = new Map();
+    const transport = {
+      subscribeAsync(topic, handler) {
+        handlers.set(topic, handler);
+        return new Promise((resolve) =>
+          setImmediate(() => {
+            events.push(`suback:${topic}`);
+            resolve();
+          })
+        );
+      },
+      publish(topic, payload) {
+        events.push(`publish:${topic}`);
+        queueMicrotask(() => {
+          if (topic === CREATE_TOPIC) {
+            handlers.get(`${CREATE_TOPIC}/accepted`)({
+              certificateId: 'c',
+              certificatePem: 'p',
+              privateKey: 'k',
+              certificateOwnershipToken: 'tok',
+            });
+          } else {
+            handlers.get(`${topic}/accepted`)({ thingName: 'bt-x' });
+          }
+        });
+        return Promise.resolve();
+      },
+    };
+
+    await provisionOverMqtt({ transport, templateName: 't', identity });
+
+    const createPublishIdx = events.indexOf(`publish:${CREATE_TOPIC}`);
+    assert.ok(events.indexOf(`suback:${CREATE_TOPIC}/accepted`) < createPublishIdx, 'accepted SUBACK before publish');
+    assert.ok(events.indexOf(`suback:${CREATE_TOPIC}/rejected`) < createPublishIdx, 'rejected SUBACK before publish');
+    const provisionPublishIdx = events.findIndex((e) => e.startsWith('publish:$aws/provisioning-templates'));
+    assert.ok(events.indexOf('suback:$aws/provisioning-templates/t/provision/json/accepted') < provisionPublishIdx);
+  });
+
   test('times out with a clear message when AWS never answers', async () => {
     const silent = { subscribe() {}, publish: () => Promise.resolve() };
     await assert.rejects(

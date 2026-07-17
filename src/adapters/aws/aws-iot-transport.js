@@ -167,6 +167,24 @@ class AwsIotTransport {
     this.subscriptions.get(topic).push(handler);
   }
 
+  /**
+   * Like subscribe(), but resolves only once the broker has ACKed the
+   * subscription (SUBACK). Needed by request/response flows over MQTT
+   * (Fleet Provisioning): publishing the request before the response
+   * subscription is ACKed silently loses the response - seen live as
+   * intermittent "no response from AWS IoT within 30000ms".
+   */
+  subscribeAsync(topic, handler) {
+    if (!this.subscriptions.has(topic)) this.subscriptions.set(topic, []);
+    this.subscriptions.get(topic).push(handler);
+    if (!this.connected || !this.client) {
+      return Promise.resolve(); // replayed (and ACKed) on the next connect
+    }
+    return new Promise((resolve, reject) => {
+      this.client.subscribe(topic, { qos: 1 }, (err) => (err ? reject(err) : resolve()));
+    });
+  }
+
   isConnected() {
     return this.connected;
   }
