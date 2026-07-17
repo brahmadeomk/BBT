@@ -19,18 +19,21 @@
 /** ProcessLogic joint tap -> batcher. Ignores anything that isn't a joint KPI. */
 function ingestKpiTap(gateway, msg) {
   if (msg?.topic !== 'joint' || !msg.payload || typeof msg.payload !== 'object') return;
+  gateway.soak?.kpi(msg.payload);
   gateway.batcher.ingestJointKpi(msg.payload);
 }
 
 /** Alarm Manager 'active' tap -> alarm publisher (RAISE on genuinely-new instanceIds only). */
 function ingestAlarmActiveTap(gateway, msg) {
   if (!Array.isArray(msg?.payload)) return;
+  gateway.soak?.alarmTap('active', msg.payload);
   gateway.alarmPublisher.ingestActiveAlarms(msg.payload);
 }
 
 /** Alarm Manager 'clearedNow' tap -> alarm publisher (every item is a CLEAR). */
 function ingestAlarmClearedTap(gateway, msg) {
   if (!Array.isArray(msg?.payload)) return;
+  gateway.soak?.alarmTap('cleared', msg.payload);
   gateway.alarmPublisher.ingestClearedAlarms(msg.payload);
 }
 
@@ -43,7 +46,7 @@ function ingestAlarmClearedTap(gateway, msg) {
  */
 function flushTelemetry(gateway, intervalMin) {
   const chunks = gateway.batcher.flush(intervalMin);
-  return {
+  const status = {
     flushed_chunks: chunks,
     outbox: gateway.outbox.counts(),
     outbox_bytes: gateway.outbox.totalSizeBytes(),
@@ -52,6 +55,8 @@ function flushTelemetry(gateway, intervalMin) {
     // loopback only - the AWS transport keeps no publish record (the cloud does)
     ...(gateway.transport.published ? { published_total: gateway.transport.published.length } : {}),
   };
+  gateway.soak?.flushStatus(status);
+  return status;
 }
 
 /**

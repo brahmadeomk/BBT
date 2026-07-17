@@ -5,6 +5,7 @@ const { Outbox } = require('../outbox');
 const { Batcher } = require('../batcher');
 const { AlarmPublisher } = require('../alarm-publisher');
 const { Heartbeat } = require('../heartbeat');
+const { createSoakRecorder, wrapTransportForSoak } = require('../soak-recorder');
 const handlers = require('./gateway-handler');
 
 /**
@@ -56,13 +57,23 @@ function resolveTopic(template, identity) {
  * @param {object} [opts.transport] - custom transport (tests); default capped LoopbackTransport
  */
 function createGateway({ outboxDir = DEFAULT_OUTBOX_DIR, identity = DEFAULT_IDENTITY, topics, transport } = {}) {
-  const t = transport ?? new LoopbackTransport({ maxPublished: 500 });
+  let t = transport ?? new LoopbackTransport({ maxPublished: 500 });
+
+  // Soak evidence collection (combined Slice 5+6 soak) - inert unless
+  // BUSDUCT_SOAK_LOG is set in Node-RED's environment.
+  const soak = createSoakRecorder();
+  if (soak) {
+    t.onConnectionChange((connected) => soak.connection(connected));
+    t = wrapTransportForSoak(t, soak);
+  }
+
   const outbox = new Outbox({ dir: outboxDir, transport: t });
   const telemetryTopic = topics?.telemetry ?? resolveTopic(TOPIC_TEMPLATES.telemetry, identity);
   const alarmTopic = topics?.alarm ?? resolveTopic(TOPIC_TEMPLATES.alarm, identity);
 
   const gateway = {
     transport: t,
+    soak,
     outbox,
     batcher: new Batcher({ outbox, topic: telemetryTopic }),
     alarmPublisher: new AlarmPublisher({ outbox, topic: alarmTopic }),

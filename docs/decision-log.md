@@ -817,3 +817,52 @@ companion project chat and recorded in the workplan/design docs there).
     before publishing each request. Regression tests: SUBACK-ordering
     asserted via an event-sequenced fake transport; subscribeAsync
     accept/reject paths.
+
+- **2026-07-17** — **Milestone: first live panel on AWS IoT Core.**
+  After the thing-type + SUBACK fixes, provisioning completed and the
+  gateway came up with transport_mode "aws", connected true -
+  telemetry flowing every 10 min (user's debug screenshots, 15:48 and
+  15:58 flushes, outbox draining). Slice 6's "reference panel
+  publishes batched telemetry and alarms to AWS IoT Core" is met; the
+  resilience half (router reboot, 24h link pull, outbox recovery)
+  awaits the combined soak. Advised the user that the MQTT test
+  client is a live window only, and to add a CloudWatch Logs IoT rule
+  for retained inspection until the real cloud data pipeline
+  (Timestream/S3/dashboard - a design-chat decision) exists.
+
+- **2026-07-17** — Combined 24h soak tooling (recorder + verifier),
+  so the soak acceptance is a mechanical check, not eyeballing:
+
+  - `src/cloud-gateway/soak-recorder.js`, enabled only when
+    BUSDUCT_SOAK_LOG=<dir> is in Node-RED's environment (inert
+    otherwise; recorder write errors are swallowed - evidence
+    collection must never take down the gateway). Records JSON-lines:
+    kpi.jsonl (every joint sample entering the batcher), alarm-taps
+    .jsonl, flush-status.jsonl, published.jsonl (messages actually
+    accepted by the transport, stamped with drain time), connection
+    .jsonl. Wired in createGateway via a transport decorator +
+    optional-chained calls in the tap handlers.
+  - `src/cloud-gateway/soak-verify.js` + `tools/soak-verify.js`:
+    recomputes every published interval's per-joint aggregates from
+    the raw samples (window = between consecutive batch timestamps;
+    250ms boundary slack for millisecond ties) and diffs against what
+    was published; replays the alarm taps through the publisher's
+    dedupe rules and requires the published RAISE/CLEAR sequence to
+    match in order (trailing still-queued alarms tolerated via the
+    last flush status's outbox count - reordering/loss never);
+    reports offline windows and per-message hold times
+    (published_at - edge timestamp) proving hold-and-drain.
+  - **"Aggregates vs historian" is checked against the KPI tap
+    recording**, which is the same ProcessLogic stream the historian
+    consumes - ground truth captured at the source, with manual
+    historian spot-checks remaining a human step in the runbook.
+  - The CLI lives in /tools, not /test (where the workplan's prose
+    puts soak scripts), because `node --test` executes everything
+    under /test - a runnable CLI there would fail the suite. The
+    verification logic is a library under src with its unit tests in
+    /test (7 new: recorder wiring end-to-end incl. inertness, clean
+    recording passes, tampered aggregate flagged, reordered alarms
+    flagged, trailing queued alarm tolerated, link-pull hold times).
+
+  263 tests passing. Runbook gained §C5 (systemd env override, run
+  with drills, verify command, what PASS proves).

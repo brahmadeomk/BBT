@@ -325,6 +325,52 @@ historian: for a handful of joints, compare each interval's
 `dt_min/dt_max/dt_avg/t_max` against the historian's raw samples for
 the same window.
 
+### C5. Running the combined 24 h soak (mechanically verified)
+
+The repo ships a recorder + verifier so the soak acceptance is checked
+by tooling, not eyeballs.
+
+1. **Enable evidence recording** — give Node-RED the env var and
+   restart:
+
+   ```bash
+   sudo mkdir -p /var/busduct/soak && sudo chown pi:pi /var/busduct/soak
+   sudo systemctl edit nodered
+   # in the editor add:
+   #   [Service]
+   #   Environment=BUSDUCT_SOAK_LOG=/var/busduct/soak
+   sudo systemctl restart nodered
+   ```
+
+   While set, the gateway appends JSON-lines evidence:
+   every raw KPI sample entering the batcher (`kpi.jsonl` — the same
+   stream the historian consumes, i.e. ground truth), every alarm tap
+   (`alarm-taps.jsonl`), every flush status, every message actually
+   accepted by AWS (`published.jsonl`, with drain time), and every
+   connect/disconnect (`connection.jsonl`). Unset the variable (and
+   restart) after the soak — it's inert then.
+
+2. **Run for 24 h**, performing the C4 drills during the window: at
+   least one ~1 h link pull, one router reboot, and (ideally) the
+   long pull. Trigger at least one real alarm RAISE/CLEAR (C2) so
+   alarm parity isn't vacuous.
+
+3. **Verify**:
+
+   ```bash
+   node tools/soak-verify.js /var/busduct/soak
+   ```
+
+   PASS means: every published interval's per-joint aggregates
+   (dt_min/dt_max/dt_avg, ror_max, t_max, ambient) exactly match a
+   recomputation from the raw KPI samples; the published alarm
+   RAISE/CLEAR sequence matches the locally-observed transitions in
+   order (a trailing still-queued alarm is tolerated, a reorder or
+   loss is not); and the report lists each offline window with the
+   maximum message hold time — messages held during pulls must appear
+   drained with their original edge timestamps. That is the combined
+   Slice 5+6 "Done when" in one exit code.
+
 ---
 
 ## Part D — optional: Basic Ingest (cost optimization, later)

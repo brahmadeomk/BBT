@@ -448,9 +448,27 @@ Mosquitto):
   that may require from `src/adapters/aws` — gateway logic still sees
   only the transport interface.
 
-**Not yet done**: real AWS account inputs (endpoint, claim certs,
-template registration), live connect from the panel, Slice 7's
-shadow/cmd config channel subscription, and the combined 24h soak.
+**Live connect achieved (2026-07-17)**: the real panel provisioned via
+Fleet Provisioning (after two live fixes: `bt-panel` thing type — AWS
+caps untyped things at 3 attributes — and a SUBACK race in the
+provisioning request/response flow) and now publishes to AWS IoT Core:
+`transport_mode: "aws"`, `connected: true`, telemetry flowing every
+10 min.
+
+**Soak tooling** (`BUSDUCT_SOAK_LOG=<dir>` in Node-RED's environment,
+else fully inert): `src/cloud-gateway/soak-recorder.js` captures raw
+KPI/alarm taps, flush statuses, accepted publishes (with drain time),
+and connection transitions as JSON-lines; `tools/soak-verify.js`
+(logic in `src/cloud-gateway/soak-verify.js` — the CLI lives in
+/tools because `node --test` executes everything under /test)
+recomputes every interval's aggregates from the raw samples, checks
+alarm RAISE/CLEAR parity in order, and reports offline windows +
+hold-and-drain times. See docs/aws/README.md §C5 for the procedure.
+
+**Not yet done**: actually running the combined 24h soak with the C4
+drills (that's the remaining Slice 5+6 "Done when"), Slice 7's
+shadow/cmd config channel subscription, and the cloud-side data
+pipeline (IoT Rule → Timestream/S3 — a design-chat decision).
 
 ## Working agreements
 
