@@ -60,7 +60,71 @@ describe('collectPiHealth', () => {
         throw new Error('vcgencmd: not found');
       },
     });
-    assert.deepEqual(health, { cpu_temp_c: null, mac_id: null, ram_free_mb: null, ram_available_mb: null, low_voltage: null });
+    assert.deepEqual(health, { cpu_temp_c: null, mac_id: null, ram_free_mb: null, ram_available_mb: null, low_voltage: null, network: null });
+  });
+});
+
+const ROUTE_VIA = (iface) =>
+  `Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n${iface}\t00000000\tC0A80101\t0003\t0\t0\t100\t00000000\n${iface}\tC0A80100\t00000000\t0001\t0\t0\t100\tFFFFFF00\n`;
+
+describe('collectPiHealth - network', () => {
+  test('Wi-Fi uplink includes signal dBm and link quality from /proc/net/wireless', () => {
+    const files = {
+      ...PI_FILES,
+      '/proc/net/route': ROUTE_VIA('wlan0'),
+      '/proc/net/wireless':
+        'Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE\n face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22\n wlan0: 0000   54.  -56.  -256        0      0      0      0      0        0\n',
+    };
+    const health = collectPiHealth({ fs: fakeFs(files), execFileSync: () => 'throttled=0x0\n', env: {} });
+    assert.deepEqual(health.network, { interface: 'wlan0', type: 'wifi', wifi: { signal_dbm: -56, link_quality: 54 } });
+  });
+
+  test('ethernet uplink reports type only (no signal concept)', () => {
+    const files = { ...PI_FILES, '/proc/net/route': ROUTE_VIA('eth0') };
+    const health = collectPiHealth({ fs: fakeFs(files), execFileSync: () => 'throttled=0x0\n', env: {} });
+    assert.deepEqual(health.network, { interface: 'eth0', type: 'ethernet' });
+  });
+
+  test('cellular uplink (SIM7600G as usb0) reads ModemManager percent and AT+CSQ dBm', () => {
+    const files = { ...PI_FILES, '/proc/net/route': ROUTE_VIA('usb0') };
+    const health = collectPiHealth({
+      fs: fakeFs(files),
+      execFileSync: (cmd, args) => {
+        if (cmd === 'vcgencmd') return 'throttled=0x0\n';
+        if (cmd === 'mmcli') return "  signal quality: '75' (recent)\n";
+        if (cmd === 'stty') return '';
+        if (cmd === 'sh') return 'AT+CSQ\r\r\n+CSQ: 22,0\r\n\r\nOK\r\n';
+        throw new Error(`unexpected ${cmd}`);
+      },
+      env: { BUSDUCT_MODEM_AT_PORT: '/dev/ttyUSB2' },
+    });
+    assert.deepEqual(health.network, {
+      interface: 'usb0',
+      type: 'cellular',
+      cellular: { signal_percent: 75, signal_dbm: -69, csq: 22 }, // -113 + 2*22
+    });
+  });
+
+  test('cellular with neither ModemManager nor AT port still reports the uplink type', () => {
+    const files = { ...PI_FILES, '/proc/net/route': ROUTE_VIA('ppp0') };
+    const health = collectPiHealth({
+      fs: fakeFs(files),
+      execFileSync: (cmd) => {
+        if (cmd === 'vcgencmd') return 'throttled=0x0\n';
+        throw new Error('not installed');
+      },
+      env: {},
+    });
+    assert.deepEqual(health.network, {
+      interface: 'ppp0',
+      type: 'cellular',
+      cellular: { signal_percent: null, signal_dbm: null, csq: null },
+    });
+  });
+
+  test('no default route -> network null, nothing throws', () => {
+    const health = collectPiHealth({ fs: fakeFs(PI_FILES), execFileSync: () => 'throttled=0x0\n', env: {} });
+    assert.equal(health.network, null);
   });
 });
 

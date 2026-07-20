@@ -57,7 +57,7 @@ function withPayload(msg, payload) {
  * @param {Array} deps.zones - legacy zone_master
  * @param {import('../store').ConfigStore} deps.store
  * @param {string} [deps.user]
- * @returns {{msg: object|null, draft: Array|null, resendNeeded?: boolean}} draft is null when nothing
+ * @returns {{msg: object|null, draft: Array|null, resendNeeded?: boolean, audit?: object|null}} draft is null when nothing
  *   needs persisting; resendNeeded is true only after a successful 'apply' whose compiled Nano job
  *   actually differs from what's currently applied (see nano-compiler.js's nanoJobsEqual) - a
  *   joint/zone-only edit leaves modbus.slaves/buses untouched, so it does NOT trigger a resend
@@ -112,11 +112,27 @@ function handleJointMasterMessage(msg, deps) {
     j.editing = false;
     joints[index] = j;
 
-    return { msg: withPayload(msg, { joints, zones, success: 'Saved', action: 'save' }), draft: joints };
+    return {
+      msg: withPayload(msg, { joints, zones, success: 'Saved', action: 'save' }),
+      draft: joints,
+      audit: {
+        timestamp: new Date().toISOString(),
+        user: msg.payload?.user || 'UI',
+        action: 'SAVE_ROW',
+        details: `Joint ${j.joint_id}: slave ${j.slaveID} ch ${j.channel}, zone ${j.zone_id}`,
+      },
+    };
   }
 
+  let deleteAudit = null;
   if (action === 'delete' && joints[index]) {
-    joints.splice(index, 1);
+    const removed = joints.splice(index, 1)[0];
+    deleteAudit = {
+      timestamp: new Date().toISOString(),
+      user: msg.payload?.user || 'UI',
+      action: 'DELETE_ROW',
+      details: `Joint ${removed.joint_id || '(unnamed)'} removed from draft`,
+    };
   }
 
   const anyEditing = joints.some((j) => j.editing === true);
@@ -125,7 +141,7 @@ function handleJointMasterMessage(msg, deps) {
   }
 
   const mutatingActions = new Set(['add', 'add_below', 'edit', 'delete']);
-  return { msg: withPayload(msg, { joints, zones }), draft: mutatingActions.has(action) ? joints : null };
+  return { msg: withPayload(msg, { joints, zones }), draft: mutatingActions.has(action) ? joints : null, audit: deleteAudit };
 }
 
 function applyJoints(msg, joints, zones, slaveList, store, user) {
@@ -248,6 +264,12 @@ function applyJoints(msg, joints, zones, slaveList, store, user) {
         action: 'apply',
       }),
       draft: null,
+      audit: {
+        timestamp: new Date().toISOString(),
+        user,
+        action: 'APPLY_CONFIG',
+        details: `REJECTED: ${result.errors.map((e) => `${e.rule}: ${e.message}`).join('; ')}`,
+      },
     };
   }
 
@@ -260,6 +282,12 @@ function applyJoints(msg, joints, zones, slaveList, store, user) {
     // compiled job itself differs, since a resend briefly disrupts live polling (the
     // firmware re-inits Serial1/timeout on every job update - see nano-compiler.js).
     resendNeeded: !nanoJobsEqual(currentModbusJoints, newDoc),
+    audit: {
+      timestamp: new Date().toISOString(),
+      user,
+      action: 'APPLY_CONFIG',
+      details: `${newJoints.length} joint(s) applied (modbus v${newDoc.config_domain_versions.modbus}, joints v${newDoc.config_domain_versions.joints})`,
+    },
   };
 }
 

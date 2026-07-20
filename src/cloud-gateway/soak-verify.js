@@ -57,7 +57,7 @@ function isHeartbeat(entry) {
 }
 
 function isAlarmEvent(entry) {
-  return entry.payload && typeof entry.payload === 'object' && (entry.payload.action === 'RAISE' || entry.payload.action === 'CLEAR');
+  return entry.payload && typeof entry.payload === 'object' && ['RAISE', 'CLEAR', 'ACK'].includes(entry.payload.action);
 }
 
 function aggregate(samples) {
@@ -141,16 +141,20 @@ function verifyTelemetry(kpi, published) {
 
 function verifyAlarms(alarmTaps, published, flushStatus) {
   // replay the publisher's dedupe over the tap recording -> expected sequence
+  // (mirrors AlarmPublisher: RAISE on new ids, ACK on NACK->ACK status change)
   const expected = [];
-  const known = new Set();
+  let known = new Map(); // instanceId -> last status
   for (const tap of alarmTaps) {
     if (tap.kind === 'active') {
-      const incoming = new Set(tap.alarms.map((a) => a.instanceId));
+      const incoming = new Map(tap.alarms.map((a) => [a.instanceId, a.status]));
       for (const alarm of tap.alarms) {
-        if (!known.has(alarm.instanceId)) expected.push({ action: 'RAISE', instanceId: alarm.instanceId });
+        if (!known.has(alarm.instanceId)) {
+          expected.push({ action: 'RAISE', instanceId: alarm.instanceId });
+        } else if (known.get(alarm.instanceId) === 'ACTIVE_NACK' && alarm.status === 'ACTIVE_ACK') {
+          expected.push({ action: 'ACK', instanceId: alarm.instanceId });
+        }
       }
-      known.clear();
-      for (const id of incoming) known.add(id);
+      known = incoming;
     } else if (tap.kind === 'cleared') {
       for (const alarm of tap.alarms) {
         known.delete(alarm.instanceId);

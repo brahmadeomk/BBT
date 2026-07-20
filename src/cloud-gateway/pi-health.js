@@ -21,14 +21,24 @@ const { execFileSync: nodeExecFileSync } = require('node:child_process');
  *                  right now, bit 16 = has occurred since boot; bits 2/18
  *                  the same for actual throttling. Raw hex included for
  *                  cloud-side decoding of the remaining bits.
+ *   network        active default-route interface (/proc/net/route) classified
+ *                  as wifi/ethernet/cellular. Wi-Fi adds signal from
+ *                  /proc/net/wireless (level dBm + link quality). Cellular
+ *                  (e.g. the SIM7600G USB modem, usually usb0/wwan0/ppp0)
+ *                  adds signal via ModemManager (`mmcli -m any`, percent) when
+ *                  installed; if BUSDUCT_MODEM_AT_PORT is set (e.g.
+ *                  /dev/ttyUSB2 - the SIM7600's spare AT port, safe to query
+ *                  during a data session), AT+CSQ is queried directly for
+ *                  rssi_dbm as well.
  */
-function collectPiHealth({ fs = nodeFs, execFileSync = nodeExecFileSync } = {}) {
+function collectPiHealth({ fs = nodeFs, execFileSync = nodeExecFileSync, env = process.env } = {}) {
   const health = {
     cpu_temp_c: null,
     mac_id: null,
     ram_free_mb: null,
     ram_available_mb: null,
     low_voltage: null,
+    network: collectNetwork({ fs, execFileSync, env }),
   };
 
   try {
@@ -82,6 +92,91 @@ function collectPiHealth({ fs = nodeFs, execFileSync = nodeExecFileSync } = {}) 
   }
 
   return health;
+}
+
+function classifyInterface(iface) {
+  if (/^wl/.test(iface)) return 'wifi';
+  if (/^(eth|en)/.test(iface)) return 'ethernet';
+  if (/^(ppp|wwan|usb)/.test(iface)) return 'cellular'; // SIM7600G shows up as usb0 (RNDIS), wwan0 (QMI) or ppp0
+  return 'unknown';
+}
+
+/** Active default-route interface + signal strength for wifi/cellular uplinks. */
+function collectNetwork({ fs, execFileSync, env }) {
+  let iface = null;
+  try {
+    // /proc/net/route: pick the interface of the default route (Destination 00000000)
+    const lines = fs.readFileSync('/proc/net/route', 'utf8').trim().split('\n').slice(1);
+    for (const line of lines) {
+      const cols = line.trim().split(/\s+/);
+      if (cols[1] === '00000000') {
+        iface = cols[0];
+        break;
+      }
+    }
+  } catch {
+    return null;
+  }
+  if (!iface) return null;
+
+  const type = classifyInterface(iface);
+  const network = { interface: iface, type };
+
+  if (type === 'wifi') {
+    try {
+      // /proc/net/wireless data row: "wlan0: 0000   54.  -56.  -256 ..." -> link quality, level dBm
+      const row = fs
+        .readFileSync('/proc/net/wireless', 'utf8')
+        .split('\n')
+        .find((l) => l.trim().startsWith(`${iface}:`));
+      if (row) {
+        const cols = row.trim().split(/\s+/);
+        const quality = parseFloat(cols[2]);
+        const level = parseFloat(cols[3]);
+        network.wifi = {
+          signal_dbm: Number.isFinite(level) ? level : null,
+          link_quality: Number.isFinite(quality) ? quality : null,
+        };
+      }
+    } catch {
+      /* wireless stats unavailable */
+    }
+  }
+
+  if (type === 'cellular') {
+    const cellular = { signal_percent: null, signal_dbm: null, csq: null };
+    try {
+      // ModemManager, when present, is the least invasive source
+      const out = execFileSync('mmcli', ['-m', 'any'], { encoding: 'utf8', timeout: 3000 });
+      const m = out.match(/signal quality:\s*'?(\d+)'?/i);
+      if (m) cellular.signal_percent = parseInt(m[1], 10);
+    } catch {
+      /* no ModemManager */
+    }
+    const atPort = env.BUSDUCT_MODEM_AT_PORT;
+    if (atPort) {
+      try {
+        // SIM7600G keeps a spare AT port (typically /dev/ttyUSB2) usable during a
+        // data session. stty raw + short read; +CSQ: <rssi>,<ber>, rssi 0-31 -> dBm.
+        execFileSync('stty', ['-F', atPort, 'raw', '-echo', '115200'], { timeout: 2000 });
+        const out = execFileSync('sh', ['-c', `printf 'AT+CSQ\\r' > ${atPort}; timeout 2 head -c 128 ${atPort}`], {
+          encoding: 'utf8',
+          timeout: 5000,
+        });
+        const m = out.match(/\+CSQ:\s*(\d+),/);
+        if (m) {
+          const csq = parseInt(m[1], 10);
+          cellular.csq = csq;
+          if (csq >= 0 && csq <= 31) cellular.signal_dbm = -113 + 2 * csq;
+        }
+      } catch {
+        /* AT port busy/absent */
+      }
+    }
+    network.cellular = cellular;
+  }
+
+  return network;
 }
 
 module.exports = { collectPiHealth };

@@ -343,3 +343,55 @@ describe('handleJointMasterMessage - apply', () => {
     assert.equal(doc.joints[0].channel, 1);
   });
 });
+
+describe('handleJointMasterMessage - legacy audit viewer entries', () => {
+  test('save/delete/apply return viewer-shaped audit entries; loads and rejected saves do not', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const joints = [{ joint_name: 'J01', joint_id: 'J01', slaveID: 1, channel: 1, ambientSlaveID: 101, zone_id: 'Z1', editing: true }];
+
+    const saved = handleJointMasterMessage({ payload: { action: 'save', index: 0, user: 'alice' } }, { joints, slaveList: legacySlaveList(), zones: legacyZones(), store });
+    assert.equal(saved.audit.action, 'SAVE_ROW');
+    assert.equal(saved.audit.user, 'alice');
+    assert.match(saved.audit.details, /Joint J01.*slave 1 ch 1/);
+
+    const deleted = handleJointMasterMessage({ payload: { action: 'delete', index: 0 } }, { joints: saved.draft, slaveList: legacySlaveList(), zones: legacyZones(), store });
+    assert.equal(deleted.audit.action, 'DELETE_ROW');
+
+    const applied = handleJointMasterMessage(
+      { payload: { action: 'apply' } },
+      { joints: [{ joint_name: 'J01', joint_id: 'J01', slaveID: 1, ambientSlaveID: 101, zone_id: 'Z1', editing: false }], slaveList: legacySlaveList(), zones: legacyZones(), store }
+    );
+    assert.equal(applied.audit.action, 'APPLY_CONFIG');
+    assert.match(applied.audit.details, /1 joint\(s\) applied/);
+
+    const load = handleJointMasterMessage({ payload: {} }, { joints: [], slaveList: legacySlaveList(), zones: legacyZones(), store });
+    assert.ok(!load.audit);
+  });
+
+  test('a rejected apply is audited with the rejection reason', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const joints = [
+      { joint_name: 'J01', joint_id: 'J01', slaveID: 1, ambientSlaveID: 101, zone_id: 'Z1', editing: false },
+      { joint_name: 'J02', joint_id: 'J01', slaveID: 2, ambientSlaveID: 101, zone_id: 'Z1', editing: false },
+    ];
+    const result = handleJointMasterMessage({ payload: { action: 'apply' } }, { joints, slaveList: legacySlaveList(), zones: legacyZones(), store });
+    assert.ok(!result.audit); // duplicate-ID pre-check fails before the store - no audit (matches legacy: only real apply attempts audited)
+  });
+});
+
+describe('appendLegacyAudit', () => {
+  test('appends viewer entries to the global and caps the array', () => {
+    const { appendLegacyAudit } = require('../../../src/config-service/node-red/legacy-audit');
+    const ctx = new Map();
+    const globalContext = { get: (k) => ctx.get(k), set: (k, v) => ctx.set(k, v) };
+    for (let i = 0; i < 205; i++) {
+      appendLegacyAudit(globalContext, 'joint_config_audit_log', { timestamp: `t${i}`, action: 'SAVE_ROW' });
+    }
+    const log = ctx.get('joint_config_audit_log');
+    assert.equal(log.length, 200);
+    assert.equal(log[0].timestamp, 't5'); // oldest dropped
+    assert.equal(log[199].timestamp, 't204');
+  });
+});

@@ -52,7 +52,7 @@ const { DEFAULTS } = require('../validate-modbus-joints');
  * @param {{slaves: Array, bus: object}|null} [deps.draft] - persisted draft (global 'modbus_settings_draft')
  * @param {Array} [deps.legacySlaveList] - current global SlaveIDList, for parameterID carry-over and label recovery
  * @param {string} [deps.user]
- * @returns {{msg: object|null, draft: {slaves: Array, bus: object}|null, resendNeeded?: boolean, legacy?: object}}
+ * @returns {{msg: object|null, draft: {slaves: Array, bus: object}|null, resendNeeded?: boolean, legacy?: object, audit?: object|null}}
  */
 function handleModbusSettingsMessage(msg, deps) {
   const { store, draft = null, legacySlaveList = [], user = 'UI' } = deps;
@@ -99,7 +99,16 @@ function handleModbusSettingsMessage(msg, deps) {
     }
     row.editing = false;
     slaves[index] = row;
-    return { msg: withPayload(msg, { slaves, bus, success: 'Saved', action: 'save' }), draft: { slaves, bus } };
+    return {
+      msg: withPayload(msg, { slaves, bus, success: 'Saved', action: 'save' }),
+      draft: { slaves, bus },
+      audit: {
+        timestamp: new Date().toISOString(),
+        user: msg.payload?.user || 'UI',
+        action: 'SAVE_ROW',
+        details: `Modbus channel saved: ${row.label} (unit ${row.unit_address} ch ${row.channel} @ ${row.base_addr})`,
+      },
+    };
   }
 
   if (action === 'delete' && slaves[index]) {
@@ -424,7 +433,16 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
 
   const result = store.applyIfValid('modbus_joints', newDoc, { source: 'local', alarmsDoc: currentAlarms }, user);
   if (!result.applied) {
-    return fail(result.errors.map((e) => `${e.rule}: ${e.message}`).join('; '));
+    const errorText = result.errors.map((e) => `${e.rule}: ${e.message}`).join('; ');
+    return {
+      ...fail(errorText),
+      audit: {
+        timestamp: new Date().toISOString(),
+        user,
+        action: 'APPLY_CONFIG',
+        details: `REJECTED (Modbus settings): ${errorText}`,
+      },
+    };
   }
 
   const idByAddress = new Map(groups.map((g) => [g.unit_address, g.slave_id]));
@@ -434,6 +452,12 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
     draft: { slaves: savedRows, bus },
     resendNeeded: !nanoJobsEqual(current, newDoc),
     legacy: deriveLegacyBridge(newDoc, legacySlaveList),
+    audit: {
+      timestamp: new Date().toISOString(),
+      user,
+      action: 'APPLY_CONFIG',
+      details: `Modbus settings applied: ${newSlaves.length} unit(s) / ${rows.length} channel(s), ${bus.baud} baud (modbus v${newDoc.config_domain_versions.modbus})`,
+    },
   };
 }
 

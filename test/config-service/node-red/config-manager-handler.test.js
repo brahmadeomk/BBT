@@ -21,7 +21,7 @@ describe('handleConfigManagerMessage - msg preservation', () => {
     const store = freshStore();
     const fakeReq = {};
     const fakeRes = {};
-    const result = handleConfigManagerMessage(
+    const { msg: result } = handleConfigManagerMessage(
       { topic: 'config', socketid: 'abc123', req: fakeReq, res: fakeRes, _msgid: 'xyz', payload: {} },
       store
     );
@@ -36,14 +36,15 @@ describe('handleConfigManagerMessage - msg preservation', () => {
 describe('handleConfigManagerMessage - load', () => {
   test('returns the built-in default when nothing has been applied yet', () => {
     const store = freshStore();
-    const result = handleConfigManagerMessage({ payload: {} }, store);
+    const { msg: result, audit } = handleConfigManagerMessage({ payload: {} }, store);
     assert.deepEqual(result.payload.config, DEFAULT_PROFILE);
+    assert.equal(audit, null); // plain loads are not audited
   });
 
   test('returns the currently applied profile', () => {
     const store = freshStore();
     handleConfigManagerMessage({ payload: { action: 'save', config: DEFAULT_PROFILE } }, store);
-    const result = handleConfigManagerMessage({ payload: {} }, store);
+    const { msg: result } = handleConfigManagerMessage({ payload: {} }, store);
     assert.deepEqual(result.payload.config, DEFAULT_PROFILE);
   });
 });
@@ -52,9 +53,14 @@ describe('handleConfigManagerMessage - save', () => {
   test('applies a valid config and reports success', () => {
     const store = freshStore();
     const newProfile = { deltaT: { watch: 10, warning: 20, critical: 30 }, ror: { watch: 10, warning: 20, critical: 40, timeWindowMin: 15 }, persistence: { watchMin: 20, warningMin: 10, criticalMin: 5 } };
-    const result = handleConfigManagerMessage({ payload: { action: 'save', config: newProfile, user: 'alice' } }, store);
+    const { msg: result, audit } = handleConfigManagerMessage({ payload: { action: 'save', config: newProfile, user: 'alice' } }, store);
     assert.equal(result.payload.success, 'Configuration saved successfully');
     assert.deepEqual(result.payload.config, newProfile);
+    // legacy audit viewer entry (regression fix): ts/user/action/oldConfig/newConfig
+    assert.equal(audit.action, 'APPLY');
+    assert.equal(audit.user, 'alice');
+    assert.equal(audit.oldConfig, null); // nothing applied before
+    assert.deepEqual(audit.newConfig, newProfile);
 
     const { doc } = store.readDomain('alarms');
     assert.equal(doc.config_domain_versions.alarms, 1);
@@ -66,10 +72,11 @@ describe('handleConfigManagerMessage - save', () => {
     handleConfigManagerMessage({ payload: { action: 'save', config: DEFAULT_PROFILE } }, store);
 
     const bad = { ...DEFAULT_PROFILE, deltaT: { watch: 30, warning: 20, critical: 35 } };
-    const result = handleConfigManagerMessage({ payload: { action: 'save', config: bad } }, store);
+    const { msg: result, audit } = handleConfigManagerMessage({ payload: { action: 'save', config: bad } }, store);
     assert.ok(result.payload.error);
     assert.ok(result.payload.error.includes('A1'));
     assert.deepEqual(result.payload.config, DEFAULT_PROFILE);
+    assert.equal(audit.action, 'APPLY_REJECTED');
 
     const { doc } = store.readDomain('alarms');
     assert.equal(doc.config_domain_versions.alarms, 1); // unchanged
@@ -107,8 +114,9 @@ describe('handleConfigManagerMessage - restore', () => {
     const customProfile = { deltaT: { watch: 10, warning: 20, critical: 30 }, ror: { watch: 10, warning: 20, critical: 40, timeWindowMin: 15 }, persistence: { watchMin: 20, warningMin: 10, criticalMin: 5 } };
     handleConfigManagerMessage({ payload: { action: 'save', config: customProfile } }, store);
 
-    const result = handleConfigManagerMessage({ payload: { action: 'restore' } }, store);
+    const { msg: result, audit } = handleConfigManagerMessage({ payload: { action: 'restore' } }, store);
     assert.equal(result.payload.success, 'Default configuration restored');
     assert.deepEqual(result.payload.config, DEFAULT_PROFILE);
+    assert.equal(audit.action, 'RESTORE');
   });
 });

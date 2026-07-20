@@ -28,7 +28,10 @@ function withPayload(msg, payload) {
  *
  * @param {object} msg - Node-RED msg; msg.payload = {action?, user?, config?}
  * @param {import('../store').ConfigStore} store
- * @returns {object|null} a Node-RED msg to return, or null to suppress output
+ * @returns {{msg: object|null, audit: object|null}} msg to send (or null to suppress);
+ *   audit is a legacy-viewer-shaped entry ({ts, user, action, oldConfig, newConfig})
+ *   for the wrapper to append to the `audit_busbartherm` global (see legacy-audit.js),
+ *   present on save/restore attempts (applied or rejected), null on plain loads
  */
 function handleConfigManagerMessage(msg, store) {
   const action = msg.payload?.action;
@@ -38,11 +41,11 @@ function handleConfigManagerMessage(msg, store) {
   const { doc: currentModbusJoints } = store.readDomain('modbus_joints');
 
   if (action === 'save' && msg.payload.config) {
-    return applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, msg.payload.config, user, 'Configuration saved successfully');
+    return applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, msg.payload.config, user, 'Configuration saved successfully', 'APPLY');
   }
 
   if (action === 'restore') {
-    return applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, DEFAULT_PROFILE, user, 'Default configuration restored');
+    return applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, DEFAULT_PROFILE, user, 'Default configuration restored', 'RESTORE');
   }
 
   // LOAD (no action): reflect the currently applied default profile, or the
@@ -54,10 +57,13 @@ function handleConfigManagerMessage(msg, store) {
         persistence: currentAlarms.profiles.default.persistence,
       }
     : DEFAULT_PROFILE;
-  return withPayload(msg, { config });
+  return { msg: withPayload(msg, { config }), audit: null };
 }
 
-function applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, flatProfile, user, successMessage) {
+function applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, flatProfile, user, successMessage, auditAction) {
+  const currentFlatProfile = currentAlarms?.profiles?.default
+    ? { deltaT: currentAlarms.profiles.default.deltaT, ror: currentAlarms.profiles.default.ror, persistence: currentAlarms.profiles.default.persistence }
+    : null;
   const newDoc = {
     config_domain_versions: {
       alarms: (currentAlarms?.config_domain_versions?.alarms ?? 0) + 1,
@@ -83,16 +89,32 @@ function applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, fla
   );
 
   if (!result.applied) {
-    const currentFlat = currentAlarms?.profiles?.default
-      ? { deltaT: currentAlarms.profiles.default.deltaT, ror: currentAlarms.profiles.default.ror, persistence: currentAlarms.profiles.default.persistence }
-      : DEFAULT_PROFILE;
-    return withPayload(msg, {
-      config: currentFlat,
-      error: result.errors.map((e) => `${e.rule}: ${e.message}`).join('; '),
-    });
+    const currentFlat = currentFlatProfile ?? DEFAULT_PROFILE;
+    return {
+      msg: withPayload(msg, {
+        config: currentFlat,
+        error: result.errors.map((e) => `${e.rule}: ${e.message}`).join('; '),
+      }),
+      audit: {
+        ts: new Date().toISOString(),
+        user,
+        action: `${auditAction}_REJECTED`,
+        oldConfig: currentFlatProfile,
+        newConfig: flatProfile,
+      },
+    };
   }
 
-  return withPayload(msg, { config: flatProfile, success: successMessage });
+  return {
+    msg: withPayload(msg, { config: flatProfile, success: successMessage }),
+    audit: {
+      ts: new Date().toISOString(),
+      user,
+      action: auditAction,
+      oldConfig: currentFlatProfile,
+      newConfig: flatProfile,
+    },
+  };
 }
 
 module.exports = { handleConfigManagerMessage, DEFAULT_PROFILE };

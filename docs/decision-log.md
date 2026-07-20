@@ -894,3 +894,47 @@ companion project chat and recorded in the workplan/design docs there).
   publish.telemetry section, which the spec marks updatable via the
   remote config channel that Slice 7 builds. It becomes Slice 7's
   first delivered knob instead of a throwaway side channel.
+
+- **2026-07-18** — Heartbeat `system` block extended with the active
+  uplink (user requirement): `network.interface`/`type` from the
+  default route (/proc/net/route), classified wifi/ethernet/cellular.
+  Wi-Fi adds signal_dbm + link_quality from /proc/net/wireless; a
+  cellular uplink (SIM7600G shows up as usb0/wwan0/ppp0) adds signal
+  via ModemManager's percent when installed, and - only when
+  BUSDUCT_MODEM_AT_PORT is set (typically /dev/ttyUSB2, the SIM7600's
+  spare AT port, safe during a data session) - AT+CSQ directly for
+  rssi_dbm (-113 + 2*csq). All null-degrading, same rule as the rest
+  of the health probe.
+
+- **2026-07-18** — **Fixed: ACK button on Active Alarms did nothing.**
+  Root cause (legacy gap, predates the refactor): the Active Alarms UI
+  sends {action:"ACK", instanceId} into Alarm Manager, but the
+  function only handled CLEAR_HISTORY/BOOT_REFRESH/INJECT_EVENT - no
+  ACK branch existed, so the message fell through to the
+  sensor-processing path and was ignored. Added the branch: sets
+  status ACTIVE_ACK + ackTs/ackBy on the active alarm (and its
+  historian entry), persists both, and emits through buildOutputs so
+  the UI repaints and the taps fire. isActive() treats ACTIVE_ACK as
+  still-active (startsWith("ACTIVE")), so persistence/clear logic is
+  unaffected. Completing the chain, AlarmPublisher now emits an ACK
+  event (qos 1, timestamp = ackTs) when a known alarm transitions
+  ACTIVE_NACK -> ACTIVE_ACK - fulfilling publish.alarm mode "RAISE,
+  CLEAR, ACK only" from the edge config, which had been RAISE/CLEAR
+  only. The soak verifier's parity replay mirrors the same rule.
+
+- **2026-07-18** — **Fixed: audit screens blank after settings changes**
+  (regression from the Slice 2 refactor): the Audit Log Viewer reads
+  global `joint_config_audit_log` ({timestamp, user, action, details};
+  actions APPLY_CONFIG/SAVE_ROW/DELETE_ROW) and the alarms audit
+  viewer reads `audit_busbartherm` ({ts, user, action, oldConfig,
+  newConfig}) - both were written by the legacy backend nodes that the
+  refactor replaced; the new handlers wrote only the durable
+  audit_trail.jsonl in the ConfigStore. Handlers now also return a
+  viewer-shaped `audit` entry (joint save/delete/apply incl. rejected
+  applies; modbus-settings save/apply; alarms save/restore incl.
+  rejections) and the thin wrappers append it via the new
+  legacy-audit.js helper (capped at 200 entries - display only, the
+  jsonl file remains the complete record).
+  handleConfigManagerMessage's return shape changed to {msg, audit} -
+  its wrapper function node updated accordingly. 4 flow nodes changed,
+  all func-only, diff-verified. 279 tests passing (11 new).

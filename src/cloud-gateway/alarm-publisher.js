@@ -40,24 +40,32 @@ class AlarmPublisher {
   constructor({ outbox, topic }) {
     this.outbox = outbox;
     this.topic = topic;
-    this.knownActiveIds = new Set();
+    this.knownActive = new Map(); // instanceId -> last seen status
   }
 
-  /** Feed Alarm Manager's "active" output (msg.payload, the full current active-alarms array). */
+  /**
+   * Feed Alarm Manager's "active" output (msg.payload, the full current
+   * active-alarms array). Emits RAISE for genuinely new instanceIds and
+   * ACK when a known alarm's status transitions ACTIVE_NACK ->
+   * ACTIVE_ACK (operator pressed the ACK button) - completing the
+   * publish.alarm mode "RAISE, CLEAR, ACK only" from the edge config.
+   */
   ingestActiveAlarms(activeAlarms) {
-    const incomingIds = new Set(activeAlarms.map((a) => a.instanceId));
+    const incoming = new Map(activeAlarms.map((a) => [a.instanceId, a.status]));
     for (const alarm of activeAlarms) {
-      if (!this.knownActiveIds.has(alarm.instanceId)) {
+      if (!this.knownActive.has(alarm.instanceId)) {
         this._publish('RAISE', alarm);
+      } else if (this.knownActive.get(alarm.instanceId) === 'ACTIVE_NACK' && alarm.status === 'ACTIVE_ACK') {
+        this._publish('ACK', alarm);
       }
     }
-    this.knownActiveIds = incomingIds;
+    this.knownActive = incoming;
   }
 
   /** Feed Alarm Manager's "clearedNow" output (msg.payload, this message's just-cleared alarms only). */
   ingestClearedAlarms(clearedAlarms) {
     for (const alarm of clearedAlarms) {
-      this.knownActiveIds.delete(alarm.instanceId);
+      this.knownActive.delete(alarm.instanceId);
       this._publish('CLEAR', alarm);
     }
   }
@@ -68,7 +76,7 @@ class AlarmPublisher {
       joint_id: alarm.joint_id,
       level: alarm.level,
       kpi: KPI_BY_ALARM_TYPE[alarm.alarm_type] ?? null,
-      timestamp: action === 'CLEAR' ? alarm.clearedTs : alarm.raisedTs,
+      timestamp: action === 'CLEAR' ? alarm.clearedTs : action === 'ACK' ? alarm.ackTs ?? alarm.raisedTs : alarm.raisedTs,
       alarm, // full context snapshot
     };
     if (typeof alarm.value === 'number') event.value = alarm.value;

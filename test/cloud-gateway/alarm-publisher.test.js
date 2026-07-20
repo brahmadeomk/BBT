@@ -152,3 +152,38 @@ describe('AlarmPublisher - structured value/threshold/persistence_min/absolute_t
     assert.equal(event.absolute_temp_c, undefined);
   });
 });
+
+describe('AlarmPublisher - ACK on status transition', () => {
+  const { AlarmPublisher: AckPub } = require('../../src/cloud-gateway/alarm-publisher');
+  function ackSetup() {
+    const events = [];
+    const outbox = { enqueue: (cls, topic, payload, qos) => events.push({ cls, payload, qos }) };
+    return { publisher: new AckPub({ outbox, topic: 't/alarm' }), events };
+  }
+  const nack = { instanceId: 'PROCESS|J01|DELTA_T|WARNING', joint_id: 'J01', alarm_type: 'DELTA_T', level: 'WARNING', status: 'ACTIVE_NACK', raisedTs: '2026-07-18T10:00:00Z' };
+
+  test('publishes ACK exactly once when a known alarm goes ACTIVE_NACK -> ACTIVE_ACK', () => {
+    const { publisher, events } = ackSetup();
+    publisher.ingestActiveAlarms([nack]);
+    publisher.ingestActiveAlarms([{ ...nack, status: 'ACTIVE_ACK', ackTs: '2026-07-18T10:05:00Z' }]);
+    publisher.ingestActiveAlarms([{ ...nack, status: 'ACTIVE_ACK', ackTs: '2026-07-18T10:05:00Z' }]); // refire, no repeat
+    assert.deepEqual(events.map((e) => e.payload.action), ['RAISE', 'ACK']);
+    assert.equal(events[1].payload.timestamp, '2026-07-18T10:05:00Z'); // ackTs, not raisedTs
+    assert.equal(events[1].qos, 1);
+  });
+
+  test('an alarm arriving already ACKed is a RAISE only (no phantom ACK)', () => {
+    const { publisher, events } = ackSetup();
+    publisher.ingestActiveAlarms([{ ...nack, status: 'ACTIVE_ACK', ackTs: '2026-07-18T10:05:00Z' }]);
+    assert.deepEqual(events.map((e) => e.payload.action), ['RAISE']);
+  });
+
+  test('CLEAR after ACK still publishes and forgets the instance', () => {
+    const { publisher, events } = ackSetup();
+    publisher.ingestActiveAlarms([nack]);
+    publisher.ingestActiveAlarms([{ ...nack, status: 'ACTIVE_ACK', ackTs: '2026-07-18T10:05:00Z' }]);
+    publisher.ingestClearedAlarms([{ ...nack, status: 'CLEARED', clearedTs: '2026-07-18T11:00:00Z' }]);
+    publisher.ingestActiveAlarms([nack]); // re-raise later
+    assert.deepEqual(events.map((e) => e.payload.action), ['RAISE', 'ACK', 'CLEAR', 'RAISE']);
+  });
+});
