@@ -21,12 +21,15 @@ class Heartbeat {
    * @param {object} status
    * @param {string} status.fwVersion - reported firmware version (busduct_edge_config.yaml identity.fw_version)
    * @param {object} status.configVersions - e.g. { modbus, joints, alarms } from ConfigStore.getAppliedVersions
+   * @param {object} [status.system] - edge hardware health snapshot (see pi-health.js):
+   *   cpu_temp_c, mac_id, ram_free_mb, ram_available_mb, low_voltage
    */
   send(status) {
     const payload = {
       timestamp: new Date().toISOString(),
       fwVersion: status.fwVersion,
       configVersions: status.configVersions,
+      ...(status.system ? { system: status.system } : {}),
     };
     this.outbox.enqueue('telemetry', this.topic, payload, 0); // qos 0, per publish.heartbeat.qos
   }

@@ -60,15 +60,21 @@ function flushTelemetry(gateway, intervalMin) {
 }
 
 /**
- * Hourly liveness ping with firmware + applied config versions.
+ * Hourly liveness ping with firmware + applied config versions, plus
+ * the Pi health snapshot (CPU temp, MAC id, free/available RAM,
+ * low-voltage state - see pi-health.js; fields are null off-Pi).
+ * Collected here, once per heartbeat, so the flow stays unchanged.
  * Returns a status summary for the debug sidebar.
  */
 function sendHeartbeat(gateway, { fwVersion, configVersions }) {
-  gateway.heartbeat.send({ fwVersion, configVersions });
+  const { collectPiHealth } = require('../pi-health');
+  const system = collectPiHealth();
+  gateway.heartbeat.send({ fwVersion, configVersions, system });
   return {
     heartbeat: 'queued',
     fwVersion,
     configVersions,
+    system,
     outbox: gateway.outbox.counts(),
   };
 }

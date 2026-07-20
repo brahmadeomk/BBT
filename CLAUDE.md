@@ -31,7 +31,9 @@ across all of them.**
   recovery). Slice 6 (AWS adapter + Fleet Provisioning) code is built
   and unit-tested; it needs real AWS-side inputs (ATS endpoint, claim
   certs, provisioning template — see docs/aws/README.md) before the
-  panel can connect and the combined soak can run.
+  panel can connect and the combined soak can run. **Update: live
+  connect achieved 2026-07-17; combined 24h soak PASSED 2026-07-18 —
+  Slices 1–6 are all done. Slice 7 (remote config channel) is next.**
 
 - **Cloud-agnostic rule**: no AWS SDK (or any single-cloud SDK) may be
   imported outside `/src/adapters/aws`. Everything else — config
@@ -465,10 +467,18 @@ recomputes every interval's aggregates from the raw samples, checks
 alarm RAISE/CLEAR parity in order, and reports offline windows +
 hold-and-drain times. See docs/aws/README.md §C5 for the procedure.
 
-**Not yet done**: actually running the combined 24h soak with the C4
-drills (that's the remaining Slice 5+6 "Done when"), Slice 7's
-shadow/cmd config channel subscription, and the cloud-side data
-pipeline (IoT Rule → Timestream/S3 — a design-chat decision).
+**Combined 24h soak: PASS (2026-07-18, user-verified via
+tools/soak-verify.js)** — Slice 5's and Slice 6's "Done when" are both
+met. **Slices 1–6 are done.** Heartbeats now carry a `system` block
+(`src/cloud-gateway/pi-health.js`: cpu_temp_c, mac_id, ram_free_mb,
+ram_available_mb, low_voltage incl. Pi under-voltage/throttling flags
+from `vcgencmd get_throttled`; all fields null off-Pi, probe failures
+never break the heartbeat).
+
+**Not yet done**: Slice 7 (remote config channel — user decision
+2026-07-18: the cloud-settable telemetry interval is Slice 7's first
+delivered knob, NOT a pre-Slice-7 side channel) and the cloud-side
+data pipeline (IoT Rule → Timestream/S3 — a design-chat decision).
 
 ## Working agreements
 

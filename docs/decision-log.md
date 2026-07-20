@@ -866,3 +866,31 @@ companion project chat and recorded in the workplan/design docs there).
 
   263 tests passing. Runbook gained §C5 (systemd env override, run
   with drills, verify command, what PASS proves).
+
+- **2026-07-18** — **Combined 24h soak: PASS** (user ran
+  tools/soak-verify.js on the panel's recording - telemetry
+  aggregates, alarm parity, and hold-and-drain all verified). Slice
+  5's and Slice 6's "Done when" are both met; Slices 1-6 done.
+
+- **2026-07-18** — Heartbeat enriched with a `system` block (user
+  requirement): `src/cloud-gateway/pi-health.js` collects cpu_temp_c
+  (sysfs thermal zone), mac_id (eth0, wlan0 fallback), ram_free_mb +
+  ram_available_mb (/proc/meminfo - both requested; available is the
+  actionable one, free alone under-reports due to page cache), and
+  low_voltage from `vcgencmd get_throttled` (now/since_boot for both
+  under-voltage and throttling, plus the raw hex for cloud-side
+  decoding of the remaining bits). Collected once per heartbeat in
+  the sendHeartbeat handler - no flow change, no new dependencies.
+  Every probe degrades to null off-Pi and never throws: a health
+  probe must not break the liveness message that carries it. The
+  low-voltage state rides the heartbeat rather than raising a local
+  SYSTEM alarm through Alarm Manager - cloud-side alerting can act on
+  it; wiring it into the local alarm chain is a separate decision if
+  wanted.
+
+- **2026-07-18** — Sequencing decision (recommended, user asked):
+  the "set telemetry interval from cloud" requirement is NOT built as
+  a pre-Slice-7 one-off - the interval lives in the edge config's
+  publish.telemetry section, which the spec marks updatable via the
+  remote config channel that Slice 7 builds. It becomes Slice 7's
+  first delivered knob instead of a throwaway side channel.
