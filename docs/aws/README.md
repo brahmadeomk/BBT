@@ -411,3 +411,53 @@ Panel-side logs: `journalctl -u nodered -f` — the gateway never
 crashes Node-RED on connection errors (they feed the backoff), so look
 at the debug sidebar's `connected` field rather than expecting stack
 traces.
+
+---
+
+## Part E — pushing remote config from the cloud (Slice 7)
+
+The panel subscribes to `cmd/{customer}/{site}/{panel}/config` and
+acknowledges every push on `cmd/.../config/ack` (QoS 1 through the
+outbox, so acks survive link drops). Test from **IoT Core → MQTT test
+client**: subscribe to `cmd/C000/S000/P000/config/ack`, then publish to
+`cmd/C000/S000/P000/config`.
+
+Envelope:
+
+```json
+{
+  "request_id": "any-string-echoed-back",
+  "user": "who is pushing (lands in the audit trail)",
+  "domain": "alarms | modbus_joints | edge",
+  "doc": { }
+}
+```
+
+**1. Telemetry interval (the `edge` domain):**
+
+```json
+{ "request_id": "iv-1", "user": "ops", "domain": "edge",
+  "doc": { "telemetry_interval_min": 5 } }
+```
+
+Applied live (next batch on the new cadence within a minute) and
+persisted across restarts. Bounds 1–1440 minutes.
+
+**2. Alarm thresholds (`alarms` domain)** — freely tunable, no
+maintenance mode needed. `doc` is a complete cfg/alarms document
+(bump `config_domain_versions.alarms` past the applied version or A6
+rejects). On accept, the running Alarm Manager evaluates the very next
+sample against the new thresholds — alarms raise/clear through their
+normal persistence paths (A10), never a mass-clear.
+
+**3. Wiring/commissioning (`modbus_joints` domain)** — gated by **R12**:
+rejected with `{"rule":"R12"}` unless the panel is in maintenance mode
+(local action: set the `maintenanceMode` global to `true` via the
+panel — deliberately not settable from the cloud). On accept the panel
+converges exactly like a local apply: decode pipeline rewired,
+dashboard tables refreshed, Nano job recompiled and resent only if the
+compiled job actually changed.
+
+Every push — accepted or rejected — is acknowledged with either
+`applied_versions` or `errors: [{rule, message}]` citing the exact
+R/A rule ids, and recorded in the panel's audit trail.

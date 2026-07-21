@@ -54,6 +54,10 @@ function loadEdgeConfig(configPath = process.env.BUSDUCT_EDGE_CONFIG || DEFAULT_
     // topic keeps broker delivery so subscribers/tests can listen.
     telemetry: resolveTopic(useBasicIngest ? raw.topics.telemetry_basic_ingest : raw.topics.telemetry, identity),
     alarm: resolveTopic(raw.topics.alarm, identity),
+    // remote config channel (Slice 7) - cmd topics, with the yaml's
+    // documented templates as defaults when the config predates them
+    cmd_config: resolveTopic(raw.topics.cmd_config ?? 'cmd/{customer_id}/{site_id}/{panel_id}/config', identity),
+    cmd_config_ack: resolveTopic(raw.topics.cmd_config_ack ?? 'cmd/{customer_id}/{site_id}/{panel_id}/config/ack', identity),
     use_basic_ingest: useBasicIngest,
   };
 

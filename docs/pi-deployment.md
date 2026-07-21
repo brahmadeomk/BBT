@@ -174,6 +174,17 @@ If something's still wrong, check the Node-RED debug sidebar / log
 completed. An error like *"No cfg/modbus applied yet"* means step 3
 (bootstrap) wasn't done.
 
+## 9. Remote config channel (Slice 7, after AWS is connected)
+
+After pulling this version: restart Node-RED AND re-import the flow
+(library + flow both changed). The Cloud Gateway tab gains a "Remote
+Config Setup" node - its debug shows `enabled: true` with the cmd
+topic once the panel runs on the AWS transport. Push examples and the
+maintenance-mode rule: `docs/aws/README.md` Part E. To allow a remote
+wiring change (R12), set the `maintenanceMode` global to `true`
+locally (e.g. a temporary inject with a change node, or from the
+Settings screen once one exists) and set it back after.
+
 ## Updating later
 
 Whenever this repo changes (new commits pushed):

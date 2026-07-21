@@ -33,7 +33,10 @@ across all of them.**
   certs, provisioning template — see docs/aws/README.md) before the
   panel can connect and the combined soak can run. **Update: live
   connect achieved 2026-07-17; combined 24h soak PASSED 2026-07-18 —
-  Slices 1–6 are all done. Slice 7 (remote config channel) is next.**
+  Slices 1–6 are all done. Slice 7 (remote config channel) is
+  **built and unit-tested** (cmd-topic channel, telemetry-interval
+  knob, R12 gate, A10 live re-evaluation — see the Slice 7 section
+  below); its "Done when" needs the live end-to-end push from AWS.**
 
 - **Cloud-agnostic rule**: no AWS SDK (or any single-cloud SDK) may be
   imported outside `/src/adapters/aws`. Everything else — config
@@ -475,10 +478,54 @@ ram_available_mb, low_voltage incl. Pi under-voltage/throttling flags
 from `vcgencmd get_throttled`; all fields null off-Pi, probe failures
 never break the heartbeat).
 
-**Not yet done**: Slice 7 (remote config channel — user decision
-2026-07-18: the cloud-settable telemetry interval is Slice 7's first
-delivered knob, NOT a pre-Slice-7 side channel) and the cloud-side
-data pipeline (IoT Rule → Timestream/S3 — a design-chat decision).
+## Remote config channel (Slice 7, built — live verification pending)
+
+Implemented over the **cmd topics** (`cmd/{c}/{s}/{p}/config` +
+`/config/ack`), NOT the AWS shadow — plain MQTT works on any broker
+(Slice 8 portability drill) and keeps gateway logic cloud-agnostic;
+shadow support would be an AWS-adapter add-on if the design chat ever
+wants it. Envelope/examples: docs/aws/README.md Part E.
+
+- `src/config-service/node-red/remote-config-handler.js`
+  (`processRemoteConfig` — pure, fully unit-tested): routes `alarms`
+  (A-rules, freely tunable), `modbus_joints` (source:'remote' → R12
+  rejects outside maintenance mode; the `maintenanceMode` global is a
+  deliberately local-only switch), and `edge` (first knob:
+  `telemetry_interval_min`, 1–1440, persisted via
+  `src/cloud-gateway/runtime-settings.js` in the outbox dir). Acks
+  echo `request_id` and carry `applied_versions` or `errors` with real
+  rule ids; acks ride the outbox **alarm** class (QoS 1, survives link
+  drops, ordered).
+- Accepted remote modbus change converges exactly like a local apply:
+  `deriveLegacyBridge` rewrites the decode-pipeline globals, dashboard
+  drafts are rebuilt (`buildLegacyDrafts` reverse-maps schema →
+  legacy shapes incl. effective-ambient flattening), paraRaw ships to
+  modbusMaster_V2, and the Nano resend fires content-aware
+  (nanoJobsEqual). Accepted alarms change writes
+  `busbartherm_system_config` — the global the live Alarm Manager
+  evaluates each sample against, which is A10's live re-evaluation
+  (normal raise/clear paths, no mass-clear).
+- **Telemetry flushing is now due-based**: the Cloud Gateway tab's
+  inject ticks every 60s calling `flushIfDue` (emits nothing
+  off-cycle); the interval lives in persisted runtime settings
+  (default 10 min) and changes take effect within a minute — no flow
+  edit needed to retune. `flushTelemetry`'s fixed-interval form
+  remains for tests.
+- `setupRemoteConfig` (src/cloud-gateway/node-red/remote-config.js)
+  is the subscription glue: works over any transport with
+  subscribe(), so the whole channel is bench-testable on the loopback
+  (publishing into the loopback = a simulated cloud push — that's how
+  the end-to-end tests run). Subscriptions replay on AWS reconnects.
+- **Also fixed here (regression from Slice 2)**: local threshold
+  saves stopped writing `busbartherm_system_config`, so the running
+  Alarm Manager kept evaluating OLD thresholds after a dashboard
+  save. The handler now returns `runtimeConfig` and both the local
+  wrapper and the remote path write the global.
+
+**Not yet done**: Slice 7's "Done when" live pass (push valid+invalid
+configs from the real AWS console, confirm acks/audit/no
+alarm-state corruption), and the cloud-side data pipeline (IoT Rule →
+Timestream/S3 — a design-chat decision).
 
 ## Working agreements
 

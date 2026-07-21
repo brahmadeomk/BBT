@@ -562,4 +562,4 @@ function mostCommon(values) {
   return best;
 }
 
-module.exports = { handleModbusSettingsMessage, writeLegacyModbusGlobals };
+module.exports = { handleModbusSettingsMessage, writeLegacyModbusGlobals, deriveLegacyBridge };

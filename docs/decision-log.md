@@ -972,3 +972,62 @@ companion project chat and recorded in the workplan/design docs there).
     their removal into the next deliberate flow change (Slice 7).
 
   Repo and panel are identical again; 279 tests passing.
+
+- **2026-07-19** — **Slice 7 built: remote config channel** (+ the
+  cloud-settable telemetry interval as its first knob, per the user's
+  2026-07-18 decision). Design decisions:
+
+  - **cmd topics, not the AWS shadow.** The edge yaml offers both
+    (config_channel: shadow|cmd, shadow marked "recommended"); chose
+    the cmd channel because it is plain MQTT - it works unchanged on
+    Mosquitto for Slice 8's portability drill and keeps every line of
+    gateway/config logic cloud-agnostic. Shadow delivery would be an
+    AWS-adapter add-on if the design chat wants it later; flag there.
+  - `processRemoteConfig` (config-service, pure): envelope
+    {request_id, user, domain: alarms|modbus_joints|edge, doc}. Acks
+    echo request_id with applied_versions or errors[{rule, message}]
+    citing real R/A rule ids; acks are enqueued on the outbox ALARM
+    class (QoS 1, ordered, survives link drops). alarms domain is
+    freely tunable; modbus_joints carries source:'remote' so R12
+    rejects unless the `maintenanceMode` global is true - that switch
+    is deliberately local-only (a cloud-settable maintenance mode
+    would defeat R12's purpose). edge domain validates
+    telemetry_interval_min 1-1440.
+  - **Remote modbus applies converge like local ones**: the wrapper
+    reuses deriveLegacyBridge (decode globals + paraRaw ship) and new
+    buildLegacyDrafts (schema -> legacy dashboard shapes, incl.
+    flattening the effective ambient chain back to per-joint
+    ambientSlaveID and uppercasing zone ids), clears the
+    modbus-settings draft, and fires the content-aware Nano resend.
+  - **A10 via the runtime global**: the live Alarm Manager evaluates
+    every sample against `busbartherm_system_config`; both the remote
+    path and (fix) the local path write it on successful apply. The
+    Slice 2 refactor had dropped the local write - dashboard threshold
+    saves updated the store but the RUNNING alarm engine kept old
+    thresholds (regression found while implementing A10 here; the
+    original legacy node wrote the global inline, confirmed from git
+    history). Alarm state is never bulk-modified - thresholds change
+    and alarms raise/clear through their normal persistence paths.
+  - **Telemetry flushing became due-based**: the flow's fixed 600s
+    inject is now a 60s tick calling flushIfDue (emits nothing
+    off-cycle); the interval lives in RuntimeSettings
+    (gateway-settings.json in the outbox dir, atomic writes, bounds
+    1-1440, default 10) so a remote change takes effect within a
+    minute and survives restarts.
+  - `setupRemoteConfig` glue subscribes over the transport interface -
+    on the loopback a publish IS a simulated cloud push, which is how
+    the end-to-end tests run the whole chain (subscribe -> validate ->
+    apply -> side effects -> ack via outbox) without a broker.
+    Idempotent (one subscription per gateway); AWS transport replays
+    subscriptions on every reconnect.
+  - Flow changes: tick swap + Remote Config Setup node (3 outputs:
+    status debug, resend link, paraRaw link) + removal of the 10
+    empty ui_groups left by the user's pruning (promised cleanup).
+    Runbook Part E documents push examples for all three domains.
+
+  294 tests passing (15 new: envelope/A1/R12/R1 rule acks, drafts
+  reverse-mapping, edge knob bounds+persistence, end-to-end loopback
+  pushes incl. garbage payloads never crashing the subscription).
+  Slice 7's "Done when" still needs the live push from the real AWS
+  console (valid + invalid, acks observed, audit checked, no
+  alarm-state corruption).

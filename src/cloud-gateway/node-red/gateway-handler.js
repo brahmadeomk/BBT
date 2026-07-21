@@ -60,6 +60,35 @@ function flushTelemetry(gateway, intervalMin) {
 }
 
 /**
+ * Due-based telemetry flush (Slice 7): called by a fast tick inject
+ * (60s) instead of a fixed-interval one, so the batch interval can be
+ * changed at runtime (locally or from the cloud) without editing the
+ * flow. Returns null when nothing is due - the function node emits
+ * nothing. The interval comes from the gateway's persisted runtime
+ * settings (default 10 min per publish.telemetry.interval_min);
+ * setTelemetryInterval() below changes it and reschedules.
+ */
+function flushIfDue(gateway, now = Date.now()) {
+  const intervalMs = gateway.settings.telemetryIntervalMin * 60_000;
+  if (!gateway._nextFlushAt) gateway._nextFlushAt = now + intervalMs;
+  if (now < gateway._nextFlushAt) return null;
+  gateway._nextFlushAt = now + intervalMs;
+  return flushTelemetry(gateway, gateway.settings.telemetryIntervalMin);
+}
+
+/**
+ * Applies + persists a new telemetry interval and reschedules the next
+ * flush from now. Returns an error string (bounds come from
+ * runtime-settings.js) or null on success.
+ */
+function setTelemetryInterval(gateway, intervalMin, now = Date.now()) {
+  const error = gateway.settings.setTelemetryIntervalMin(intervalMin);
+  if (error) return error;
+  gateway._nextFlushAt = now + intervalMin * 60_000;
+  return null;
+}
+
+/**
  * Hourly liveness ping with firmware + applied config versions, plus
  * the Pi health snapshot (CPU temp, MAC id, free/available RAM,
  * low-voltage state - see pi-health.js; fields are null off-Pi).
@@ -79,4 +108,4 @@ function sendHeartbeat(gateway, { fwVersion, configVersions }) {
   };
 }
 
-module.exports = { ingestKpiTap, ingestAlarmActiveTap, ingestAlarmClearedTap, flushTelemetry, sendHeartbeat };
+module.exports = { ingestKpiTap, ingestAlarmActiveTap, ingestAlarmClearedTap, flushTelemetry, flushIfDue, setTelemetryInterval, sendHeartbeat };

@@ -28,10 +28,16 @@ function withPayload(msg, payload) {
  *
  * @param {object} msg - Node-RED msg; msg.payload = {action?, user?, config?}
  * @param {import('../store').ConfigStore} store
- * @returns {{msg: object|null, audit: object|null}} msg to send (or null to suppress);
- *   audit is a legacy-viewer-shaped entry ({ts, user, action, oldConfig, newConfig})
- *   for the wrapper to append to the `audit_busbartherm` global (see legacy-audit.js),
- *   present on save/restore attempts (applied or rejected), null on plain loads
+ * @returns {{msg: object|null, audit: object|null, runtimeConfig: object|null}} msg to send (or
+ *   null to suppress); audit is a legacy-viewer-shaped entry ({ts, user, action, oldConfig,
+ *   newConfig}) for the wrapper to append to the `audit_busbartherm` global (see
+ *   legacy-audit.js), present on save/restore attempts (applied or rejected), null on plain
+ *   loads; runtimeConfig is the flat profile the wrapper must write to the
+ *   `busbartherm_system_config` global on a SUCCESSFUL apply - that's what the live Alarm
+ *   Manager evaluates against on every sample, so writing it IS the live re-evaluation (A10:
+ *   raise/clear through the normal persistence paths, no mass-clear). The legacy node wrote
+ *   this global inline; the Slice 2 refactor dropped it (regression - thresholds saved to the
+ *   store stopped reaching the running alarm engine until this was restored).
  */
 function handleConfigManagerMessage(msg, store) {
   const action = msg.payload?.action;
@@ -57,7 +63,7 @@ function handleConfigManagerMessage(msg, store) {
         persistence: currentAlarms.profiles.default.persistence,
       }
     : DEFAULT_PROFILE;
-  return { msg: withPayload(msg, { config }), audit: null };
+  return { msg: withPayload(msg, { config }), audit: null, runtimeConfig: null };
 }
 
 function applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, flatProfile, user, successMessage, auditAction) {
@@ -102,6 +108,7 @@ function applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, fla
         oldConfig: currentFlatProfile,
         newConfig: flatProfile,
       },
+      runtimeConfig: null,
     };
   }
 
@@ -114,6 +121,7 @@ function applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, fla
       oldConfig: currentFlatProfile,
       newConfig: flatProfile,
     },
+    runtimeConfig: flatProfile,
   };
 }
 

@@ -6,7 +6,9 @@ const { Batcher } = require('../batcher');
 const { AlarmPublisher } = require('../alarm-publisher');
 const { Heartbeat } = require('../heartbeat');
 const { createSoakRecorder, wrapTransportForSoak } = require('../soak-recorder');
+const { RuntimeSettings } = require('../runtime-settings');
 const handlers = require('./gateway-handler');
+const { setupRemoteConfig } = require('./remote-config');
 
 /**
  * Entry point exposed to Node-RED function nodes via
@@ -78,7 +80,12 @@ function createGateway({ outboxDir = DEFAULT_OUTBOX_DIR, identity = DEFAULT_IDEN
     batcher: new Batcher({ outbox, topic: telemetryTopic }),
     alarmPublisher: new AlarmPublisher({ outbox, topic: alarmTopic }),
     heartbeat: new Heartbeat({ outbox, topic: telemetryTopic }),
-    topics: { telemetry: telemetryTopic, alarm: alarmTopic },
+    settings: new RuntimeSettings({ dir: outboxDir }),
+    topics: {
+      telemetry: telemetryTopic,
+      alarm: alarmTopic,
+      ...(topics?.cmd_config ? { cmd_config: topics.cmd_config, cmd_config_ack: topics.cmd_config_ack } : {}),
+    },
     mode: transport ? 'custom' : 'loopback', // createGatewayFromEdgeConfig overwrites with 'aws'
   };
   outbox.start(); // drain loop (5 msg/s); harmless with the loopback, required with a real transport
@@ -161,4 +168,4 @@ function getGatewayInfo() {
   return singletonInfo;
 }
 
-module.exports = { createGateway, createGatewayFromEdgeConfig, getGateway, getGatewayInfo, resolveTopic, ...handlers };
+module.exports = { createGateway, createGatewayFromEdgeConfig, getGateway, getGatewayInfo, resolveTopic, setupRemoteConfig, ...handlers };
