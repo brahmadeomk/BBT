@@ -1031,3 +1031,35 @@ companion project chat and recorded in the workplan/design docs there).
   Slice 7's "Done when" still needs the live push from the real AWS
   console (valid + invalid, acks observed, audit checked, no
   alarm-state corruption).
+
+- **2026-07-19** — **Live bug fix (first real remote alarms push from
+  AWS)**: ack came back "applied", the store (alarms.json) updated, and
+  an audit entry appeared, but the running Alarm Manager kept the OLD
+  thresholds, and the audit's "before" was always null. Two causes:
+
+  1. **Detached-callback context writes.** Slice 7's setupRemoteConfig
+     subscribed with a callback that performed the
+     busbartherm_system_config write (and legacy bridge, drafts,
+     audits) directly. That callback is captured ONCE at boot and
+     fires forever; its `global`/`node` handles go stale after any
+     redeploy, so global.set from it silently no-ops even though the
+     plain-JS calls beside it (store.applyIfValid, outbox.enqueue)
+     succeed - exactly the "applied + stored but not live" split.
+     Fixed by splitting receipt from apply: the callback now only
+     pushes the raw message onto gateway._remoteConfigInbox; a new 2s
+     flow tick ("drain remote config" inject -> "Remote Config Apply"
+     function) calls drainRemoteConfig, which does every context write
+     in a NORMAL message execution with a fresh `global`. Same
+     async-receipt/tick-drain pattern as the outbox. The apply node's
+     debug now includes live_thresholds_written for confirmation.
+  2. **Audit store + before=null.** appendLegacyAudit wrote the audit
+     arrays to the unnamed default store while both viewers read the
+     "default" named store; aligned it to "default" (matching the
+     original legacy nodes). And the remote alarms path hardcoded
+     oldConfig=null - now reads the currently-applied flat profile as
+     the audit "before".
+
+  Config apply latency is now up to 2s (the tick period) - negligible
+  for config. 294 tests passing; the end-to-end loopback tests updated
+  to drive the drain tick and to model that the Pi's unnamed default
+  store is the "default" named store.

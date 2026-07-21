@@ -20,10 +20,14 @@
  * @param {number} [cap] - max entries kept (oldest dropped)
  */
 function appendLegacyAudit(globalContext, key, entry, cap = 200) {
-  const log = globalContext.get(key) || [];
+  // Both audit viewers read the "default" named context store
+  // (global.get(key, "default")) and the original legacy nodes wrote it
+  // there too - so write to the same store, not the unnamed default,
+  // or the entries silently land where the viewer never looks.
+  const log = globalContext.get(key, 'default') || [];
   log.push(entry);
   while (log.length > cap) log.shift();
-  globalContext.set(key, log);
+  globalContext.set(key, log, 'default');
 }
 
 module.exports = { appendLegacyAudit };

@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const configService = require('../../src/config-service/node-red');
-const { createGateway, setupRemoteConfig, flushIfDue, setTelemetryInterval, ingestKpiTap } = require('../../src/cloud-gateway/node-red');
+const { createGateway, setupRemoteConfig, drainRemoteConfig, flushIfDue, setTelemetryInterval, ingestKpiTap } = require('../../src/cloud-gateway/node-red');
 const { RuntimeSettings } = require('../../src/cloud-gateway/runtime-settings');
 const { validAlarmsDoc } = require('../config-service/fixtures');
 
@@ -27,21 +27,35 @@ function bench() {
   const storeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'busduct-rc-e2e-store-'));
   const cs = { ...configService, createStore: () => configService.createStore(storeRoot) };
 
+  // globalContext honors the store argument the way Node-RED does (here a
+  // single map keyed by name+store is enough - the "default" store is the
+  // only one used).
   const ctx = new Map();
+  // On the Pi the unnamed default store IS the store named "default"
+  // (contextStorage: { default: {...} }) - model that so a value written
+  // without a store name is readable with "default" and vice-versa.
+  const key = (k, store) => `${store && store !== 'default' ? store : 'default'}::${k}`;
   const globalContext = {
-    get: (k) => ctx.get(k),
-    set: (k, v) => ctx.set(k, v),
+    get: (k, store) => ctx.get(key(k, store)),
+    set: (k, v, store) => ctx.set(key(k, store), v),
   };
   const sends = [];
-  const node = { send: (m) => sends.push(m), warn: () => {} };
-
-  const status = setupRemoteConfig({ gateway, configService: cs, globalContext, node });
-  return { gateway, cs, ctx, sends, status, storeRoot };
+  const b = { gateway, cs, ctx, globalContext, sends, storeRoot };
+  b.status = setupRemoteConfig({ gateway });
+  b.ctxGet = (k, store = 'default') => ctx.get(key(k, store));
+  return b;
 }
 
-/** Simulates the cloud pushing on the cmd topic (loopback dispatches to subscribers). */
+/** Simulates the cloud pushing on the cmd topic (loopback dispatches to the inbox). */
 function cloudPush(gateway, payload) {
   return gateway.transport.publish('cmd/C1/S1/P1/config', payload, 1);
+}
+
+/** Simulates the flow's drain tick running in message context. */
+function drive(b) {
+  const out = drainRemoteConfig(b.gateway, b.cs, b.globalContext);
+  for (const s of out) b.sends.push(s);
+  return out;
 }
 
 async function drainAcks(gateway) {
@@ -56,42 +70,46 @@ describe('remote config channel end-to-end (loopback = simulated cloud push)', (
 
     const bare = createGateway({ outboxDir: fs.mkdtempSync(path.join(os.tmpdir(), 'busduct-rc-bare-')) });
     bare.outbox.stop();
-    const s2 = setupRemoteConfig({ gateway: bare, configService, globalContext: { get: () => null, set: () => {} }, node: { send: () => {} } });
+    const s2 = setupRemoteConfig({ gateway: bare });
     assert.equal(s2.enabled, false);
   });
 
   test('valid alarms push: applied, acked with versions, live engine global updated (A10)', async () => {
-    const { gateway, ctx, sends } = bench();
-    await cloudPush(gateway, { request_id: 'push-1', user: 'ops', domain: 'alarms', doc: validAlarmsDoc() });
+    const b = bench();
+    await cloudPush(b.gateway, { request_id: 'push-1', user: 'ops', domain: 'alarms', doc: validAlarmsDoc() });
+    drive(b); // the tick drains + applies in message context
 
-    const acks = await drainAcks(gateway);
+    const acks = await drainAcks(b.gateway);
     assert.equal(acks.length, 1);
     assert.equal(acks[0].payload.result, 'applied');
     assert.equal(acks[0].payload.request_id, 'push-1');
     assert.equal(acks[0].qos, 1);
 
-    const runtime = ctx.get('busbartherm_system_config');
+    const runtime = b.ctxGet('busbartherm_system_config'); // store "default"
     assert.deepEqual(runtime.deltaT, validAlarmsDoc().profiles.default.deltaT);
-    const audit = ctx.get('audit_busbartherm');
+    const audit = b.ctxGet('audit_busbartherm');
     assert.equal(audit[0].action, 'REMOTE_APPLY');
-    assert.equal(sends[0][0].payload.remote_config.result, 'applied');
-    assert.equal(sends[0][1], null); // no Nano resend for an alarms change
+    assert.equal(b.sends[0][0].payload.remote_config.result, 'applied');
+    assert.equal(b.sends[0][0].payload.remote_config.live_thresholds_written, true);
+    assert.equal(b.sends[0][1], null); // no Nano resend for an alarms change
   });
 
   test('invalid alarms push: rejected ack carries the rule id, no side effects', async () => {
-    const { gateway, ctx } = bench();
+    const b = bench();
     const bad = validAlarmsDoc();
     bad.profiles.default.deltaT = { watch: 30, warning: 20, critical: 35 };
-    await cloudPush(gateway, { request_id: 'push-2', domain: 'alarms', doc: bad });
+    await cloudPush(b.gateway, { request_id: 'push-2', domain: 'alarms', doc: bad });
+    drive(b);
 
-    const acks = await drainAcks(gateway);
+    const acks = await drainAcks(b.gateway);
     assert.equal(acks[0].payload.result, 'rejected');
     assert.ok(acks[0].payload.errors.some((e) => e.rule === 'A1'));
-    assert.equal(ctx.get('busbartherm_system_config'), undefined);
+    assert.equal(b.ctxGet('busbartherm_system_config'), undefined);
   });
 
   test('remote modbus push respects R12, then applies in maintenance mode with full local convergence', async () => {
-    const { gateway, cs, ctx, sends } = bench();
+    const b = bench();
+    const { gateway, cs, sends } = b;
     // seed the applied doc the panel is running
     const store = cs.createStore();
     const seed = {
@@ -115,28 +133,31 @@ describe('remote config channel end-to-end (loopback = simulated cloud push)', (
 
     // outside maintenance mode -> R12
     await cloudPush(gateway, { request_id: 'push-3', domain: 'modbus_joints', doc: newDoc });
+    drive(b);
     let acks = await drainAcks(gateway);
     assert.equal(acks[0].payload.result, 'rejected');
     assert.ok(acks[0].payload.errors.some((e) => e.rule === 'R12'));
 
     // in maintenance mode -> applied + bridge + drafts + resend
-    ctx.set('maintenanceMode', true);
+    b.globalContext.set('maintenanceMode', true);
     await cloudPush(gateway, { request_id: 'push-4', domain: 'modbus_joints', doc: newDoc });
+    drive(b);
     acks = await drainAcks(gateway);
     assert.equal(acks[1].payload.result, 'applied');
     assert.deepEqual(acks[1].payload.applied_versions, { modbus: 2, joints: 2 });
 
-    assert.equal(ctx.get('baudRate'), 19200); // legacy comm global rewritten
-    assert.equal(ctx.get('SlaveIDList').length, 2);
-    assert.equal(ctx.get('joint_master_zone_A')[0].joint_id, 'J01'); // draft rebuilt
-    assert.equal(ctx.get('modbus_settings_draft'), null);
+    assert.equal(b.ctxGet('baudRate'), 19200); // legacy comm global rewritten
+    assert.equal(b.ctxGet('SlaveIDList').length, 2);
+    assert.equal(b.ctxGet('joint_master_zone_A')[0].joint_id, 'J01'); // draft rebuilt
+    assert.equal(b.ctxGet('modbus_settings_draft'), null);
     const lastSend = sends[sends.length - 1];
     assert.deepEqual(lastSend[1], { payload: 'remote-apply' }); // Nano resend trigger
     assert.deepEqual(lastSend[2].payload, [[1, 3, 1], [101, 3, 1]]); // paraRaw sync
   });
 
   test('edge knob push changes the live flush cadence and persists across gateway restarts', async () => {
-    const { gateway } = bench();
+    const b = bench();
+    const { gateway } = b;
     const t0 = Date.parse('2026-07-19T10:00:00Z');
 
     // default 10 min: not due at +9 min
@@ -145,6 +166,7 @@ describe('remote config channel end-to-end (loopback = simulated cloud push)', (
     assert.equal(flushIfDue(gateway, t0 + 9 * 60_000), null);
 
     await cloudPush(gateway, { request_id: 'push-5', domain: 'edge', doc: { telemetry_interval_min: 2 } });
+    drive(b);
     const acks = await drainAcks(gateway);
     assert.equal(acks[0].payload.result, 'applied');
 
@@ -160,11 +182,12 @@ describe('remote config channel end-to-end (loopback = simulated cloud push)', (
     assert.equal(reloaded.telemetryIntervalMin, 2);
   });
 
-  test('a garbage push is rejected, acked, and never crashes the subscription', async () => {
-    const { gateway } = bench();
-    await cloudPush(gateway, 'not even an object');
-    await cloudPush(gateway, { domain: 'alarms', doc: null });
-    const acks = await drainAcks(gateway);
+  test('a garbage push is rejected, acked, and never crashes the drain', async () => {
+    const b = bench();
+    await cloudPush(b.gateway, 'not even an object');
+    await cloudPush(b.gateway, { domain: 'alarms', doc: null });
+    drive(b);
+    const acks = await drainAcks(b.gateway);
     assert.equal(acks.length, 2);
     assert.ok(acks.every((a) => a.payload.result === 'rejected'));
   });

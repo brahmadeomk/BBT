@@ -78,26 +78,32 @@ function processRemoteConfig(payload, deps) {
 
   if (domain === 'alarms') {
     const { doc: currentModbusJoints } = store.readDomain('modbus_joints');
+    const { doc: currentAlarmsDoc } = store.readDomain('alarms');
+    // the audit "before" value: the flat default profile currently applied
+    const beforeFlat = currentAlarmsDoc?.profiles?.default
+      ? { deltaT: currentAlarmsDoc.profiles.default.deltaT, ror: currentAlarmsDoc.profiles.default.ror, persistence: currentAlarmsDoc.profiles.default.persistence }
+      : null;
     const result = store.applyIfValid(
       'alarms',
       payload.doc,
       { source: 'remote', jointsDoc: currentModbusJoints, modbusDoc: currentModbusJoints },
       user
     );
+    const p = payload.doc?.profiles?.default;
+    const attemptedFlat = p ? { deltaT: p.deltaT, ror: p.ror, persistence: p.persistence } : payload.doc;
     if (!result.applied) {
       return {
         ...rejected(result.errors.map((e) => ({ rule: e.rule, message: e.message }))),
-        audits: [remoteAudit('audit_busbartherm', user, 'REMOTE_REJECTED', null, payload.doc)],
+        audits: [remoteAudit('audit_busbartherm', user, 'REMOTE_REJECTED', beforeFlat, attemptedFlat)],
       };
     }
-    const p = payload.doc.profiles.default;
-    const runtimeConfig = { deltaT: p.deltaT, ror: p.ror, persistence: p.persistence };
+    const runtimeConfig = attemptedFlat;
     return {
       ack: ack('applied', { applied_versions: result.appliedVersions }),
       applied: true,
       domain,
       runtimeConfig,
-      audits: [remoteAudit('audit_busbartherm', user, 'REMOTE_APPLY', null, runtimeConfig)],
+      audits: [remoteAudit('audit_busbartherm', user, 'REMOTE_APPLY', beforeFlat, runtimeConfig)],
     };
   }
 

@@ -8,7 +8,7 @@ const { Heartbeat } = require('../heartbeat');
 const { createSoakRecorder, wrapTransportForSoak } = require('../soak-recorder');
 const { RuntimeSettings } = require('../runtime-settings');
 const handlers = require('./gateway-handler');
-const { setupRemoteConfig } = require('./remote-config');
+const { setupRemoteConfig, drainRemoteConfig } = require('./remote-config');
 
 /**
  * Entry point exposed to Node-RED function nodes via
@@ -168,4 +168,4 @@ function getGatewayInfo() {
   return singletonInfo;
 }
 
-module.exports = { createGateway, createGatewayFromEdgeConfig, getGateway, getGatewayInfo, resolveTopic, setupRemoteConfig, ...handlers };
+module.exports = { createGateway, createGatewayFromEdgeConfig, getGateway, getGatewayInfo, resolveTopic, setupRemoteConfig, drainRemoteConfig, ...handlers };

@@ -4,47 +4,65 @@ const { setTelemetryInterval } = require('./gateway-handler');
 const { MIN_INTERVAL, MAX_INTERVAL } = require('../runtime-settings');
 
 /**
- * Slice 7 wiring: subscribes the gateway's transport to the remote
- * config topic (cmd/{c}/{s}/{p}/config) and, per message, runs the
- * pure handler (config-service processRemoteConfig) then applies its
- * side effects:
+ * Slice 7 wiring, split into two halves on purpose:
  *
- *   - ack -> outbox alarm class (QoS 1, survives link drops, ordered)
- *   - runtimeConfig -> busbartherm_system_config global (A10 live
- *     re-evaluation by the running Alarm Manager)
- *   - accepted modbus_joints doc -> legacy decode-pipeline bridge +
- *     rebuilt dashboard drafts (same as a local Modbus Settings apply)
- *   - audits -> the legacy audit viewer globals
- *   - accepted edge knob -> gateway telemetry interval
- *   - node.send(...) -> flow outputs (status debug, Nano resend
- *     trigger, paraRaw sync), emitted asynchronously per message
+ *   setupRemoteConfig() - runs once at boot. Subscribes the transport
+ *     to cmd/{c}/{s}/{p}/config with a callback that does NOTHING but
+ *     push the raw cloud message onto an in-memory inbox on the
+ *     gateway singleton. It must NOT touch Node-RED context or
+ *     node.send from here: this callback is long-lived and detached
+ *     (it was captured from a single boot execution of the setup
+ *     function node); after a redeploy those `global`/`node` handles
+ *     go stale and context writes from them silently fail to land -
+ *     which showed up live as "ack applied + store updated, but the
+ *     running Alarm Manager kept the old thresholds".
  *
- * Works over any transport implementing subscribe() - on the loopback
- * this makes the whole channel bench-testable (publish into the
- * loopback = a simulated cloud push); on AWS the subscription rides
- * the real broker and is replayed on every reconnect.
+ *   drainRemoteConfig() - called by a fast flow tick, so it runs in a
+ *     normal Node-RED message execution with a FRESH `global`. It
+ *     drains the inbox, runs the pure handler per message, and applies
+ *     every side effect (context writes, outbox ack, audits) here,
+ *     where the context writes are guaranteed to persist. Returns the
+ *     per-message send arrays for the tick function node to emit.
  *
- * @param {object} opts
- * @param {object} opts.gateway - getGateway() result
- * @param {object} opts.configService - global.get('busductConfigService')
- * @param {{get: Function, set: Function}} opts.globalContext - the function node's `global`
- * @param {{send: Function, warn?: Function}} opts.node - the function node (async sends)
- * @returns {{enabled: boolean, topic?: string, reason?: string}}
+ * This is the same decoupling the outbox uses (async receipt ->
+ * queue -> drained by a tick in message context).
  */
-function setupRemoteConfig({ gateway, configService, globalContext, node }) {
+
+function setupRemoteConfig({ gateway }) {
   const cmdTopic = gateway.topics.cmd_config;
   const ackTopic = gateway.topics.cmd_config_ack;
   if (!cmdTopic || !ackTopic) {
     return { enabled: false, reason: 'no cmd topics resolved (no edge config) - remote config disabled' };
   }
-  if (gateway._remoteConfigSetup) {
+  if (!gateway._remoteConfigInbox) gateway._remoteConfigInbox = [];
+  if (gateway._remoteConfigSubscribed) {
     return { enabled: true, topic: cmdTopic, reason: 'already subscribed' };
   }
-  gateway._remoteConfigSetup = true;
-
-  const store = configService.createStore();
-
+  gateway._remoteConfigSubscribed = true;
   gateway.transport.subscribe(cmdTopic, (payload) => {
+    gateway._remoteConfigInbox.push(payload);
+  });
+  return { enabled: true, topic: cmdTopic };
+}
+
+/**
+ * Drains queued remote-config messages and applies them in the caller's
+ * (message-context) global scope. Returns an array of send-arrays -
+ * one per processed message - for the flow node to node.send().
+ *
+ * @param {object} gateway
+ * @param {object} configService - global.get('busductConfigService')
+ * @param {{get: Function, set: Function}} globalContext - the tick function node's `global`
+ */
+function drainRemoteConfig(gateway, configService, globalContext) {
+  const inbox = gateway._remoteConfigInbox;
+  if (!inbox || inbox.length === 0) return [];
+  const store = configService.createStore();
+  const ackTopic = gateway.topics.cmd_config_ack;
+  const sends = [];
+
+  let payload;
+  while ((payload = inbox.shift()) !== undefined) {
     let result;
     try {
       result = configService.processRemoteConfig(payload, {
@@ -69,40 +87,50 @@ function setupRemoteConfig({ gateway, configService, globalContext, node }) {
       };
     }
 
-    try {
-      // A10: the running Alarm Manager reads this global on every sample
-      if (result.runtimeConfig) {
-        globalContext.set('busbartherm_system_config', result.runtimeConfig, 'default');
-      }
-      // accepted remote modbus change behaves exactly like a local apply:
-      // decode-pipeline globals + dashboard drafts follow the new document
-      let paraRaw = null;
-      if (result.applied && result.domain === 'modbus_joints') {
-        const legacy = configService.deriveLegacyBridge(result.newDoc, globalContext.get('SlaveIDList') || []);
-        configService.writeLegacyModbusGlobals(globalContext, legacy);
-        paraRaw = legacy.paraRaw;
-        globalContext.set('joint_master_zone_A', result.drafts.joints);
-        globalContext.set('zone_master', result.drafts.zones);
-        globalContext.set('modbus_settings_draft', null); // next dashboard load rebuilds from the store
-      }
-      for (const audit of result.audits ?? []) {
-        configService.appendLegacyAudit(globalContext, audit.key, audit.entry);
-      }
-
-      gateway.outbox.enqueue('alarm', ackTopic, result.ack, 1);
-      gateway.soak?.flushStatus({ remote_config: result.ack });
-
-      node.send([
-        { payload: { remote_config: { domain: result.ack.domain, result: result.ack.result, request_id: result.ack.request_id, errors: result.ack.errors } } },
-        result.resendNeeded ? { payload: 'remote-apply' } : null,
-        paraRaw ? { payload: paraRaw } : null,
-      ]);
-    } catch (err) {
-      node.warn?.(`remote config side effects failed: ${err.message}`);
+    // A10: the running Alarm Manager evaluates every sample against this
+    // global (store "default", matching how it reads it). Written HERE,
+    // in message context - see the module comment.
+    let runtimeWritten = null;
+    if (result.runtimeConfig) {
+      globalContext.set('busbartherm_system_config', result.runtimeConfig, 'default');
+      runtimeWritten = globalContext.get('busbartherm_system_config', 'default'); // readback for the debug
     }
-  });
 
-  return { enabled: true, topic: cmdTopic };
+    let paraRaw = null;
+    if (result.applied && result.domain === 'modbus_joints') {
+      const legacy = configService.deriveLegacyBridge(result.newDoc, globalContext.get('SlaveIDList') || []);
+      configService.writeLegacyModbusGlobals(globalContext, legacy);
+      paraRaw = legacy.paraRaw;
+      globalContext.set('joint_master_zone_A', result.drafts.joints);
+      globalContext.set('zone_master', result.drafts.zones);
+      globalContext.set('modbus_settings_draft', null);
+    }
+
+    for (const audit of result.audits ?? []) {
+      configService.appendLegacyAudit(globalContext, audit.key, audit.entry);
+    }
+
+    if (ackTopic) gateway.outbox.enqueue('alarm', ackTopic, result.ack, 1);
+    gateway.soak?.flushStatus({ remote_config: result.ack });
+
+    sends.push([
+      {
+        payload: {
+          remote_config: {
+            domain: result.ack.domain,
+            result: result.ack.result,
+            request_id: result.ack.request_id,
+            errors: result.ack.errors,
+            live_thresholds_written: runtimeWritten ? true : undefined,
+          },
+        },
+      },
+      result.resendNeeded ? { payload: 'remote-apply' } : null,
+      paraRaw ? { payload: paraRaw } : null,
+    ]);
+  }
+
+  return sends;
 }
 
-module.exports = { setupRemoteConfig };
+module.exports = { setupRemoteConfig, drainRemoteConfig };

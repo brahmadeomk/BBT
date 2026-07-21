@@ -520,7 +520,10 @@ wants it. Envelope/examples: docs/aws/README.md Part E.
   saves stopped writing `busbartherm_system_config`, so the running
   Alarm Manager kept evaluating OLD thresholds after a dashboard
   save. The handler now returns `runtimeConfig` and both the local
-  wrapper and the remote path write the global.
+  wrapper and the remote drain write the global (store "default", to
+  match how the Alarm Manager reads it). `appendLegacyAudit` likewise
+  writes the audit globals to store "default" - the store both audit
+  viewers read - so remote/local audit entries actually appear.
 
 **Not yet done**: Slice 7's "Done when" live pass (push valid+invalid
 configs from the real AWS console, confirm acks/audit/no
