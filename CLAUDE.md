@@ -34,9 +34,13 @@ across all of them.**
   panel can connect and the combined soak can run. **Update: live
   connect achieved 2026-07-17; combined 24h soak PASSED 2026-07-18 —
   Slices 1–6 are all done. Slice 7 (remote config channel) is
-  **built and unit-tested** (cmd-topic channel, telemetry-interval
-  knob, R12 gate, A10 live re-evaluation — see the Slice 7 section
-  below); its "Done when" needs the live end-to-end push from AWS.**
+  **live-verified (2026-07-20)** — end-to-end push from AWS working:
+  telemetry-interval knob, alarm thresholds (A10 live re-evaluation),
+  R12 maintenance gate, acks + audit all confirmed on the real panel.
+  **Slices 1–7 are done. Slice 8 (hardening, portability drill, pilot)
+  is next** — note it checks against the still-missing Edge Cloud
+  Readiness Workplan, so ask for that before treating Slice 8 as fully
+  spec'd.**
 
 - **Cloud-agnostic rule**: no AWS SDK (or any single-cloud SDK) may be
   imported outside `/src/adapters/aws`. Everything else — config

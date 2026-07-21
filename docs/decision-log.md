@@ -1063,3 +1063,14 @@ companion project chat and recorded in the workplan/design docs there).
   for config. 294 tests passing; the end-to-end loopback tests updated
   to drive the drain tick and to model that the Pi's unnamed default
   store is the "default" named store.
+
+- **2026-07-20** — **Slice 7 live-verified.** End-to-end remote config
+  push from the real AWS console confirmed working on the panel:
+  telemetry-interval knob changes the flush cadence, alarm-threshold
+  pushes take effect on the running Alarm Manager (A10), the R12
+  maintenance gate rejects remote modbus changes unless enabled
+  locally, and acks + audit entries land correctly (after the
+  2026-07-19 message-context-drain fix). Slice 7's "Done when" is met.
+  Slices 1-7 done; Slice 8 (hardening / portability drill / pilot) is
+  next, blocked on the missing Edge Cloud Readiness Workplan for its
+  acceptance checklist.
