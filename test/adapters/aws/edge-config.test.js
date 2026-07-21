@@ -55,6 +55,14 @@ describe('loadEdgeConfig', () => {
     assert.equal(cfg.buffer.path, '/var/busduct/outbox');
   });
 
+  test('resolves the config and cert cmd topics (defaults when absent)', () => {
+    const cfg = loadEdgeConfig(writeConfig(BASE_YAML));
+    assert.equal(cfg.topics.cmd_config, 'cmd/c1024/s02/p07/config');
+    assert.equal(cfg.topics.cmd_config_ack, 'cmd/c1024/s02/p07/config/ack');
+    assert.equal(cfg.topics.cmd_cert, 'cmd/c1024/s02/p07/cert');
+    assert.equal(cfg.topics.cmd_cert_ack, 'cmd/c1024/s02/p07/cert/ack');
+  });
+
   test('basic ingest flag rewrites only the telemetry publish topic', () => {
     const cfg = loadEdgeConfig(writeConfig(BASE_YAML.replace('use_basic_ingest: false', 'use_basic_ingest: true')));
     assert.equal(cfg.topics.telemetry, '$aws/rules/btTelemetry/dt/c1024/s02/p07/tel');

@@ -58,6 +58,10 @@ function loadEdgeConfig(configPath = process.env.BUSDUCT_EDGE_CONFIG || DEFAULT_
     // documented templates as defaults when the config predates them
     cmd_config: resolveTopic(raw.topics.cmd_config ?? 'cmd/{customer_id}/{site_id}/{panel_id}/config', identity),
     cmd_config_ack: resolveTopic(raw.topics.cmd_config_ack ?? 'cmd/{customer_id}/{site_id}/{panel_id}/config/ack', identity),
+    // certificate rotation channel (Readiness Phase 1) - dedicated cmd
+    // topic, defaults when the config predates the field
+    cmd_cert: resolveTopic(raw.topics.cmd_cert ?? 'cmd/{customer_id}/{site_id}/{panel_id}/cert', identity),
+    cmd_cert_ack: resolveTopic(raw.topics.cmd_cert_ack ?? 'cmd/{customer_id}/{site_id}/{panel_id}/cert/ack', identity),
     use_basic_ingest: useBasicIngest,
   };
 

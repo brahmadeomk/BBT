@@ -1113,3 +1113,48 @@ companion project chat and recorded in the workplan/design docs there).
   New dir /src/historian (added to the layout table). 301 tests
   passing (7 new). Needs live verification on the Pi (create the DB via
   the setup script, restart, confirm bt_kpi points land).
+
+## 2026-07-21 — Historian visualisation + certificate rotation
+
+- **Historian visualisation — both read layers (user: "Build both")**:
+  (1) In-HMI **Trends** dashboard tab (Historian flow tab nodes
+  `9c1d2e3f4a5b7000`–`0b`): Sensor + Range dropdowns → on-demand
+  `influxdb in` query → `ui_chart`. Sensor list auto-populated from
+  `SHOW TAG VALUES` (boot + hourly); each range picks the matching
+  retention tier (raw / rollup_1h / rollup_1d). Pure logic in
+  `src/historian/trend-query.js` (`buildTrendQuery`, `resultsToChart`,
+  `sensorOptionsFromTagValues`) on the `busductHistorian` global; thin
+  function nodes. No new npm package (reuses node-red-contrib-influxdb's
+  query node). (2) **Grafana** as provisioning-as-code under
+  `tools/grafana/` (datasource + dashboard-provider YAMLs +
+  `busduct-historian.json`; `sensor_id` variable, one panel per tier).
+  Rationale: operators stay in the existing HMI for at-a-glance trends;
+  Grafana is the richer analysis/export tool for engineering. 13 new
+  tests.
+
+- **Certificate rotation (Readiness Phase 1, user: "Certification
+  rotation")**: device accepts a new operational cert over a dedicated
+  `cmd/{c}/{s}/{p}/cert` channel and switches atomically with automatic
+  rollback.
+  - **Layering to keep the cloud-agnostic rule intact**: generic
+    fs-mechanics + commit/rollback in `src/cloud-gateway/cert-rotation.js`
+    (`CertRotator`, plain fs, injected `reconnectAndVerify`); the only
+    AWS-side piece is `AwsIotTransport.reloadCredentials()` (re-read the
+    same paths, force-redial, resolve true/false on connect/timeout).
+    The rotator never imports the transport — it gets a callback. So it
+    also works against the Slice 8 Mosquitto/EMQX drill unchanged.
+  - **All-or-nothing**: validate PEM (no fs change on junk) → back up
+    (`.bak`) → atomic write (tmp+rename, key `0600`) → verify connect →
+    commit, else restore old material and reconnect on it. A failed
+    (expired/mis-issued) cert can never strand the panel offline.
+  - **Dedicated channel, not folded into the config domain**: rotation
+    is rarer, connection-affecting and higher-privilege; separate
+    receipt/apply split (setup subscribes → inbox; async 5s drain tick
+    applies in message context so the `CERT_ROTATION` audit lands),
+    mirroring the Slice 7 detached-callback lesson.
+  - **Transport hardening**: added a "stale client's late close no-ops"
+    guard (`this.client !== client`) so a redial (backoff OR rotation)
+    can't have an old client's close event disturb the live connection.
+  - Cloud-side: policy template grants the new topic (no new thing
+    attributes); runbook + envelope in docs/aws/README.md Part F. 334
+    tests passing (20 new). Live AWS pass still pending.

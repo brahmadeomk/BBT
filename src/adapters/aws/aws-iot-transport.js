@@ -64,6 +64,12 @@ class AwsIotTransport {
     random = Math.random,
   }) {
     this.url = `mqtts://${endpoint}:${port}`;
+    // Paths kept so credentials can be re-read for certificate rotation
+    // (reloadCredentials below) - the constructor snapshots the bytes,
+    // but a rotation writes new material to these same paths.
+    this.certPath = certPath;
+    this.keyPath = keyPath;
+    this.caPath = caPath;
     this.connectOptions = {
       clientId,
       cert: fs.readFileSync(certPath),
@@ -121,6 +127,10 @@ class AwsIotTransport {
     });
 
     client.on('close', () => {
+      // A redial (reconnect backoff or reloadCredentials) replaces
+      // this.client; a stale client's late 'close' must not drive the
+      // live connection's state or schedule a duplicate reconnect.
+      if (this.client !== client) return;
       this._setConnected(false);
       if (!this.closedByUser) this._scheduleReconnect();
     });
@@ -191,6 +201,62 @@ class AwsIotTransport {
 
   onConnectionChange(callback) {
     this.connectionListeners.push(callback);
+  }
+
+  offConnectionChange(callback) {
+    const i = this.connectionListeners.indexOf(callback);
+    if (i >= 0) this.connectionListeners.splice(i, 1);
+  }
+
+  /**
+   * Certificate rotation (Readiness Workplan Phase 1): re-reads the
+   * cert/key/CA from the SAME on-disk paths - a rotation writes the new
+   * material there atomically first (see CertRotator) - and force-redials
+   * with them. Resolves `true` once the broker accepts the new
+   * certificate (a real 'connect'), or `false` if no successful connect
+   * happens within verifyTimeoutSec. The caller uses that boolean to
+   * decide commit vs rollback; rollback restores the old files and calls
+   * this again. Publishing is naturally held by the outbox across the
+   * brief reconnect (publish rejects while disconnected).
+   */
+  reloadCredentials({ verifyTimeoutSec = 60 } = {}) {
+    this.connectOptions.cert = fs.readFileSync(this.certPath);
+    this.connectOptions.key = fs.readFileSync(this.keyPath);
+    this.connectOptions.ca = fs.readFileSync(this.caPath);
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.offConnectionChange(onChange);
+        resolve(ok);
+      };
+      const onChange = (connected) => {
+        if (connected) finish(true);
+      };
+      // Not unref'd: during a rotation this timeout is the only thing
+      // guaranteeing the verify promise settles; it's cleared as soon as
+      // the new connection is accepted (finish()).
+      const timer = setTimeout(() => finish(false), verifyTimeoutSec * 1000);
+      this.onConnectionChange(onChange);
+      this._redial();
+    });
+  }
+
+  /** Tears down the current client and dials fresh with the current connectOptions. */
+  _redial() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempts = 0;
+    this.closedByUser = false;
+    const old = this.client;
+    this.client = null; // old client's late 'close' now no-ops (guard in _dial)
+    this._setConnected(false);
+    if (old) old.end(true);
+    this._dial();
   }
 
   /** Graceful shutdown - no LWT fires, no reconnect scheduled. */

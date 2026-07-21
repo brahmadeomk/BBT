@@ -183,3 +183,63 @@ describe('AwsIotTransport - reconnect backoff', () => {
     assert.ok(dials[0].client.ended);
   });
 });
+
+describe('AwsIotTransport - reloadCredentials (certificate rotation)', () => {
+  test('re-reads the on-disk cert/key/CA, redials with them, and resolves true on connect', async () => {
+    const dir = certDir();
+    const paths = { certPath: path.join(dir, 'cert.pem'), keyPath: path.join(dir, 'key.pem'), caPath: path.join(dir, 'ca.pem') };
+    const dials = [];
+    const transport = new AwsIotTransport({
+      endpoint: 'e-ats.iot.ap-south-1.amazonaws.com',
+      ...paths,
+      clientId: 'bt-c1-s1-p1',
+      mqttConnect: (url, options) => {
+        const client = new FakeMqttClient();
+        dials.push({ url, options, client });
+        return client;
+      },
+    });
+    transport.connect();
+    dials[0].client.emit('connect');
+    assert.equal(transport.isConnected(), true);
+
+    // a rotation has just written new material to the same paths
+    fs.writeFileSync(paths.certPath, 'rotated cert');
+    fs.writeFileSync(paths.keyPath, 'rotated key');
+
+    const p = transport.reloadCredentials({ verifyTimeoutSec: 5 });
+    assert.equal(dials.length, 2, 'redialed with fresh credentials');
+    assert.ok(dials[0].client.ended, 'old client torn down');
+    assert.equal(dials[1].options.cert.toString(), 'rotated cert');
+    assert.equal(dials[1].options.key.toString(), 'rotated key');
+    dials[1].client.emit('connect');
+    assert.equal(await p, true, 'resolves true once the broker accepts the new cert');
+    transport.close();
+  });
+
+  test('resolves false when the new certificate does not connect within the timeout', async () => {
+    const { transport, dials } = makeTransport();
+    transport.connect();
+    dials[0].client.emit('connect');
+    const p = transport.reloadCredentials({ verifyTimeoutSec: 0.02 });
+    const ok = await p; // no 'connect' emitted on the redial -> times out
+    assert.equal(ok, false);
+    assert.equal(dials.length, 2);
+    transport.close();
+  });
+
+  test('a superseded client’s late close does not disturb the live connection', async () => {
+    const { transport, dials } = makeTransport();
+    transport.connect();
+    dials[0].client.emit('connect');
+    const p = transport.reloadCredentials({ verifyTimeoutSec: 5 });
+    dials[1].client.emit('connect');
+    await p;
+    const dialsBefore = dials.length;
+    dials[0].client.emit('close'); // old client's late close
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(dials.length, dialsBefore, 'no extra redial from the stale close');
+    assert.equal(transport.isConnected(), true, 'live connection unaffected');
+    transport.close();
+  });
+});

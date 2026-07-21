@@ -461,3 +461,67 @@ compiled job actually changed.
 Every push — accepted or rejected — is acknowledged with either
 `applied_versions` or `errors: [{rule, message}]` citing the exact
 R/A rule ids, and recorded in the panel's audit trail.
+
+## Part F — certificate rotation (Readiness Workplan Phase 1)
+
+The panel accepts a **new operational certificate** pushed over a
+dedicated command channel and switches to it **atomically, with
+automatic rollback** if the new cert can't connect — so a
+bad/expired/mis-issued cert can never strand the panel offline.
+
+Channel (separate from the config channel above, because rotation is
+rarer, connection-affecting and higher-privilege):
+
+- push topic: `cmd/{customer}/{site}/{panel}/cert`
+- ack topic:  `cmd/{customer}/{site}/{panel}/cert/ack` (QoS 1 via the
+  outbox alarm class)
+
+The per-device policy (`iot-policy-panel.template.json`) already grants
+subscribe/receive on `.../cert` and publish on `.../cert/ack`; no new
+thing attributes are needed (it reuses customer/site/panel).
+
+Envelope:
+
+```json
+{
+  "request_id": "rot-2026-07-21-a",
+  "user": "who is rotating (audit trail)",
+  "certificate": "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----\n",
+  "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
+  "ca": "-----BEGIN CERTIFICATE-----\n...  (optional, usually omitted)",
+  "certificate_id": "aws-cert-id (optional, audit only)"
+}
+```
+
+What the panel does on receipt (all-or-nothing):
+
+1. Validates the PEM. Junk → rejected ack, **no filesystem change**.
+2. Backs up the current cert/key (`.bak` beside the live files).
+3. Writes the new material atomically (temp file + rename; key `0600`).
+4. Reconnects to AWS IoT with the new cert and waits for the broker to
+   accept it (default 60s).
+5. **Accepted** → commit; ack `result:"applied"` with `certificate_id`.
+   **Not accepted** → restore the previous cert/key, reconnect on the
+   old cert, ack `result:"rejected"`, `rolled_back:true`, and an
+   `errors:[{rule:"CERT", ...}]` explaining the failure.
+
+Every outcome is written to the panel's audit trail (`CERT_ROTATION`).
+
+**Rotation runbook (per panel):**
+
+1. In AWS IoT, create/register the **new** certificate, attach the
+   same `bt-panel-policy`, and **attach it to the same thing**
+   (a thing may carry several active certs — attach the new one
+   *before* rotating so both old and new are valid during the switch).
+2. Publish the envelope above to `cmd/{c}/{s}/{p}/cert` (MQTT test
+   client, or your fleet tooling). Watch `cmd/.../cert/ack`.
+3. On `applied`, **deactivate then delete the old certificate** in AWS
+   IoT once you've confirmed telemetry is still flowing on the new one.
+4. On `rejected`/`rolled_back`, the panel is still live on the old
+   cert — investigate (policy not attached to the new cert? cert not
+   attached to the thing? wrong key?) and retry.
+
+Bench/portability note: on the loopback transport (unprovisioned bench,
+or the Slice 8 Mosquitto drill without file-based creds) the channel
+reports `enabled:false` — rotation only runs on a real MQTT-TLS
+transport that reads its credentials from disk.

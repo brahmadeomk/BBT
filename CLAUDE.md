@@ -96,11 +96,11 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 The **Edge Cloud Readiness Workplan** (now present) is the higher-level
 phase/acceptance document. Its §6 Exit Checklist is Slice 8's acceptance
 bar. Mapping to what's built: its Phases 0-5 correspond to our Slices
-1-7 (all done); it adds **two items our slices did not cover** — (1)
-**certificate rotation** (Phase 1: accept a new cert via config/OTA,
-switch atomically with rollback), and (2) **OTA update readiness**
-(Phase 6: A/B dual-bank update, signed packages, generic job message on
-the cmd channel, auto-rollback). Its §6 checklist also requires a 7-day
+1-7 (all done); it added **two items our slices did not cover** — (1)
+**certificate rotation** (Phase 1) — **now built** (see below), and (2)
+**OTA update readiness** (Phase 6: A/B dual-bank update, signed
+packages, generic job message on the cmd channel, auto-rollback) —
+still to build. Its §6 checklist also requires a 7-day
 (not just 24h) network-pull autonomy test, the portability drill
 against a non-AWS broker, and a 3-4 week pilot parallel run. OTA (Phase
 6) is a substantial new build whose A/B scheme depends on the Pi's
@@ -542,6 +542,39 @@ wants it. Envelope/examples: docs/aws/README.md Part E.
 configs from the real AWS console, confirm acks/audit/no
 alarm-state corruption), and the cloud-side data pipeline (IoT Rule →
 Timestream/S3 — a design-chat decision).
+
+## Certificate rotation (Readiness Phase 1, built — live pending)
+
+The device accepts a **new operational certificate** pushed over a
+dedicated cmd channel and switches atomically with rollback (Readiness
+§ line 56). Three layers:
+
+- **`src/cloud-gateway/cert-rotation.js`** (`CertRotator`) — pure,
+  cloud-agnostic fs mechanics + commit/rollback: validate PEM (no fs
+  change if junk) → snapshot + `.bak` backup → atomic write (tmp+rename,
+  key `0600`) → injected `reconnectAndVerify()` → commit on success,
+  else restore snapshot and reconnect on the old cert. A `_busy` guard
+  serializes rotations. Fully unit-tested with an in-memory fs.
+- **`AwsIotTransport.reloadCredentials({verifyTimeoutSec})`** — re-reads
+  cert/key/ca from the same paths and force-redials, resolving `true`
+  once the broker accepts the new cert or `false` on timeout. The
+  `_redial()` + "stale client's close no-ops" guard (`this.client !==
+  client`) make the swap clean. This is the only AWS-side piece; the
+  rotator sees only the injected callback (cloud-agnostic rule intact).
+- **Channel wiring** (`src/cloud-gateway/node-red/cert-rotation.js`):
+  dedicated `cmd/{c}/{s}/{p}/cert` topic (ack on `.../cert/ack`, outbox
+  alarm class), same receipt/apply split as remote config —
+  `setupCertRotation` (subscribe → `_certRotationInbox`, only enabled on
+  a transport that can reload creds), `drainCertRotation` (async tick,
+  applies in message context so the `CERT_ROTATION` audit lands). Flow:
+  Cloud Gateway tab nodes `8a1b2c3d4e5f6a30`–`35` (setup @boot + 5s
+  drain tick). Topics resolved in `edge-config.js` (`cmd_cert`/
+  `cmd_cert_ack`, defaults when absent). Policy template grants the new
+  topic; runbook + envelope: **docs/aws/README.md Part F**.
+
+**Not yet done**: live pass — push a real replacement cert from AWS,
+confirm atomic switch + ack, then push a bad cert and confirm rollback
+keeps the panel online.
 
 ## Local historian (InfluxDB 1.x)
 

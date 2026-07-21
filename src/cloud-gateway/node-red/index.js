@@ -9,6 +9,7 @@ const { createSoakRecorder, wrapTransportForSoak } = require('../soak-recorder')
 const { RuntimeSettings } = require('../runtime-settings');
 const handlers = require('./gateway-handler');
 const { setupRemoteConfig, drainRemoteConfig } = require('./remote-config');
+const { setupCertRotation, drainCertRotation } = require('./cert-rotation');
 
 /**
  * Entry point exposed to Node-RED function nodes via
@@ -85,6 +86,7 @@ function createGateway({ outboxDir = DEFAULT_OUTBOX_DIR, identity = DEFAULT_IDEN
       telemetry: telemetryTopic,
       alarm: alarmTopic,
       ...(topics?.cmd_config ? { cmd_config: topics.cmd_config, cmd_config_ack: topics.cmd_config_ack } : {}),
+      ...(topics?.cmd_cert ? { cmd_cert: topics.cmd_cert, cmd_cert_ack: topics.cmd_cert_ack } : {}),
     },
     mode: transport ? 'custom' : 'loopback', // createGatewayFromEdgeConfig overwrites with 'aws'
   };
@@ -168,4 +170,4 @@ function getGatewayInfo() {
   return singletonInfo;
 }
 
-module.exports = { createGateway, createGatewayFromEdgeConfig, getGateway, getGatewayInfo, resolveTopic, setupRemoteConfig, drainRemoteConfig, ...handlers };
+module.exports = { createGateway, createGatewayFromEdgeConfig, getGateway, getGatewayInfo, resolveTopic, setupRemoteConfig, drainRemoteConfig, setupCertRotation, drainCertRotation, ...handlers };
