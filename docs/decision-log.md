@@ -938,3 +938,37 @@ companion project chat and recorded in the workplan/design docs there).
   handleConfigManagerMessage's return shape changed to {msg, audit} -
   its wrapper function node updated accordingly. 4 flow nodes changed,
   all func-only, diff-verified. 279 tests passing (11 new).
+
+- **2026-07-19** — Merged the user's on-Pi flow pruning into the repo
+  artifact (user deleted unrelated legacy flows directly in the live
+  editor, then supplied the export for reconciliation - the repo copy
+  is the deployable artifact, so divergence had to be closed before
+  Slice 7 adds more flow changes). Verified before adopting:
+
+  - Their export is based on the repo's LATEST version - every recent
+    marker present (Alarm Manager ACK branch, audit-bridge wrappers,
+    Modbus Settings, Cloud Gateway tab); zero added nodes; the only
+    in-both difference is the palette global-config dropping
+    node-red-contrib-python3-function (consistent with the deletions;
+    the module can be npm-uninstalled from ~/.node-red at leisure).
+  - 280 nodes removed: five whole tabs (Temperature, Debugging,
+    SIM Debug, CSV Settings, IP Address) plus 82 nodes on
+    modbusMaster_V2 - all water-quality-era legacy: pH/pressure/
+    current calibration screens with their txt persistence, and the
+    entire pre-V2 polling chain (0.5s inject -> GetData/Write job
+    builder -> switch -> jsons -> python3-function modbusMaster.py/
+    modbusWrite.py). That V1 chain went out as a complete unit.
+  - Boundary-verified on the merged result: no dangling wires/links/
+    groups; every critical live-path node survives (Nano serial
+    in/out, json->serial, Send Nano Job + resend link, read/write job
+    builders, serial-silence watchdog, parameterForLoop with all 21
+    decode targets, Cloud Gateway link-ins, Sync Legacy ParaRaw,
+    Read/Transfer dropdown, SLAVE Active). flows-integrity green.
+  - Known cosmetic leftovers, deliberately NOT cleaned in this merge
+    (kept the repo byte-identical to what the Pi runs, so no re-import
+    is needed): 10 now-empty ui_groups (calibration/CSV/CPU TEMP) that
+    render nothing, and 2 pre-existing ui_groups with an empty tab ref
+    (Operator Login Form, Group 1) that predate this change. Fold
+    their removal into the next deliberate flow change (Slice 7).
+
+  Repo and panel are identical again; 279 tests passing.
