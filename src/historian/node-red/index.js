@@ -1,11 +1,28 @@
 'use strict';
 
 const { toInfluxPoints } = require('../influx-points');
+const {
+  RANGES,
+  DEFAULT_RANGE,
+  buildTrendQuery,
+  resultsToChart,
+  sensorOptionsFromTagValues,
+} = require('../trend-query');
 
 /**
  * Entry point exposed to Node-RED function nodes via
  * functionGlobalContext as `busductHistorian` (see
  * src/config-service/node-red/settings.js.example) so the Historian
- * tab's "Historian Points" function node stays a thin one-liner.
+ * and Trends tab function nodes stay thin one-liners:
+ *   - toInfluxPoints  : write side (KPI tap -> bt_kpi points)
+ *   - buildTrendQuery / resultsToChart / sensorOptionsFromTagValues :
+ *     read side for the in-HMI Trends screen.
  */
-module.exports = { toInfluxPoints };
+module.exports = {
+  toInfluxPoints,
+  RANGES,
+  DEFAULT_RANGE,
+  buildTrendQuery,
+  resultsToChart,
+  sensorOptionsFromTagValues,
+};

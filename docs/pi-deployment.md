@@ -196,8 +196,17 @@ influx -host 127.0.0.1 -port 8086 < tools/influx-setup.influxql   # once
 
 Add `busductHistorian` to settings.js functionGlobalContext (see
 settings.js.example), restart Node-RED, re-import the flow. The
-Historian tab then writes bt_kpi points to the `busduct` database.
-Full details, read queries and flash-wear notes: `docs/historian.md`.
+Historian tab then writes bt_kpi points to the `busduct` database, and
+a new **Trends** dashboard tab appears in the HMI (Sensor + Range
+dropdowns → on-demand chart). Full details, read queries and flash-wear
+notes: `docs/historian.md`.
+
+Optional **Grafana** analysis dashboard (provisioning-as-code under
+`tools/grafana/`): copy the two provisioning YAMLs to
+`/etc/grafana/provisioning/{datasources,dashboards}/` and the dashboard
+JSON to `/var/lib/grafana/dashboards/busduct/`, then
+`sudo systemctl restart grafana-server`. See `docs/historian.md`
+"Visualisation".
 
 ## Updating later
 

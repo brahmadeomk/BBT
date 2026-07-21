@@ -559,9 +559,19 @@ readings are skipped so trend aggregates stay clean.
 Retention/downsampling is native InfluxDB (`tools/influx-setup.influxql`):
 `raw` 7d (highest granularity) + `rollup_1h` 90d (daily/weekly) +
 `rollup_1d` ~5y (monthly/yearly), fed by two continuous queries. Full
-setup + read queries + flash-wear notes: **docs/historian.md**. The
-read/visualisation layer (Grafana or a ui_chart trend screen) is a
-deliberate follow-up, not built yet.
+setup + read queries + flash-wear notes: **docs/historian.md**.
+
+**Visualisation — both read layers built:** (1) an in-HMI **Trends**
+dashboard tab (Historian flow tab nodes `9c1d2e3f4a5b7000`–`0b`):
+Sensor + Range dropdowns drive an on-demand `influxdb in` query into a
+`ui_chart`; the sensor list auto-populates from `SHOW TAG VALUES`
+(boot + hourly), and each range picks the matching retention tier. Pure
+logic in `src/historian/trend-query.js` (`buildTrendQuery`,
+`resultsToChart`, `sensorOptionsFromTagValues` — all on the
+`busductHistorian` global), thin function nodes. (2) **Grafana**
+provisioning-as-code under `tools/grafana/` (datasource + dashboard
+provider YAMLs + `busduct-historian.json`, a `sensor_id` variable and
+one panel per retention tier). See docs/historian.md "Visualisation".
 
 ## Working agreements
 

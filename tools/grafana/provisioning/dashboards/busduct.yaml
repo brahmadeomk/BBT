@@ -1,0 +1,19 @@
+# Grafana dashboard provider for the BusductTherMo historian.
+#
+# Copy to /etc/grafana/provisioning/dashboards/ and copy the dashboard
+# JSON(s) from tools/grafana/dashboards/ to the `path` below. Grafana loads
+# them at startup and re-reads every updateIntervalSeconds, so updating the
+# JSON in the repo + re-copying is all it takes to update the dashboard.
+apiVersion: 1
+
+providers:
+  - name: busduct
+    orgId: 1
+    folder: Busduct
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/busduct
+      foldersFromFilesStructure: false

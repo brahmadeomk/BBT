@@ -1,0 +1,25 @@
+# Grafana provisioned datasource for the local BusductTherMo historian.
+#
+# Copy to /etc/grafana/provisioning/datasources/ (see docs/historian.md
+# "Grafana"). Points at the same InfluxDB 1.x instance the Pi already runs,
+# dedicated `busduct` database (leaves the legacy `Mecha` DB untouched).
+#
+# Read-only: no InfluxDB credentials are required for the default 1.x
+# install on the Pi; add user/password here if auth is enabled.
+apiVersion: 1
+
+datasources:
+  - name: BusductHistorian
+    uid: busduct_influx
+    type: influxdb
+    access: proxy
+    url: http://127.0.0.1:8086
+    database: busduct
+    isDefault: false
+    editable: true
+    jsonData:
+      dbName: busduct
+      httpMode: GET
+      # The default retention policy is `raw`; dashboard queries fully
+      # qualify the RP ("raw"."bt_kpi", "rollup_1h"."bt_kpi_1h", ...) so
+      # this default only matters for ad-hoc Explore queries.

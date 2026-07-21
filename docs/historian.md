@@ -85,12 +85,54 @@ SELECT temp_c_mean, temp_c_max, ror_c_hr_max FROM "rollup_1d"."bt_kpi_1d"
 WHERE sensor_id='J01' AND time > now() - 365d;
 ```
 
-**Visualisation** (the read layer) is deliberately not built here yet.
-The recommended path is Grafana pointed at the `busduct` database (one
-dashboard, a variable for `sensor_id`, and a panel per retention
-policy), which gives the daily/weekly/monthly/yearly views for free. A
-Node-RED `ui_chart` trend screen is the alternative if you want it in
-the existing HMI — say the word and it's a small follow-up.
+## Visualisation
+
+Two read layers ship, for two audiences:
+
+### In-HMI Trends tab (operators)
+
+A **Trends** dashboard tab in the existing Node-RED HMI — operators
+stay in the same UI they use for config and alarms, no separate login.
+Two dropdowns:
+
+- **Sensor** — auto-populated from the historian's own `sensor_id` tag
+  values (`SHOW TAG VALUES`), refreshed at boot and hourly, so it lists
+  exactly what's actually been recorded.
+- **Range** — `Live · 7 days (full)` / `Daily · 30 days` /
+  `Weekly · 90 days` / `Monthly · 1 year` / `Yearly · 5 years`. Each
+  range picks the matching retention tier automatically (raw for 7-day,
+  `rollup_1h` for daily/weekly, `rollup_1d` for monthly/yearly).
+
+Selecting either dropdown runs an on-demand InfluxDB query and loads the
+result into a line chart (temperature, ambient, ΔT, rate-of-rise — click
+a legend entry to hide a series if the scales clash). The query/transform
+logic is pure and unit-tested (`src/historian/trend-query.js`); the
+function nodes on the Historian flow tab are thin wrappers over the
+`busductHistorian` global. Nothing new to install — it uses the
+`influxdb in` (query) node from the `node-red-contrib-influxdb` package
+already present for the batch writer.
+
+### Grafana (analysis / engineering)
+
+For rich trending, zoom, and export, **Grafana** pointed at the
+`busduct` database is the recommended tool. This repo ships it as
+provisioning-as-code (no click-configuration to reproduce), under
+`tools/grafana/`:
+
+| File | Copy to |
+|---|---|
+| `provisioning/datasources/busduct.yaml` | `/etc/grafana/provisioning/datasources/` |
+| `provisioning/dashboards/busduct.yaml` | `/etc/grafana/provisioning/dashboards/` |
+| `dashboards/busduct-historian.json` | `/var/lib/grafana/dashboards/busduct/` |
+
+Then `sudo systemctl restart grafana-server`. The dashboard
+(**BusductTherMo — Historian Trends**, in the *Busduct* folder) has a
+`sensor_id` variable and three panels — one per retention tier
+(7-day raw, 1-hour rollup, 1-day rollup) — so the daily/weekly/monthly/
+yearly views come for free by moving the time picker. Install Grafana
+with `sudo apt-get install grafana` if it isn't already on the Pi; it
+reads the same InfluxDB the historian writes, no extra credentials on a
+default 1.x install.
 
 ## Operational notes
 
