@@ -78,6 +78,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | `/flows` | Node-RED flow exports — `flows_BBT.json` is the current production flow |
 | `/test` | Unit tests, soak/network-pull scripts, portability drill config (empty — Slice 2+) |
 | `/tools` | Migration script, commissioning helper (empty — Slice 2/6) |
+| `/src/historian` | Local InfluxDB historian: KPI→point transform + Node-RED exposure (not in the workplan's layout table; a local service per the Readiness Workplan) |
 | `/firmware` | Arduino Nano sketch (`Nano_IOT.ino`) — not in the workplan's layout table verbatim, kept as its own dir since it's frozen device source, not prose documentation. See decision log. |
 
 ## Reference documents
@@ -541,6 +542,26 @@ wants it. Envelope/examples: docs/aws/README.md Part E.
 configs from the real AWS console, confirm acks/audit/no
 alarm-state corruption), and the cloud-side data pipeline (IoT Rule →
 Timestream/S3 — a design-chat decision).
+
+## Local historian (InfluxDB 1.x)
+
+Local, cloud-independent trend store (Readiness Workplan "Local
+services / Historian"). The panel already runs InfluxDB 1.x (legacy
+`Mecha` db); this uses the same engine in a dedicated **`busduct`**
+database. New **Historian** flow tab taps the ProcessLogic joint +
+ambient KPI streams (`18f56266a8967320` / `89020f3e770fb86a`) → thin
+`Historian Points` node → `src/historian/influx-points.js`
+(`toInfluxPoints`, exposed as **`busductHistorian`**) → an
+`influxdb batch` node writing measurement `bt_kpi` (tags
+sensor_id/zone_id/slave_id/kind; fields temp_c + KPIs). Non-OK
+readings are skipped so trend aggregates stay clean.
+
+Retention/downsampling is native InfluxDB (`tools/influx-setup.influxql`):
+`raw` 7d (highest granularity) + `rollup_1h` 90d (daily/weekly) +
+`rollup_1d` ~5y (monthly/yearly), fed by two continuous queries. Full
+setup + read queries + flash-wear notes: **docs/historian.md**. The
+read/visualisation layer (Grafana or a ui_chart trend screen) is a
+deliberate follow-up, not built yet.
 
 ## Working agreements
 

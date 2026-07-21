@@ -35,5 +35,9 @@ module.exports = {
     // /var/busduct/outbox - create it with the same ownership as /var/busduct/cfg
     // (see docs/pi-deployment.md).
     busductCloudGateway: require('/home/pi/busduct-cloud-edge/src/cloud-gateway/node-red'),
+    // Local InfluxDB historian (Historian tab). Requires InfluxDB 1.x
+    // running on the Pi and the busduct database/retention policies
+    // created once - see docs/historian.md.
+    busductHistorian: require('/home/pi/busduct-cloud-edge/src/historian/node-red'),
   },
 };

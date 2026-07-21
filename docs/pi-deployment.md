@@ -185,6 +185,20 @@ wiring change (R12), set the `maintenanceMode` global to `true`
 locally (e.g. a temporary inject with a change node, or from the
 Settings screen once one exists) and set it back after.
 
+## 10. Local historian (InfluxDB, optional but recommended)
+
+The panel already runs InfluxDB 1.x. To enable the tiered local
+historian (7-day full resolution + daily/weekly/monthly/yearly trends):
+
+```bash
+influx -host 127.0.0.1 -port 8086 < tools/influx-setup.influxql   # once
+```
+
+Add `busductHistorian` to settings.js functionGlobalContext (see
+settings.js.example), restart Node-RED, re-import the flow. The
+Historian tab then writes bt_kpi points to the `busduct` database.
+Full details, read queries and flash-wear notes: `docs/historian.md`.
+
 ## Updating later
 
 Whenever this repo changes (new commits pushed):

@@ -1,0 +1,50 @@
+-- BusductTherMo local historian - InfluxDB 1.8 setup.
+-- Run once on the Pi:  influx -host 127.0.0.1 -port 8086 < tools/influx-setup.influxql
+-- Idempotent-ish: CREATE ... will error if it already exists; that's fine
+-- to ignore on a re-run. See docs/historian.md for the retention rationale
+-- and the trend read-queries.
+
+CREATE DATABASE "busduct";
+
+-- ============================================================
+-- Retention tiers (user requirement: 7 days at highest granularity,
+-- then daily/weekly/monthly/yearly trend). Adjust durations to taste -
+-- flagged for the design chat.
+-- ============================================================
+-- raw: every sample, 7 days. DEFAULT so bare writes land here.
+CREATE RETENTION POLICY "raw"       ON "busduct" DURATION 7d    REPLICATION 1 DEFAULT;
+-- 1-hour rollup, 90 days -> serves daily and weekly trend views.
+CREATE RETENTION POLICY "rollup_1h" ON "busduct" DURATION 90d   REPLICATION 1;
+-- 1-day rollup, ~5 years -> serves monthly and yearly trend views.
+CREATE RETENTION POLICY "rollup_1d" ON "busduct" DURATION 1825d REPLICATION 1;
+
+-- ============================================================
+-- Continuous queries: automatic downsampling. GROUP BY time(...), *
+-- keeps every tag (sensor_id/zone_id/slave_id/kind), so trends can be
+-- filtered/grouped per sensor exactly like the raw data.
+-- ============================================================
+CREATE CONTINUOUS QUERY "cq_1h" ON "busduct" BEGIN
+  SELECT mean("temp_c")      AS "temp_c_mean",
+         max("temp_c")       AS "temp_c_max",
+         min("temp_c")       AS "temp_c_min",
+         mean("delta_t_c")   AS "delta_t_c_mean",
+         max("delta_t_c")    AS "delta_t_c_max",
+         max("ror_c_hr")     AS "ror_c_hr_max",
+         mean("ambient_c")   AS "ambient_c_mean"
+  INTO "busduct"."rollup_1h"."bt_kpi_1h"
+  FROM "busduct"."raw"."bt_kpi"
+  GROUP BY time(1h), *
+END;
+
+CREATE CONTINUOUS QUERY "cq_1d" ON "busduct" BEGIN
+  SELECT mean("temp_c_mean")    AS "temp_c_mean",
+         max("temp_c_max")      AS "temp_c_max",
+         min("temp_c_min")      AS "temp_c_min",
+         mean("delta_t_c_mean") AS "delta_t_c_mean",
+         max("delta_t_c_max")   AS "delta_t_c_max",
+         max("ror_c_hr_max")    AS "ror_c_hr_max",
+         mean("ambient_c_mean") AS "ambient_c_mean"
+  INTO "busduct"."rollup_1d"."bt_kpi_1d"
+  FROM "busduct"."rollup_1h"."bt_kpi_1h"
+  GROUP BY time(1d), *
+END;

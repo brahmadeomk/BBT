@@ -1074,3 +1074,42 @@ companion project chat and recorded in the workplan/design docs there).
   Slices 1-7 done; Slice 8 (hardening / portability drill / pilot) is
   next, blocked on the missing Edge Cloud Readiness Workplan for its
   acceptance checklist.
+
+- **2026-07-21** — Built the **local InfluxDB historian** (user
+  requirement: 7 days full-resolution + daily/weekly/monthly/yearly
+  trends for absolute value + derived KPI, all configured sensors).
+  Decisions:
+  - **InfluxDB 1.x**, not 2.x - the panel ALREADY runs 1.x (found a
+    live influxdb config node -> db `Mecha` feeding a legacy raw
+    pipeline on modbusMaster_V2). Reused the engine, added a dedicated
+    `busduct` database so the legacy store is untouched. 1.x also
+    makes the tiered requirement trivial: retention policies +
+    continuous queries do the downsampling natively (2.x would need
+    Flux tasks).
+  - **Retention tiers**: raw 7d (default RP) + rollup_1h 90d + rollup_1d
+    1825d, with CQs cq_1h (raw->1h) and cq_1d (1h->1d), all keeping
+    tags via GROUP BY time,*. Serves the exact requested views. Durations
+    are engineering defaults - flagged for the design chat.
+  - **Ingestion from the internal bus**, not a new poll: the Historian
+    tab adds link-ins on the existing ProcessLogic joint + ambient
+    taps (the ambient tap had no consumer before), so the historian
+    sees every sample while the Cloud Gateway independently sees the
+    10-min batch. Pure transform in src/historian/influx-points.js
+    (measurement bt_kpi; temp_c always, KPIs for joints); non-OK
+    sensor_status skipped so rollup means/maxes aren't poisoned;
+    "unassigned" stream not historised (not configured sensors).
+    Exposed as busductHistorian; the function node is a one-liner.
+  - **No new repo dependency**: the DB write uses the node-red-contrib-
+    influxdb *batch* node (already in the Pi's palette), and point-
+    building is pure JS - so package.json is unchanged and the
+    cloud-agnostic check stays trivially green (InfluxDB is a LOCAL
+    service, not cloud egress; it does not go through the transport
+    interface).
+  - **Read/visualisation deferred**: shipped ingestion + retention +
+    documented per-granularity read queries; Grafana (recommended) or
+    a ui_chart trend screen is a follow-up. Flash-wear mitigation
+    (batch writes, optional USB SSD for /var/lib/influxdb) documented
+    per the Readiness Workplan risk table.
+  New dir /src/historian (added to the layout table). 301 tests
+  passing (7 new). Needs live verification on the Pi (create the DB via
+  the setup script, restart, confirm bt_kpi points land).
