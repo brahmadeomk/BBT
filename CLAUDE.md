@@ -85,17 +85,25 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | Artifact | Path | Status |
 |---|---|---|
 | Edge Implementation Work Plan (this plan) | `docs/BusductTherMo_Edge_Implementation_WorkPlan.md` (+ original `.docx`) | present |
-| Edge Cloud Readiness Workplan (phase-level plan this one maps to; referenced in §1, §4 Slice 8, needed for the final acceptance checklist) | — | **missing** |
+| Edge Cloud Readiness Workplan (phase-level plan this one maps to; §6 is Slice 8's exit checklist) | `docs/BusductTherMo_Edge_Cloud_Readiness_Workplan.docx` (+ extracted `.md`) | present (2026-07-21) |
 | Edge node config spec | `docs/busduct_edge_config.yaml` | present |
 | Modbus/joint schema (R1–R15) | `config/schemas/busduct_modbus_joint_config.schema.json` | present |
 | Alarms schema (A1–A10) | `config/schemas/busduct_alarms_config.schema.json` | present |
 | Existing Node-RED flow | `flows/flows_BBT.json` | present |
 | Arduino Nano firmware | `firmware/Nano_IOT.ino` | present |
 
-The **Edge Cloud Readiness Workplan** is referenced repeatedly by the
-Implementation Work Plan (it's the higher-level phase/acceptance-criteria
-document Slice 8's "Done when" checks against) but hasn't been provided
-to this repo yet. Ask for it before treating Slice 8 as fully spec'd.
+The **Edge Cloud Readiness Workplan** (now present) is the higher-level
+phase/acceptance document. Its §6 Exit Checklist is Slice 8's acceptance
+bar. Mapping to what's built: its Phases 0-5 correspond to our Slices
+1-7 (all done); it adds **two items our slices did not cover** — (1)
+**certificate rotation** (Phase 1: accept a new cert via config/OTA,
+switch atomically with rollback), and (2) **OTA update readiness**
+(Phase 6: A/B dual-bank update, signed packages, generic job message on
+the cmd channel, auto-rollback). Its §6 checklist also requires a 7-day
+(not just 24h) network-pull autonomy test, the portability drill
+against a non-AWS broker, and a 3-4 week pilot parallel run. OTA (Phase
+6) is a substantial new build whose A/B scheme depends on the Pi's
+OS/boot layout — take it to the design chat before implementing.
 
 ## Config domains
 
