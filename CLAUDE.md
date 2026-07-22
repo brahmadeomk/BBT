@@ -92,6 +92,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | Alarms schema (A1–A10) | `config/schemas/busduct_alarms_config.schema.json` | present |
 | Existing Node-RED flow | `flows/flows_BBT.json` | present |
 | Arduino Nano firmware | `firmware/Nano_IOT.ino` | present |
+| Edge device user manual (operator/technician HMI guide) | `docs/edge-user-manual.md` | present |
 
 The **Edge Cloud Readiness Workplan** (now present) is the higher-level
 phase/acceptance document. Its §6 Exit Checklist is Slice 8's acceptance
