@@ -398,8 +398,9 @@ before `Serial1.begin` (a bad comm used to set baud 0 and kill Modbus);
 `delayMicroseconds` >16383 µs routed through `delay()`. **New build
 dependency: Adafruit SleepyDog library.** After a watchdog reset the
 Nano waits for the Pi to resend the job — the Pi's serial-silence
-watchdog already triggers that resend. **Needs flashing + a multi-hour
-soak on real hardware to confirm the hang is gone.**
+watchdog already triggers that resend. **Flashed to the real Nano
+(2026-07-22) — confirmed transmitting; a 24 h soak is in progress to
+confirm the hang is gone.**
 
 ## Internal bus (Slice 4)
 
