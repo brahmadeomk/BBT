@@ -4,8 +4,9 @@ const { toInfluxPoints } = require('../influx-points');
 const {
   RANGES,
   DEFAULT_RANGE,
+  CHART_GROUPS,
   buildTrendQuery,
-  resultsToChart,
+  resultsToCharts,
   sensorOptionsFromTagValues,
 } = require('../trend-query');
 
@@ -15,14 +16,15 @@ const {
  * src/config-service/node-red/settings.js.example) so the Historian
  * and Trends tab function nodes stay thin one-liners:
  *   - toInfluxPoints  : write side (KPI tap -> bt_kpi points)
- *   - buildTrendQuery / resultsToChart / sensorOptionsFromTagValues :
+ *   - buildTrendQuery / resultsToCharts / sensorOptionsFromTagValues :
  *     read side for the in-HMI Trends screen.
  */
 module.exports = {
   toInfluxPoints,
   RANGES,
   DEFAULT_RANGE,
+  CHART_GROUPS,
   buildTrendQuery,
-  resultsToChart,
+  resultsToCharts,
   sensorOptionsFromTagValues,
 };

@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const {
   RANGES,
   buildTrendQuery,
-  resultsToChart,
+  resultsToCharts,
   sensorOptionsFromTagValues,
 } = require('../../src/historian/trend-query');
 
@@ -48,49 +48,52 @@ describe('buildTrendQuery', () => {
   });
 });
 
-describe('resultsToChart', () => {
-  test('raw rows become a ui_chart historic-data payload, one series per field', () => {
-    const rows = [
-      { time: '2026-07-20T10:00:00Z', temp_c: 42.1, ambient_c: 31.0, delta_t_c: 11.1, ror_c_hr: 2.2 },
-      { time: '2026-07-20T10:10:00Z', temp_c: 42.4, ambient_c: 31.2, delta_t_c: 11.2, ror_c_hr: 2.5 },
-    ];
-    const [payload] = resultsToChart(rows, 'raw7d');
-    assert.deepEqual(payload.series, ['Temp °C', 'Ambient °C', 'ΔT °C', 'RoR °C/hr']);
-    assert.deepEqual(payload.labels, ['']);
-    assert.equal(payload.data.length, 4);
-    assert.equal(payload.data[0].length, 2);
-    assert.deepEqual(payload.data[0][0], { x: Date.parse('2026-07-20T10:00:00Z'), y: 42.1 });
-    assert.deepEqual(payload.data[3][1], { x: Date.parse('2026-07-20T10:10:00Z'), y: 2.5 });
-  });
-
+describe('resultsToCharts (split charts)', () => {
   test('null/missing field values are dropped (gap stays a gap)', () => {
     const rows = [
       { time: '2026-07-20T10:00:00Z', temp_c: 42.1, ambient_c: null },
       { time: '2026-07-20T10:10:00Z', temp_c: null, ambient_c: 31.2 },
     ];
-    const [payload] = resultsToChart(rows, 'raw7d');
-    assert.equal(payload.data[0].length, 1); // temp_c: one valid
-    assert.equal(payload.data[1].length, 1); // ambient_c: one valid
+    const { temp } = resultsToCharts(rows, 'raw7d');
+    assert.equal(temp[0].data[0].length, 1); // temp_c: one valid
+    assert.equal(temp[0].data[1].length, 1); // ambient_c: one valid
   });
 
   test('rows with an unparseable time are skipped', () => {
     const rows = [{ time: 'not-a-date', temp_c: 42.1 }, { time: '2026-07-20T10:10:00Z', temp_c: 42.4 }];
-    const [payload] = resultsToChart(rows, 'raw7d');
-    assert.equal(payload.data[0].length, 1);
+    const { temp } = resultsToCharts(rows, 'raw7d');
+    assert.equal(temp[0].data[0].length, 1);
   });
 
-  test('accepts epoch-ms time and rollup aggregate columns', () => {
+  test('raw rows split into temp+ambient / ΔT / RoR chart payloads', () => {
+    const rows = [
+      { time: '2026-07-20T10:00:00Z', temp_c: 42.1, ambient_c: 31.0, delta_t_c: 11.1, delta_t_raw_c: 11.4, ror_c_hr: 2.2 },
+    ];
+    const charts = resultsToCharts(rows, 'raw7d');
+    assert.deepEqual(charts.temp[0].series, ['Temp °C', 'Ambient °C']);
+    assert.deepEqual(charts.delta[0].series, ['ΔT °C', 'ΔT raw °C']);
+    assert.deepEqual(charts.ror[0].series, ['RoR °C/hr']);
+    // values land in the right chart
+    assert.deepEqual(charts.temp[0].data[0][0], { x: Date.parse('2026-07-20T10:00:00Z'), y: 42.1 });
+    assert.deepEqual(charts.temp[0].data[1][0], { x: Date.parse('2026-07-20T10:00:00Z'), y: 31.0 });
+    assert.deepEqual(charts.ror[0].data[0][0], { x: Date.parse('2026-07-20T10:00:00Z'), y: 2.2 });
+  });
+
+  test('rollup ranges group the aggregate columns the same way', () => {
     const t = Date.parse('2026-07-20T10:00:00Z');
-    const [payload] = resultsToChart([{ time: t, temp_c_mean: 40.0, temp_c_max: 44.0 }], 'day30');
-    assert.deepEqual(payload.data[0][0], { x: t, y: 40.0 });
-    assert.deepEqual(payload.data[1][0], { x: t, y: 44.0 });
+    const charts = resultsToCharts([{ time: t, temp_c_mean: 40, temp_c_max: 44, ambient_c_mean: 30, delta_t_c_max: 12, ror_c_hr_max: 3 }], 'day30');
+    assert.deepEqual(charts.temp[0].series, ['Temp mean °C', 'Temp max °C', 'Ambient mean °C']);
+    assert.deepEqual(charts.delta[0].series, ['ΔT max °C']);
+    assert.deepEqual(charts.ror[0].series, ['RoR max °C/hr']);
+    assert.equal(charts.ror[0].data[0][0].y, 3);
   });
 
-  test('empty / non-array input yields an empty (chart-clearing) payload', () => {
-    const [payload] = resultsToChart([], 'raw7d');
-    assert.equal(payload.data.every((d) => d.length === 0), true);
-    assert.equal(resultsToChart(null, 'raw7d')[0].data[0].length, 0);
-    assert.equal(resultsToChart(undefined, 'nope')[0].series.length, 4);
+  test('empty input yields three chart-clearing payloads', () => {
+    const charts = resultsToCharts([], 'raw7d');
+    for (const g of ['temp', 'delta', 'ror']) {
+      assert.equal(charts[g][0].data.every((d) => d.length === 0), true);
+      assert.deepEqual(charts[g][0].labels, ['']);
+    }
   });
 });
 

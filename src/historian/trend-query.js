@@ -6,8 +6,8 @@
 // busductHistorian global:
 //   - buildTrendQuery(sensorId, rangeKey) -> InfluxQL string for the
 //     influxdb query node (msg.query).
-//   - resultsToChart(rows, rangeKey)      -> a node-red-dashboard ui_chart
-//     "load historic data" payload.
+//   - resultsToCharts(rows, rangeKey)     -> node-red-dashboard ui_chart
+//     "load historic data" payloads, split into temp / delta / ror charts.
 //   - sensorOptionsFromTagValues(rows)    -> ui_dropdown option list built
 //     from SHOW TAG VALUES output.
 //
@@ -22,20 +22,28 @@
 // queries. Every series is in degrees C except rate-of-rise (C/hr) - the
 // operator can toggle a series off via the chart legend if the scales
 // clash.
+// `group` routes each field to its own chart in the Trends tab:
+//   temp  -> absolute temperature + ambient (shared °C axis)
+//   delta -> ΔT (°C, separate chart)
+//   ror   -> rate-of-rise (°C/hr, separate chart)
 const RAW_FIELDS = [
-  { col: 'temp_c', series: 'Temp °C' },
-  { col: 'ambient_c', series: 'Ambient °C' },
-  { col: 'delta_t_c', series: 'ΔT °C' },
-  { col: 'ror_c_hr', series: 'RoR °C/hr' },
+  { col: 'temp_c', series: 'Temp °C', group: 'temp' },
+  { col: 'ambient_c', series: 'Ambient °C', group: 'temp' },
+  { col: 'delta_t_c', series: 'ΔT °C', group: 'delta' },
+  { col: 'delta_t_raw_c', series: 'ΔT raw °C', group: 'delta' },
+  { col: 'ror_c_hr', series: 'RoR °C/hr', group: 'ror' },
 ];
 
 const ROLLUP_FIELDS = [
-  { col: 'temp_c_mean', series: 'Temp mean °C' },
-  { col: 'temp_c_max', series: 'Temp max °C' },
-  { col: 'ambient_c_mean', series: 'Ambient mean °C' },
-  { col: 'delta_t_c_max', series: 'ΔT max °C' },
-  { col: 'ror_c_hr_max', series: 'RoR max °C/hr' },
+  { col: 'temp_c_mean', series: 'Temp mean °C', group: 'temp' },
+  { col: 'temp_c_max', series: 'Temp max °C', group: 'temp' },
+  { col: 'ambient_c_mean', series: 'Ambient mean °C', group: 'temp' },
+  { col: 'delta_t_c_max', series: 'ΔT max °C', group: 'delta' },
+  { col: 'ror_c_hr_max', series: 'RoR max °C/hr', group: 'ror' },
 ];
+
+// The three charts the Trends tab renders, in order.
+const CHART_GROUPS = ['temp', 'delta', 'ror'];
 
 const RANGES = [
   { key: 'raw7d', label: 'Live · 7 days (full)', rp: 'raw', measurement: 'bt_kpi', duration: '7d', fields: RAW_FIELDS },
@@ -78,26 +86,32 @@ function parseTime(t) {
 }
 
 // node-red-dashboard ui_chart accepts a complete historic dataset as
-// [{ series:[...], data:[[{x,y}...],...], labels:[''] }]. One data array
-// per series, x = epoch ms, y = value; null/missing points are dropped so a
-// gap shows as a gap.
-function resultsToChart(rows, rangeKey) {
+// [{ series:[...], data:[[{x,y}...],...], labels:[''] }] - one data array per
+// series, x = epoch ms, y = value; null/missing points are dropped so a gap
+// shows as a gap. resultsToCharts splits the range's fields into one such
+// payload per group (temp / delta / ror) so the Trends tab shows three charts
+// from a single query. Returns { temp: [payload], delta: [payload],
+// ror: [payload] }.
+function resultsToCharts(rows, rangeKey) {
   const r = rangeFor(rangeKey);
-  const series = r.fields.map((f) => f.series);
-  const data = r.fields.map(() => []);
   const list = Array.isArray(rows) ? rows : [];
-  for (const row of list) {
-    if (!row || typeof row !== 'object') continue;
-    const x = parseTime(row.time);
-    if (x === null) continue;
-    r.fields.forEach((f, i) => {
-      const y = row[f.col];
-      if (typeof y === 'number' && Number.isFinite(y)) {
-        data[i].push({ x, y });
-      }
-    });
+  const out = {};
+  for (const group of CHART_GROUPS) {
+    const fields = r.fields.filter((f) => f.group === group);
+    const series = fields.map((f) => f.series);
+    const data = fields.map(() => []);
+    for (const row of list) {
+      if (!row || typeof row !== 'object') continue;
+      const x = parseTime(row.time);
+      if (x === null) continue;
+      fields.forEach((f, i) => {
+        const y = row[f.col];
+        if (typeof y === 'number' && Number.isFinite(y)) data[i].push({ x, y });
+      });
+    }
+    out[group] = [{ series, data, labels: [''] }];
   }
-  return [{ series, data, labels: [''] }];
+  return out;
 }
 
 // SHOW TAG VALUES FROM bt_kpi WITH KEY = "sensor_id" returns rows shaped
@@ -116,7 +130,8 @@ function sensorOptionsFromTagValues(rows) {
 module.exports = {
   RANGES,
   DEFAULT_RANGE,
+  CHART_GROUPS,
   buildTrendQuery,
-  resultsToChart,
+  resultsToCharts,
   sensorOptionsFromTagValues,
 };

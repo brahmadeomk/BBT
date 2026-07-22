@@ -103,10 +103,18 @@ Two dropdowns:
   range picks the matching retention tier automatically (raw for 7-day,
   `rollup_1h` for daily/weekly, `rollup_1d` for monthly/yearly).
 
-Selecting either dropdown runs an on-demand InfluxDB query and loads the
-result into a line chart (temperature, ambient, ΔT, rate-of-rise — click
-a legend entry to hide a series if the scales clash). The query/transform
-logic is pure and unit-tested (`src/historian/trend-query.js`); the
+Selecting either dropdown runs a single on-demand InfluxDB query and
+loads the result into **three stacked charts**, grouped by unit so the
+scales never fight:
+
+- **Temperature + Ambient (°C)** — absolute joint temperature and its
+  ambient reference on one axis;
+- **ΔT (°C)** — delta-T (and raw ΔT) on its own chart;
+- **Rate of rise (°C/hr)** — RoR on its own chart.
+
+The query/transform logic is pure and unit-tested
+(`src/historian/trend-query.js`, `resultsToCharts` splits one query's
+rows into the three chart payloads); the
 function nodes on the Historian flow tab are thin wrappers over the
 `busductHistorian` global. Nothing new to install — it uses the
 `influxdb in` (query) node from the `node-red-contrib-influxdb` package
