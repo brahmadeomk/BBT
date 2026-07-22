@@ -34,12 +34,30 @@
  * @returns {Array<{measurement: string, fields: object, tags: object, timestamp: number}>}
  *   0 or 1 points, shaped for the influxdb batch node
  */
+/**
+ * Coerce a KPI value to a finite number. The internal-bus contract
+ * documents these as numbers, but the live ProcessLogic pipeline emits
+ * them as numeric STRINGS ("31.39"); accept those. Returns null for
+ * anything that isn't a real reading (null/""/bool/NaN/non-numeric) so
+ * the caller drops it rather than recording a bogus 0.
+ */
+function num(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 function toInfluxPoints(msg, { measurement = 'bt_kpi' } = {}) {
   const p = msg?.payload;
   if (!p || typeof p !== 'object') return [];
   if (msg.topic !== 'joint' && msg.topic !== 'ambient') return [];
   if (p.sensor_status && p.sensor_status !== 'OK') return [];
-  if (typeof p.val !== 'number' || !Number.isFinite(p.val)) return [];
+
+  const val = num(p.val); // absolute reading (may arrive as a numeric string)
+  if (val === null) return [];
 
   const timestamp = Number.isFinite(Date.parse(p.timestamp)) ? Date.parse(p.timestamp) : Date.now();
 
@@ -50,13 +68,18 @@ function toInfluxPoints(msg, { measurement = 'bt_kpi' } = {}) {
   };
   if (p.slaveID != null) tags.slave_id = String(p.slaveID);
 
-  const fields = { temp_c: p.val };
+  const fields = { temp_c: val };
   if (msg.topic === 'joint') {
-    if (Number.isFinite(p.emaTemp)) fields.ema_temp_c = p.emaTemp;
-    if (Number.isFinite(p.ror)) fields.ror_c_hr = p.ror;
-    if (p.deltaT && Number.isFinite(p.deltaT.ema)) fields.delta_t_c = p.deltaT.ema;
-    if (p.deltaT && Number.isFinite(p.deltaT.raw)) fields.delta_t_raw_c = p.deltaT.raw;
-    if (p.ambient && Number.isFinite(p.ambient.val)) fields.ambient_c = p.ambient.val;
+    const ema = num(p.emaTemp);
+    if (ema !== null) fields.ema_temp_c = ema;
+    const ror = num(p.ror);
+    if (ror !== null) fields.ror_c_hr = ror;
+    const dtEma = p.deltaT ? num(p.deltaT.ema) : null;
+    if (dtEma !== null) fields.delta_t_c = dtEma;
+    const dtRaw = p.deltaT ? num(p.deltaT.raw) : null;
+    if (dtRaw !== null) fields.delta_t_raw_c = dtRaw;
+    const amb = p.ambient ? num(p.ambient.val) : null;
+    if (amb !== null) fields.ambient_c = amb;
   }
 
   return [{ measurement, fields, tags, timestamp }];

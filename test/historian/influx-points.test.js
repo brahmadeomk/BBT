@@ -52,6 +52,32 @@ describe('toInfluxPoints', () => {
     assert.deepEqual(pt.fields, { temp_c: 42.3 });
   });
 
+  test('coerces numeric-string readings/KPIs (live ProcessLogic emits strings)', () => {
+    const [pt] = toInfluxPoints(jointMsg({
+      val: '31.39',
+      emaTemp: '31.67',
+      ror: '0',
+      deltaT: { raw: '11.2', ema: '10.9' },
+      ambient: { slaveID: 101, val: '31.06' },
+    }));
+    assert.deepEqual(pt.fields, {
+      temp_c: 31.39,
+      ema_temp_c: 31.67,
+      ror_c_hr: 0,
+      delta_t_c: 10.9,
+      delta_t_raw_c: 11.2,
+      ambient_c: 31.06,
+    });
+    // stored as real numbers, not strings, so InfluxDB math/aggregates work
+    assert.equal(typeof pt.fields.temp_c, 'number');
+  });
+
+  test('an empty string / non-numeric reading is still dropped (not recorded as 0)', () => {
+    assert.deepEqual(toInfluxPoints(jointMsg({ val: '' })), []);
+    assert.deepEqual(toInfluxPoints(jointMsg({ val: 'n/a' })), []);
+    assert.deepEqual(toInfluxPoints(jointMsg({ val: null })), []);
+  });
+
   test('skips non-OK sensor readings (no poisoned aggregates)', () => {
     assert.deepEqual(toInfluxPoints(jointMsg({ sensor_status: 'Communication_Error' })), []);
     assert.deepEqual(toInfluxPoints(jointMsg({ sensor_status: 'Sensor_Error' })), []);
