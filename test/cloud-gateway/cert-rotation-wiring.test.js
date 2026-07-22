@@ -1,6 +1,6 @@
 'use strict';
 
-const { test, describe } = require('node:test');
+const { test, describe, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { setupCertRotation, drainCertRotation } = require('../../src/cloud-gateway/node-red/cert-rotation');
@@ -19,6 +19,25 @@ function fakeGlobal() {
 const TOPICS = { cmd_cert: 'cmd/c1/s1/p1/cert', cmd_cert_ack: 'cmd/c1/s1/p1/cert/ack' };
 
 describe('setupCertRotation', () => {
+  const orig = process.env.BUSDUCT_CERT_ROTATION;
+  beforeEach(() => { process.env.BUSDUCT_CERT_ROTATION = '1'; }); // enabled for the topic/transport tests
+  afterEach(() => {
+    if (orig === undefined) delete process.env.BUSDUCT_CERT_ROTATION;
+    else process.env.BUSDUCT_CERT_ROTATION = orig;
+  });
+
+  test('disabled by default until BUSDUCT_CERT_ROTATION is set (never breaks the AWS connection)', () => {
+    delete process.env.BUSDUCT_CERT_ROTATION;
+    const gateway = {
+      topics: TOPICS,
+      transport: { certPath: '/c', keyPath: '/k', caPath: '/a', reloadCredentials: async () => true, subscribe() {} },
+    };
+    const res = setupCertRotation({ gateway });
+    assert.equal(res.enabled, false);
+    assert.match(res.reason, /BUSDUCT_CERT_ROTATION/);
+    assert.equal(gateway._certRotationSubscribed, undefined, 'must not subscribe when disabled');
+  });
+
   test('disabled without cert cmd topics', () => {
     const res = setupCertRotation({ gateway: { topics: {}, transport: {} } });
     assert.equal(res.enabled, false);
@@ -31,7 +50,7 @@ describe('setupCertRotation', () => {
     assert.match(res.reason, /cannot reload credentials/);
   });
 
-  test('subscribes once and builds a rotator when the transport supports reload', () => {
+  test('subscribes once and builds a rotator when enabled and the transport supports reload', () => {
     const subscribed = [];
     const gateway = {
       topics: TOPICS,

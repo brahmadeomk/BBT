@@ -521,6 +521,29 @@ Every outcome is written to the panel's audit trail (`CERT_ROTATION`).
    cert — investigate (policy not attached to the new cert? cert not
    attached to the thing? wrong key?) and retry.
 
+### Enabling the channel (two steps, in this order)
+
+Cert rotation is **OFF by default**, because subscribing to
+`cmd/.../cert` before the device policy allows it makes AWS IoT Core drop
+the whole MQTT connection (unauthorized subscribe = disconnect), which
+would take live telemetry down (`connected: false`). Enable it
+deliberately, policy first:
+
+1. **Update the device policy** to grant the cert topics. In AWS IoT →
+   Security → Policies → `bt-panel-policy` → *Create new version* from
+   the current `iot-policy-panel.template.json` (which now includes
+   subscribe/receive on `.../cert` and publish on `.../cert/ack`) → set
+   the new version **active**. No reconnect needed on the device; the new
+   policy applies on the next subscribe.
+2. **Turn on the flag** on the panel: set `BUSDUCT_CERT_ROTATION=1` in
+   Node-RED's environment and restart. The "Cert Rotation Setup" node's
+   debug then shows `enabled: true` with the cmd topic.
+
+If you enabled the flag *before* updating the policy and telemetry went
+to `connected: false`, either unset `BUSDUCT_CERT_ROTATION` (rotation
+off, connection recovers) or push the policy update — either restores the
+connection.
+
 Bench/portability note: on the loopback transport (unprovisioned bench,
 or the Slice 8 Mosquitto drill without file-based creds) the channel
 reports `enabled:false` — rotation only runs on a real MQTT-TLS

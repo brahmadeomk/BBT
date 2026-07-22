@@ -32,6 +32,21 @@ const { CertRotator } = require('../cert-rotation');
  */
 
 function setupCertRotation({ gateway }) {
+  // OFF by default. Subscribing to cmd/.../cert before the panel's AWS IoT
+  // policy grants that topic makes AWS IoT Core drop the ENTIRE connection
+  // (unauthorized subscribe = disconnect), taking live telemetry down with
+  // it - which is exactly the "a rotation problem must never take down local
+  // monitoring" rule. Enable only AFTER updating the device policy to grant
+  // the cert topics (docs/aws/README.md Part F): set BUSDUCT_CERT_ROTATION=1
+  // in Node-RED's environment and restart.
+  const flag = process.env.BUSDUCT_CERT_ROTATION;
+  if (flag !== '1' && flag !== 'true') {
+    return {
+      enabled: false,
+      reason: 'cert rotation disabled - grant the cmd/.../cert topic in the AWS IoT policy, then set BUSDUCT_CERT_ROTATION=1',
+    };
+  }
+
   const cmdTopic = gateway.topics.cmd_cert;
   const ackTopic = gateway.topics.cmd_cert_ack;
   if (!cmdTopic || !ackTopic) {

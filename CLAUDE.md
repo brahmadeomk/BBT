@@ -606,6 +606,15 @@ dedicated cmd channel and switches atomically with rollback (Readiness
   `cmd_cert_ack`, defaults when absent). Policy template grants the new
   topic; runbook + envelope: **docs/aws/README.md Part F**.
 
+**OFF by default (learned live 2026-07-22):** subscribing to
+`cmd/.../cert` before the device's AWS IoT policy grants it makes AWS
+IoT Core drop the whole connection (unauthorized subscribe =
+disconnect) → `connected:false`, telemetry down. So `setupCertRotation`
+now no-ops unless `BUSDUCT_CERT_ROTATION=1` is set in Node-RED's env.
+Enable order: (1) push the updated `iot-policy-panel.template.json` as a
+new active policy version in AWS, then (2) set the flag + restart.
+Recovery if it broke a connection: unset the flag (or apply the policy).
+
 **Not yet done**: live pass — push a real replacement cert from AWS,
 confirm atomic switch + ack, then push a bad cert and confirm rollback
 keeps the panel online.
