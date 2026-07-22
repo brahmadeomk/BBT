@@ -54,7 +54,11 @@ function toInfluxPoints(msg, { measurement = 'bt_kpi' } = {}) {
   const p = msg?.payload;
   if (!p || typeof p !== 'object') return [];
   if (msg.topic !== 'joint' && msg.topic !== 'ambient') return [];
-  if (p.sensor_status && p.sensor_status !== 'OK') return [];
+  // Live ProcessLogic emits sensor_status lowercase ("ok"); the contract
+  // doc shows "OK". Compare case-insensitively (and trim) so a healthy
+  // reading isn't dropped, while real faults ("Sensor_Error", etc.) still
+  // skip.
+  if (p.sensor_status && String(p.sensor_status).trim().toUpperCase() !== 'OK') return [];
 
   const val = num(p.val); // absolute reading (may arrive as a numeric string)
   if (val === null) return [];

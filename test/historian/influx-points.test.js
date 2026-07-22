@@ -78,9 +78,16 @@ describe('toInfluxPoints', () => {
     assert.deepEqual(toInfluxPoints(jointMsg({ val: null })), []);
   });
 
+  test('accepts OK regardless of case/whitespace (live pipeline emits lowercase "ok")', () => {
+    assert.equal(toInfluxPoints(jointMsg({ sensor_status: 'ok' })).length, 1);
+    assert.equal(toInfluxPoints(jointMsg({ sensor_status: 'Ok' })).length, 1);
+    assert.equal(toInfluxPoints(jointMsg({ sensor_status: ' OK ' })).length, 1);
+  });
+
   test('skips non-OK sensor readings (no poisoned aggregates)', () => {
     assert.deepEqual(toInfluxPoints(jointMsg({ sensor_status: 'Communication_Error' })), []);
     assert.deepEqual(toInfluxPoints(jointMsg({ sensor_status: 'Sensor_Error' })), []);
+    assert.deepEqual(toInfluxPoints(jointMsg({ sensor_status: 'sensor_error' })), []);
   });
 
   test('skips a non-finite / missing absolute reading', () => {
