@@ -382,6 +382,25 @@ change this wire format without updating the firmware in lockstep:
   `"err_write"` for transfers). The Cloud Gateway / Node-RED side needs
   to parse this framing, not assume a single batched response.
 
+**Hang fix (2026-07-22, firmware rev):** the Nano stopped transmitting
+after some hours, repeatably. Root causes, all fixed internally with
+**no wire-format change** (Node-RED side untouched): (1) RAM exhaustion
+— the per-loop response builder used a 12 KB `StaticJsonBuffer` on the
+stack every `loop()` next to the 12 KB static `inputBuffer` on a 32 KB
+SAMD21 → stack/heap collision → hard fault; now a 4 KB
+`RESPONSE_BUFFER_SIZE` (it only ever holds one packet result). (2)
+USB-CDC back-pressure — `Serial.print`/`flush` block when the Pi stops
+reading; writes now guarded by `if (Serial)`, blocking `flush()` calls
+removed. (3) No recovery — added an Adafruit SleepyDog **watchdog**
+(16 s window, fed at top of `loop()` and per Modbus packet). (4) Boot
+wedge — `while(!Serial)` now bounded to 2 s. (5) `comm` validated
+before `Serial1.begin` (a bad comm used to set baud 0 and kill Modbus);
+`delayMicroseconds` >16383 µs routed through `delay()`. **New build
+dependency: Adafruit SleepyDog library.** After a watchdog reset the
+Nano waits for the Pi to resend the job — the Pi's serial-silence
+watchdog already triggers that resend. **Needs flashing + a multi-hour
+soak on real hardware to confirm the hang is gone.**
+
 ## Internal bus (Slice 4)
 
 `ProcessLogic` (KPI stream, 3 outputs) and `Alarm Manager` (alarm

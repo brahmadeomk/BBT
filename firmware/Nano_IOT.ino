@@ -1,17 +1,47 @@
-//Last modified - 17/09/2025
+//Last modified - 22/07/2026
+//
+// Hang fix (stops transmitting after some hours, repeatably). Root causes
+// addressed in this revision, all internal - the Pi<->Nano wire format
+// (read/write/transfer/comm in, {"t":..,"st":..} lines out) is UNCHANGED,
+// so the Node-RED side needs no change:
+//   1. RAM exhaustion on the 32 KB SAMD21: the per-loop response builder
+//      used a 12 KB StaticJsonBuffer on the stack every loop() on top of
+//      the 12 KB static inputBuffer -> stack/heap collision -> hard fault
+//      after hours. The response builder only ever holds ONE small packet
+//      result, so it now uses RESPONSE_BUFFER_SIZE (4 KB).
+//   2. USB-CDC back-pressure: Serial.print/flush block when the host (Pi)
+//      stops reading, wedging the poll loop. Writes are now guarded by
+//      `if (Serial)` and the blocking flush() calls are gone.
+//   3. No recovery from a wedge: a SAMD watchdog now auto-resets on any
+//      hang; Watchdog.reset() is fed at the top of loop() and per Modbus
+//      packet so legitimate long poll cycles don't trip it. After a reset
+//      the Nano waits for the Pi to resend the job (the Pi's serial-silence
+//      watchdog already does this).
+//   4. Boot could wedge: `while(!Serial);` blocked forever if the host
+//      never reopened the port after a reset - now bounded to 2 s.
+//   5. Robustness: `comm` is validated before Serial1.begin (a malformed
+//      comm used to set baud 0 and silently kill Modbus); delayMicroseconds
+//      is only accurate to ~16383 us, so long polls use delay() for the ms.
+//
+// Requires the Adafruit SleepyDog library (Watchdog) - install via the
+// Library Manager before building.
 
 #include <ArduinoJson.h>
 #include <ModbusMaster.h>
+#include <Adafruit_SleepyDog.h>
 
 //#define SERIAL_BUFFER_SIZE 4096
 //const size_t BUFFER_SIZE = 4096;
 #define SERIAL_BUFFER_SIZE 12288
-const size_t BUFFER_SIZE = 12288;
+const size_t BUFFER_SIZE = 12288;          // input job buffer (holds a whole job)
+const size_t RESPONSE_BUFFER_SIZE = 4096;  // per-packet response builder (one result at a time)
 char inputBuffer[BUFFER_SIZE];
 int Modbus_Baud = 9600;
 long Polling = 1700;
 int TimeOut = 5000;
 #define RS485_CONTROL_PIN 3  // DE/RE pin for RS485 transceiver
+#define WATCHDOG_WINDOW_MS 16000  // must exceed one Modbus transaction (TimeOut, capped below)
+#define MODBUS_TIMEOUT_MAX 15000  // keep one transaction safely under the watchdog window
 
 struct ReadPacket {
   int slaveID;
@@ -65,10 +95,36 @@ void freeWritePackets() {
   }
 }
 
+// USB-CDC writes block if the host (Pi) has stopped reading. Skip output
+// when no host is attached so a stalled/absent host can never wedge the
+// poll loop. When the Pi reconnects, the next poll cycle resumes output.
+template <typename T>
+void emitJson(T& obj) {
+  if (Serial) {
+    obj.printTo(Serial);
+    Serial.println();
+  }
+}
+
+// delayMicroseconds() is only accurate up to ~16383 us; use delay() for the
+// millisecond part of any longer polling interval.
+void pollingDelay(long us) {
+  if (us <= 0) return;
+  if (us > 16000) {
+    delay(us / 1000);
+    delayMicroseconds((unsigned int)(us % 1000));
+  } else {
+    delayMicroseconds((unsigned int)us);
+  }
+}
+
 void setup() {
   Serial.begin(115200);
-  while (!Serial);
-  Serial.println("Ready to receive JSON...");
+  // Do NOT block boot forever waiting for the USB host: after a reset the
+  // Pi may not have reopened the port yet. Wait at most 2 s, then proceed.
+  unsigned long startWait = millis();
+  while (!Serial && (millis() - startWait) < 2000) { }
+  if (Serial) Serial.println("Ready to receive JSON...");
 
   pinMode(RS485_CONTROL_PIN, OUTPUT);
   digitalWrite(RS485_CONTROL_PIN, LOW);
@@ -77,9 +133,14 @@ void setup() {
   node.begin(1, Serial1);
   node.preTransmission(preTransmission);
   node.postTransmission(postTransmission);
+
+  // Hardware watchdog: any hang self-recovers within the window instead of
+  // stranding the panel until a manual power cycle.
+  Watchdog.enable(WATCHDOG_WINDOW_MS);
 }
 
 void loop() {
+  Watchdog.reset();  // healthy loop keeps the watchdog fed
   JobManager();
 //  if (packetsReady) {
     processModbusPackets();
@@ -95,15 +156,15 @@ void JobManager() {
     if (c == '}' || index >= BUFFER_SIZE - 2) {
       inputBuffer[index] = '}';
       inputBuffer[index + 1] = '\0';
-      Serial.println("Received JSON:");
-      Serial.println(inputBuffer);
-      Serial.flush();
+      if (Serial) {
+        Serial.println("Received JSON:");
+        Serial.println(inputBuffer);
+      }
       StaticJsonBuffer<BUFFER_SIZE> jsonBuffer;
       JsonObject& root = jsonBuffer.parseObject(inputBuffer);
 
       if (!root.success()) {
-        Serial.println("Error: JSON parsing failed!");
-        Serial.flush();
+        if (Serial) Serial.println("Error: JSON parsing failed!");
       } else {
         // Handle read packets
         JsonArray& readArray = root["read"];
@@ -170,25 +231,34 @@ void JobManager() {
               transferPackets[storedTransfer].destinationSlaveID = (int)transferParams[3];
               transferPackets[storedTransfer].destinationStartAddr = (int)transferParams[4];
               storedTransfer++;
-//              transferParams.printTo(Serial);
-//              Serial.println();
-//              Serial.flush();
-              //exit(0);
             }
           }
         } else {
           transferPacketCount = 0;
         }
 
+        // Apply comm settings only when present and sane: a malformed comm
+        // used to set baud 0 (Serial1.begin(0)) and silently kill Modbus.
         JsonArray& commArray = root["comm"];
-        Modbus_Baud = (int)commArray[1];
-        Polling = (int)commArray[0];
-        TimeOut = (int)commArray[2];
-        Serial1.begin(Modbus_Baud);
-        node.begin(1, Serial1);
-        node.setTimeout(TimeOut);
+        if (commArray.success() && commArray.size() >= 3) {
+          long newPoll = (long)commArray[0];
+          long newBaud = (long)commArray[1];
+          long newTimeout = (long)commArray[2];
+          if (newBaud >= 1200 && newBaud <= 921600 && newTimeout > 0) {
+            Polling = newPoll;
+            Modbus_Baud = (int)newBaud;
+            TimeOut = (int)min(newTimeout, (long)MODBUS_TIMEOUT_MAX);
+            Serial1.begin(Modbus_Baud);
+            node.begin(1, Serial1);
+            node.setTimeout(TimeOut);
+          } else if (Serial) {
+            Serial.println("Warning: comm out of range, keeping previous settings");
+          }
+        } else if (Serial) {
+          Serial.println("Warning: comm missing/invalid, keeping previous settings");
+        }
         packetsReady = true;
-        Serial.println("Info: Modbus Packets received");
+        if (Serial) Serial.println("Info: Modbus Packets received");
       }
       index = 0;
     } else {
@@ -198,14 +268,19 @@ void JobManager() {
 }
 
 void processModbusPackets() {
-  StaticJsonBuffer<BUFFER_SIZE> jsonBuffer;
+  // Small per-packet builder (one result at a time) - NOT the 12 KB job
+  // buffer. This is the key RAM fix: it used to push 12 KB of stack every
+  // loop() on a 32 KB part, next to the 12 KB static inputBuffer.
+  StaticJsonBuffer<RESPONSE_BUFFER_SIZE> jsonBuffer;
 
   for (size_t i = 0; i < readPacketCount; i++) {
-    delayMicroseconds(Polling);
+    Watchdog.reset();  // keep the watchdog fed across a long multi-slave poll cycle
+    pollingDelay(Polling);
     node.begin(readPackets[i].slaveID, Serial1);
     while (Serial1.available()) {
       Serial1.read();
     }
+    Watchdog.reset();
     uint8_t result = node.readHoldingRegisters(readPackets[i].startAddr, readPackets[i].length);
 
     JsonObject& readObj = jsonBuffer.createObject();
@@ -224,13 +299,13 @@ void processModbusPackets() {
       readObj["st"] = "err";
     }
 
-    readObj.printTo(Serial);
-    Serial.println();
+    emitJson(readObj);
     jsonBuffer.clear();
   }
 
   for (size_t i = 0; i < writePacketCount; i++) {
-    delayMicroseconds(Polling);
+    Watchdog.reset();
+    pollingDelay(Polling);
     node.begin(writePackets[i].slaveID, Serial1);
     while (Serial1.available()) {
       Serial1.read();
@@ -240,6 +315,7 @@ void processModbusPackets() {
     for (size_t j = 0; j < writePackets[i].dataLength; j++) {
       node.setTransmitBuffer(j, writePackets[i].data[j]);
     }
+    Watchdog.reset();
     // Write multiple registers in a single transaction
     uint8_t result = node.writeMultipleRegisters(writePackets[i].startAddr, writePackets[i].dataLength);
 
@@ -254,20 +330,21 @@ void processModbusPackets() {
     }
 
     writeObj["st"] = (result == node.ku8MBSuccess) ? "ok" : "err";
-    writeObj.printTo(Serial);
-    Serial.println();
+    emitJson(writeObj);
     jsonBuffer.clear();
   }
 
   // --- New loop for transfer packets ---
   for (size_t i = 0; i < transferPacketCount; i++) {
-    delayMicroseconds(Polling);
+    Watchdog.reset();
+    pollingDelay(Polling);
 
     // 1. Read from the source slave
     node.begin(transferPackets[i].sourceSlaveID, Serial1);
     while (Serial1.available()) {
       Serial1.read();
     }
+    Watchdog.reset();
     uint8_t readResult = node.readHoldingRegisters(transferPackets[i].sourceStartAddr, transferPackets[i].length);
 
     JsonObject& transferObj = jsonBuffer.createObject();
@@ -280,7 +357,7 @@ void processModbusPackets() {
 
     if (readResult == node.ku8MBSuccess) {
       // 2. Write to the destination slave
-      delayMicroseconds(Polling); // Polling delay before starting the next transaction
+      pollingDelay(Polling); // Polling delay before starting the next transaction
       node.begin(transferPackets[i].destinationSlaveID, Serial1);
       while (Serial1.available()) {
         Serial1.read();
@@ -289,6 +366,7 @@ void processModbusPackets() {
       for (int j = 0; j < transferPackets[i].length; j++) {
         node.setTransmitBuffer(j, node.getResponseBuffer(j));
       }
+      Watchdog.reset();
       uint8_t writeResult = node.writeMultipleRegisters(transferPackets[i].destinationStartAddr, transferPackets[i].length);
 
       JsonArray& values = transferObj.createNestedArray("val");
@@ -303,8 +381,7 @@ void processModbusPackets() {
     } else {
       transferObj["st"] = "err_read";
     }
-    transferObj.printTo(Serial);
-    Serial.println();
+    emitJson(transferObj);
     jsonBuffer.clear();
   }
 

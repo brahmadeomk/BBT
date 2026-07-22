@@ -1158,3 +1158,43 @@ companion project chat and recorded in the workplan/design docs there).
   - Cloud-side: policy template grants the new topic (no new thing
     attributes); runbook + envelope in docs/aws/README.md Part F. 334
     tests passing (20 new). Live AWS pass still pending.
+
+## 2026-07-22 — Nano 33 IoT firmware hang fix
+
+- **Symptom (user):** the Nano stops transmitting after some hours,
+  behaviour repeats. Classic memory/back-pressure signature, not a
+  logic bug.
+- **Root causes found in firmware/Nano_IOT.ino:**
+  1. **RAM exhaustion (leading cause)** — `processModbusPackets()` built
+     its response in a `StaticJsonBuffer<12288>` **on the stack, every
+     `loop()`**, on top of the 12 KB static `inputBuffer`, on a 32 KB
+     SAMD21. ~24 KB committed before heap/ModbusMaster/USB → stack/heap
+     collision → hard fault after hours (fragmentation/timing dependent,
+     hence "some hours" + repeatable). The response builder only ever
+     holds ONE packet result, so it was oversized by ~10 KB.
+  2. **USB-CDC back-pressure** — `Serial.print`/`flush` block when the
+     Pi stops draining the port → the poll loop wedges inside a write.
+  3. **No watchdog** — any wedge was permanent until a power cycle.
+  4. **`while(!Serial);`** blocked boot forever if the host didn't
+     reopen the port after a reset.
+- **Fix (all internal; Pi<->Nano wire format UNCHANGED, Node-RED side
+  untouched):**
+  - per-loop builder → `RESPONSE_BUFFER_SIZE` (4 KB) instead of 12 KB;
+  - `emitJson()` helper guards every response write with `if (Serial)`;
+    removed the blocking `Serial.flush()` calls;
+  - Adafruit SleepyDog **watchdog** (16 s window) enabled in setup, fed
+    at the top of `loop()` and once per Modbus packet so legitimate long
+    multi-slave poll cycles don't trip it;
+  - `while(!Serial)` bounded to 2 s;
+  - **robustness:** `comm` validated (baud/timeout sane) before
+    `Serial1.begin` — a malformed comm used to set baud 0 and silently
+    kill Modbus; `delayMicroseconds` >16383 µs routed through `delay()`.
+- **New build dependency:** Adafruit SleepyDog library.
+- **Recovery after a watchdog reset:** the Nano loses its job and waits
+  for a resend; the Pi's existing serial-silence watchdog already
+  detects the silence and resends the Nano job (also on boot / USB
+  power-cycle / config apply), so the chain self-heals.
+- **Not yet verified:** needs flashing + a multi-hour (ideally >24 h)
+  soak on real hardware to confirm the hang is gone. ArduinoJson v5 was
+  kept; migrating to v6/v7 `JsonDocument` for right-sized allocations is
+  a larger follow-up for the design chat.
