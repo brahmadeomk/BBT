@@ -407,9 +407,22 @@ confirm the hang is gone.**
 `ProcessLogic` (KPI stream, 3 outputs) and `Alarm Manager` (alarm
 events, 4 outputs) — both on the `BusbarTherMo` tab — now have a `link
 out` tap on every output, purely additive (new node appended to each
-output's existing wire list; the two function nodes' code is
-byte-identical to before). **Full message shapes for every output:
+output's existing wire list). The Slice 4 wiring left both function
+nodes' code byte-identical; the **only** later logic edit is the RoR
+fix below. **Full message shapes for every output:
 `docs/internal-message-contracts.md`.**
+
+**RoR fix (2026-07-22, user-approved):** RoR was coming through as `0`
+for every joint. Root cause in `ProcessLogic`: a `if (dtSec < 2) { ror
+= 0; }` "startup stability" guard zeroed RoR (and froze `emaTemp`) on
+every sample whose interval was under 2 s — and this panel polls
+~0.5 s, so it fired permanently. Removed the guard: the EMA update is
+already time-weighted by `alpha = dtSec/tauSec`, and the first sample
+is naturally 0 because `emaTemp` initialises to `sensorVal`, so no
+sub-2 s special case is needed. **Behaviour change: RoR now tracks real
+trends and RoR-based (A2) alarms can fire** — previously they never
+could. Needs a live re-check on the Pi (RoR non-zero under a rising
+temperature; confirm no spurious RoR alarms on stable joints).
 
 ## Cloud Gateway tab (Slice 5, wired — soak pending)
 

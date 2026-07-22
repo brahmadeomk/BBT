@@ -1198,3 +1198,33 @@ companion project chat and recorded in the workplan/design docs there).
   soak on real hardware to confirm the hang is gone. ArduinoJson v5 was
   kept; migrating to v6/v7 `JsonDocument` for right-sized allocations is
   a larger follow-up for the design chat.
+
+## 2026-07-22 — RoR permanently zero (ProcessLogic guard)
+
+- **Symptom (user):** rate-of-rise (RoR) came through as 0 for every
+  joint; the historian faithfully recorded the 0s.
+- **Root cause:** not the historian — `ProcessLogic` (the KPI/alarm
+  engine, node 39dad91df0c15744) emitted `ror: 0`. It had:
+  `if (dtSec < 2) { ror = 0; } else { emaTemp += ...; ror = ...; }`.
+  `dtSec` is the inter-sample interval clamped to [0.5, 300]; this panel
+  polls ~0.5 s, so `dtSec < 2` was always true → RoR forced to 0 AND the
+  EMA temperature never updated (frozen at the first reading, which also
+  explained emaTemp sitting at 31.67 while val moved).
+- **Intent vs effect:** the guard was a "startup stability fix" meant to
+  suppress a wild RoR on the first sample, but it keyed off the sample
+  interval instead of "is this the first sample", so fast polling made
+  it permanent.
+- **Fix (user-approved, applied to ProcessLogic):** removed the sub-2 s
+  guard. The EMA step is already time-weighted by
+  `alpha = dtSec/tauSec` (a 0.5 s sample takes a tiny correct step), and
+  the first sample is naturally 0 because `emaTemp` initialises to
+  `sensorVal` — so no special case is needed. Formula unchanged:
+  `emaTemp += alpha*(sensorVal-emaTemp); ror = (sensorVal-emaTemp)/tauSec*3600`.
+- **Behaviour change flagged:** RoR now tracks real trends, and
+  **RoR-based (A2) alarms — which could never fire while RoR was pinned
+  at 0 — become active.** This is the first logic edit to ProcessLogic
+  since Slice 4 (previously byte-identical). Per the standing rule this
+  touches the alarm engine, so it was confirmed with the user before
+  applying; still to review in the companion design chat and re-verify
+  live (RoR non-zero on a rising joint; no spurious A2 alarms on stable
+  joints).
