@@ -404,7 +404,10 @@ USB-CDC back-pressure — `Serial.print`/`flush` block when the Pi stops
 reading; writes now guarded by `if (Serial)`, blocking `flush()` calls
 removed. (3) No recovery — added an Adafruit SleepyDog **watchdog**
 (16 s window, fed at top of `loop()` and per Modbus packet). (4) Boot
-wedge — `while(!Serial)` now bounded to 2 s. (5) `comm` validated
+wedge — `while(!Serial)` **removed entirely** (early output is guarded
+by `if (Serial)`; live testing 2026-07-24 showed bounding the wait to
+2 s was not effective, so the sketch no longer waits for the host at
+all). (5) `comm` validated
 before `Serial1.begin` (a bad comm used to set baud 0 and kill Modbus);
 `delayMicroseconds` >16383 µs routed through `delay()`. **New build
 dependency: Adafruit SleepyDog library.** After a watchdog reset the

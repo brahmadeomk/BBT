@@ -18,7 +18,9 @@
 //      the Nano waits for the Pi to resend the job (the Pi's serial-silence
 //      watchdog already does this).
 //   4. Boot could wedge: `while(!Serial);` blocked forever if the host
-//      never reopened the port after a reset - now bounded to 2 s.
+//      never reopened the port after a reset - now removed entirely (early
+//      output is guarded by `if (Serial)`; live testing showed bounding the
+//      wait was not effective, so the sketch no longer waits at all).
 //   5. Robustness: `comm` is validated before Serial1.begin (a malformed
 //      comm used to set baud 0 and silently kill Modbus); delayMicroseconds
 //      is only accurate to ~16383 us, so long polls use delay() for the ms.
@@ -123,10 +125,11 @@ void pollingDelay(long us) {
 
 void setup() {
   Serial.begin(115200);
-  // Do NOT block boot forever waiting for the USB host: after a reset the
-  // Pi may not have reopened the port yet. Wait at most 2 s, then proceed.
-  unsigned long startWait = millis();
-  while (!Serial && (millis() - startWait) < 2000) { }
+  // Do NOT wait for the USB host at all. After a reset the Pi may not have
+  // reopened /dev/ttyACM0 yet; blocking on it (even bounded) wedges boot for
+  // no benefit, since every Serial write here is already guarded by
+  // `if (Serial)`. Live testing confirmed the bounded wait was ineffective,
+  // so it's removed - the sketch just runs.
   if (Serial) Serial.println("Ready to receive JSON...");
 
   pinMode(RS485_CONTROL_PIN, OUTPUT);
