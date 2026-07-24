@@ -38,6 +38,29 @@ describe('compileNanoJob - structure', () => {
     );
   });
 
+  test('excludeSlaveIds omits blacklisted slaves from the read list (Slice 9)', () => {
+    const doc = validModbusJointsDoc();
+    const all = doc.modbus.slaves.map((s) => s.slave_id);
+    assert.ok(all.length >= 2, 'fixture needs >= 2 slaves');
+    const dropped = all[0];
+    const { job } = compileNanoJob(doc, { excludeSlaveIds: [dropped] });
+    assert.equal(job.read[0], all.length - 1, 'packet count drops by one');
+    const droppedAddr = doc.modbus.slaves.find((s) => s.slave_id === dropped).unit_address;
+    assert.ok(
+      job.read.slice(1).every((t) => t[0] !== droppedAddr),
+      'the blacklisted slave is not polled'
+    );
+    // comm is unchanged, so the firmware comm-change guard won't re-init the bus
+    const full = compileNanoJob(doc).job;
+    assert.deepEqual(job.comm, full.comm);
+  });
+
+  test('excluding every slave yields an empty (but valid) read list', () => {
+    const doc = validModbusJointsDoc();
+    const { job } = compileNanoJob(doc, { excludeSlaveIds: doc.modbus.slaves.map((s) => s.slave_id) });
+    assert.deepEqual(job.read, [0]);
+  });
+
   test('read tuple length covers channels * temp_word_count', () => {
     const doc = validModbusJointsDoc();
     const { job } = compileNanoJob(doc);

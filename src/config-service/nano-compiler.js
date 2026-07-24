@@ -25,9 +25,14 @@ const { validateModbusJoints, readSpan } = require('./validate-modbus-joints');
  * physically wired to the Nano isn't something this function can know.
  *
  * @param {object} doc - cfg/modbus+joints document (already-applied, from ConfigStore.readDomain)
+ * @param {object} [opts]
+ * @param {string[]} [opts.excludeSlaveIds] - slave_ids to omit from the read
+ *   list (Slice 9 blacklisting: a blacklisted slave is temporarily not
+ *   polled). The document itself is unchanged/valid — this only trims the
+ *   compiled job — so R10 scan-time capacity still assesses the full fleet.
  * @returns {{job: {read: Array, comm: number[]}}|{error: string}}
  */
-function compileNanoJob(doc) {
+function compileNanoJob(doc, { excludeSlaveIds = [] } = {}) {
   const { valid, errors } = validateModbusJoints(doc);
   if (!valid) {
     return { error: `cannot compile an invalid cfg/modbus+joints document: ${errors.map((e) => `${e.rule}: ${e.message}`).join('; ')}` };
@@ -42,7 +47,8 @@ function compileNanoJob(doc) {
     return { error: `bus '${bus.bus_id}' is type '${bus.type}', but the Nano only speaks Modbus RTU over its RS-485 port` };
   }
 
-  const slaves = doc.modbus.slaves;
+  const exclude = new Set(excludeSlaveIds);
+  const slaves = doc.modbus.slaves.filter((s) => !exclude.has(s.slave_id));
   // One contiguous read per slave. readSpan handles both layouts:
   // consecutive channels (channels * temp_word_count from base) and
   // sparse channel_addrs (min..max span, R15 guarantees min == base) -

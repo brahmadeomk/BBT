@@ -1436,3 +1436,44 @@ just sends the entered value and shows the server's verdict via a
 `$watch('msg')`. Bonus: the PIN never reaches the browser. Env var name
 unchanged, so `/etc/busduct/nodered.env` needs no edit — just re-import
 the flow. docs/security-hardening.md corrected.
+
+## 2026-07-24 — Slice 9 core: firmware comm-guard + blacklist tracker + compiler exclusion
+
+Built the clean, unit-testable core of device blacklisting (spec:
+docs/blacklist-recovery-spec.md). Stopped before the alarm-engine
+changes (steps 5–7) for a design-review checkpoint, as they alter alarm
+behaviour.
+
+- **Firmware comm-change guard (step 1).** `Nano_IOT.ino` now re-inits
+  `Serial1`/`node.setTimeout` **only when baud or timeout actually
+  changes**, not on every job update. `Polling` still updates freely (no
+  re-init). `setup()` now calls `node.setTimeout(TimeOut)` so the guard
+  has a baseline. Without this, every blacklist/probe resend (same comm,
+  different read set) would glitch the bus. Prerequisite for practical
+  Pi-side blacklisting. (Flash with the other pending firmware changes.)
+- **`src/config-service/blacklist-tracker.js` (steps 2–3).** Pure,
+  timing-injected `BlacklistTracker`: consumes per-slave ok/err reads,
+  blacklists after 3 consecutive failures, probes on backoff
+  (30s→1m→2m→5m cap), restores after 3 consecutive good probe reads
+  (hysteresis). States active/blacklisted/probing; emits
+  blacklisted/probing/restored/probe_failed events; `activeSlaveIds`,
+  `blacklistedSlaveIds`, `isMeasurable`, `snapshot`. 8 tests incl. the
+  spec's AC1 (blacklist after 3) and AC5 (fail-every-other-probe never
+  flaps).
+- **Compiler exclusion (step 4).** `compileNanoJob(doc,
+  {excludeSlaveIds})` omits blacklisted slaves from the read list; comm
+  unchanged (so the firmware guard skips the re-init). Backward
+  compatible (default no exclusion), so `nanoJobsEqual` and the existing
+  resend path are untouched. R10 capacity math still assesses the full
+  configured fleet (validation runs on the document, not the trimmed
+  job). 2 tests. 355 tests total.
+
+**Checkpoint — not yet built (steps 5–7, need design review + touch the
+alarm engine):** joint LIVE/STALE/OFFLINE states + hold-don't-clear on
+non-measurable joints; extend ProcessLogic's `Sensor_Error` freeze to
+blacklist with **EMA baseline reset on restore** and persistence
+pause/restart; one ACK-able SYSTEM alarm per blacklisted slave
+(HMI/cloud/BMS/audit); plus the Node-RED flow wiring that feeds Nano read
+results into the tracker and resends the trimmed job. These change alarm
+raise/clear behaviour, so confirm with the user (as with the RoR fix)
+before editing ProcessLogic/Alarm Manager.

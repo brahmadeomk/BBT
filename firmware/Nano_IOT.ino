@@ -137,6 +137,7 @@ void setup() {
 
   Serial1.begin(Modbus_Baud);
   node.begin(1, Serial1);
+  node.setTimeout(TimeOut);   // apply the default so the comm-change guard has a baseline
   node.preTransmission(preTransmission);
   node.postTransmission(postTransmission);
 
@@ -251,12 +252,20 @@ void JobManager() {
           long newBaud = (long)commArray[1];
           long newTimeout = (long)commArray[2];
           if (newBaud >= 1200 && newBaud <= 921600 && newTimeout > 0) {
-            Polling = newPoll;
-            Modbus_Baud = (int)newBaud;
-            TimeOut = (int)min(newTimeout, (long)MODBUS_TIMEOUT_MAX);
-            Serial1.begin(Modbus_Baud);
-            node.begin(1, Serial1);
-            node.setTimeout(TimeOut);
+            Polling = newPoll;   // just a delay - no bus re-init, always safe to update
+            int cappedTimeout = (int)min(newTimeout, (long)MODBUS_TIMEOUT_MAX);
+            // Re-init Serial1 / Modbus timeout ONLY when baud or timeout
+            // actually changed. Blacklisting (Slice 9) resends the job every
+            // few minutes with the SAME comm but a different read set;
+            // re-opening Serial1 each time would glitch the bus on every
+            // blacklist/probe. So skip the re-init when comm is unchanged.
+            if ((int)newBaud != Modbus_Baud || cappedTimeout != TimeOut) {
+              Modbus_Baud = (int)newBaud;
+              TimeOut = cappedTimeout;
+              Serial1.begin(Modbus_Baud);
+              node.begin(1, Serial1);
+              node.setTimeout(TimeOut);
+            }
           } else if (Serial) {
             Serial.println("Warning: comm out of range, keeping previous settings");
           }
