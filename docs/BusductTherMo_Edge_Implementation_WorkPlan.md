@@ -90,13 +90,41 @@ Architecture recap: the Nano 33 IoT remains the autonomous Modbus polling layer 
 
 **Done when:** end-to-end test pushes valid and invalid configs from AWS; invalid pushes are rejected with correct rule IDs; audit trail records everything; thresholds change without alarm-state corruption.
 
-### Slice 8 — Hardening, Portability Drill & Pilot (Week 6–8+)
-- Security: remove hardcoded sudo password (scoped sudoers entries); secure Node-RED editor (adminAuth + https or disable remote editor); credential hygiene in flow exports.
-- Portability drill: point the panel at local Mosquitto/EMQX via config only; all functions must work (Basic Ingest and Shadow flags off). Fix any leaked AWS dependency.
-- Pilot: parallel run on one production panel for 3–4 weeks; daily alarm parity and telemetry reconciliation; MQTT message counts vs. cost model.
+### Slice 8 — Hardening, Portability Drill & Pilot (re-sequenced, see Addendum A)
+
+**Split as of 2026-07-24.** Slice 8a runs at its original point in the
+sequence; Slice 8b is deferred to the **final** slice, after Slices 9–11,
+because a pilot should exercise the system at its real scale (110
+devices, blacklisting, BMS interface) rather than the 19-joint shape.
+
+#### Slice 8a — Security hardening (NOT deferred)
+- Remove hardcoded sudo password (scoped sudoers entries for the
+  specific commands only).
+- Secure the Node-RED editor: adminAuth + https, or disable remote
+  editor access.
+- Credential hygiene in flow exports.
+
+**Why this does not wait:** the panel is being given a network route
+outward. Deferring a known credential exposure until after three more
+build slices is the wrong trade regardless of pilot timing.
+
+**Done when:** no credentials in the repo or flow exports; editor
+requires authentication; sudoers scoped to named commands.
+
+#### Slice 8b — Portability drill, pilot & rollout (FINAL slice)
+- Portability drill: point the panel at local Mosquitto/EMQX via config
+  only; all functions must work (Basic Ingest and Shadow flags off).
+  Fix any leaked AWS dependency.
+- Pilot: parallel run on one production panel for 3–4 weeks; daily alarm
+  parity and telemetry reconciliation; MQTT message counts vs. cost
+  model.
 - Template the validated image + commissioning procedure for rollout.
 
-**Done when:** acceptance checklist from the Readiness Workplan (Section 6) passes in full.
+**Done when:** acceptance checklist from the Readiness Workplan
+(Section 6) passes in full — assessed against the full-scale
+configuration including blacklisting (Slice 9), the positional telemetry
+payload (Slice 10) and, where the customer requires it, the BMS
+interface (Slice 11).
 ## 5. Timeline Summary
 
 | Week | Slices | Key milestone |
@@ -106,9 +134,15 @@ Architecture recap: the Nano 33 IoT remains the autonomous Modbus polling layer 
 | 3 | S4, S5 | Internal bus in place; batcher + outbox on loopback |
 | 4 | S5, S6 | 24 h bench soak passed; first publish to AWS IoT Core |
 | 5 | S6, S7 | Provisioning flow done; remote config end-to-end |
-| 6 | S7, S8 | Maintenance gate + A10 verified; security hardening |
-| 7–8 | S8 | Portability drill passed; pilot panel commissioned |
-| 9–12 | S8 | Parallel run, reconciliation, rollout template |
+| 6 | S7, S8a | Maintenance gate + A10 verified; security hardening |
+| 7–8 | S9, S10 | Blacklisting live; 110-device config validates; one telemetry message per interval |
+| 9–10 | S11 | BMS Modbus TCP map validated against a reference gateway |
+| 11–12 | S8b | Portability drill passed; pilot panel commissioned at full scale |
+| 13–16 | S8b | Parallel run, reconciliation, rollout template |
+
+*Revised 2026-07-24: Slice 8 split; 8b (drill/pilot/rollout) moved to
+last so the pilot runs against the shipping configuration. See
+Addendum A.*
 
 ## 6. Working Agreement (Claude Code)
 - Design decisions and reviews happen in the Claude project chat; code happens in Claude Code against the repo. Each slice ends with a review of diffs and test results in the project.
@@ -125,3 +159,170 @@ Architecture recap: the Nano 33 IoT remains the autonomous Modbus polling layer 
 | Nano job format drift breaks polling | Byte-identical compiler test against current working job JSON before any live use |
 | Outbox flash wear on Pi SD card | Size cap, batched writes, consider dedicated partition or USB storage; monitor write volume in soak test |
 | Scope creep into cloud-side services | This plan is edge-only; cloud rules/storage/dashboards are a separate plan |
+
+---
+
+# Addendum A — Scale & Integration Slices (added 2026-07-24)
+
+Slices 1–8 were scoped for the original 19-joint reference panel and an
+AWS-only integration target. Two changes since then add scope:
+
+1. **Provisioning target raised to 100 joint sensors + 10 ambient
+   sensors per panel.** Schema limits, telemetry payload size, ambient
+   handling and dead-device tolerance all change at this scale.
+2. **Customer BMS integration is now in scope** — Modbus TCP first,
+   with an off-the-shelf Modbus→BACnet gateway, and native BACnet/IP
+   deferred until panel volume justifies it.
+
+Slices 9–11 below are additive; Slices 1–8 are unchanged. Slice 9 is
+sequenced ahead of the others because dead-device tolerance is a
+correctness issue at 110 devices, not an enhancement.
+
+Rule numbering note: cross-field rules now run **R1–R16** (R14 ambient
+referential integrity, R15 per-channel register integrity, R16 RS-485
+bus loading) and **A1–A10**. Section 6's working agreement should be
+read as "R1–R16 and A1–A10".
+
+---
+
+## Slice 9 — Device Blacklisting & Recovery (highest priority)
+
+Full design: `docs/blacklist-recovery-spec.md`. That spec is the source
+of truth for behaviour; the steps below are the build order.
+
+1. **Firmware prerequisite:** re-initialise `Serial1` / Modbus timeout
+   only when `comm` parameters actually change, not on every job update.
+   Without this, every blacklist and probe glitches the bus. Small,
+   self-contained, and worth doing on its own merit.
+2. Implement failure tracking per slave (consecutive failure count) and
+   the blacklist decision (default: 3 consecutive failures).
+3. Implement probe scheduling with backoff (30 s → 1 m → 2 m → 5 m cap)
+   and restore on 3 consecutive good reads (hysteresis against flapping).
+4. Extend the job compiler to omit blacklisted slaves; ensure R10
+   capacity math continues to use the **configured** slave list, not the
+   active one.
+5. Introduce joint states `LIVE` / `STALE` / `OFFLINE` and the
+   hold-don't-clear rule for active alarms on non-measurable joints.
+6. Extend the existing `Sensor_Error` freeze path in ProcessLogic to
+   cover blacklist: freeze KPI updates, **reset the EMA baseline on
+   restore**, pause and restart persistence timers.
+7. Raise one ACK-able SYSTEM alarm per blacklisted slave naming the
+   affected joints; publish to cloud; reflect in HMI and BMS health
+   points; record the full cycle in the audit trail.
+
+**Done when:** the 8 acceptance criteria in the spec pass, including the
+20-minute-blackout / 8 °C-change test producing no spurious RoR alarm,
+and a device failing every other probe not flapping.
+
+---
+
+## Slice 10 — Scale Hardening for 100+10 (parallel with Slice 9)
+
+1. **Positional-array telemetry payload.** The batcher currently emits
+   keyed JSON and correctly splits above 4,800 bytes — but at 100 joints
+   that is several messages and several AWS 5 KB metering blocks per
+   interval. Switch to positional arrays with an index→`joint_id`
+   manifest published only on config change; target the whole panel in
+   one message (~2.5 KB). Chunk-splitting stays as a safety net.
+2. **Ambient outlier rejection and fallback.** The three-level ambient
+   chain (R14: panel → zone → joint) models 10 sensors well, but there
+   is no runtime fallback. Add: reject readings outside a plausibility
+   band, then fall back to zone median, then panel median. A single
+   drifting ambient must not silently corrupt ΔT for every joint that
+   references it.
+3. **Two-segment RS-485 support end-to-end.** `buses.maxItems` is
+   already 4 and R16 now warns above 80% loading; verify the compiler,
+   resend path and recovery controller all behave correctly with two
+   serial ports and two Nanos.
+4. Re-run the 24 h soak at full scale (or the closest available bench
+   approximation) and re-check outbox growth, SD-card write volume and
+   scan timing against R10.
+
+**Done when:** a 110-device config validates with only the expected R16
+loading warning, one telemetry message per interval covers the whole
+panel, and a forced ambient fault does not disturb ΔT on other joints.
+
+---
+
+## Slice 11 — BMS Integration: Modbus TCP + Gateway
+
+Approach agreed: **Modbus TCP slave on the Pi + off-the-shelf
+Modbus→BACnet gateway** first (certified stack, no development risk,
+no BOM commitment). Native BACnet/IP on the Pi is a later product
+investment; the point model designed here carries over to it unchanged.
+
+1. **New config domain `cfg/integration`** with its own schema and
+   version: enabled protocols, TCP port, exposure tier, point-map
+   version, zone rollup rules. Follows the same store/validate/audit
+   path as the other three domains.
+2. **Modbus TCP slave service** fed from the same internal link-node bus
+   as the cloud batcher — a **peer adapter**, not a new data path.
+   Must work with the internet down; the BMS is often the customer's
+   alarm path of record.
+3. **Register map builder** generated from `cfg/joints` +
+   `cfg/integration` so joint-count changes need no code edit. Tiered:
+   - Tier 1 — summary block (~12 points): highest alarm level, worst
+     joint (latched), active alarm count, per-level counts, panel max
+     ΔT / RoR / temp, system health, live joint count, **heartbeat
+     counter**
+   - Tier 2 — per-zone block
+   - Tier 3 — per-joint detail (temp, ΔT, RoR, level)
+   All signed 16-bit, ×10 scaling, contiguous blocks, fixed stride —
+   so a cheap gateway can map it with no custom work.
+4. **Rollup semantics:** worst-joint **latched** with deterministic
+   tiebreak (first-raised wins; reassign only on clear) to stop the
+   point oscillating when two joints are at the same level. Per-level
+   counts prevent a Warning being masked by a Critical. Optional
+   per-joint severity **bitmap** registers give full detail in ~6
+   registers for point-licence-sensitive customers.
+5. **Heartbeat counter** incremented every scan — Modbus has no liveness
+   concept, and without it a frozen Pi presents as healthy steady values
+   indefinitely.
+6. **ACK write point** routed through the same alarm ACK path as the HMI
+   so the audit trail captures BMS-originated acknowledgements. Summary
+   ACK acknowledges **all currently active** alarms; define and document
+   this explicitly.
+7. **Customer-facing register map document**, versioned, with the
+   **append-only** rule stated on page 1 — never renumber, only append.
+   One renumber breaks every deployed gateway configuration.
+8. Validate against one reference gateway (e.g. Intesis INMBSBAC or
+   Babel Buster) before first customer delivery.
+
+**Done when:** a reference gateway reads Tier 1 and presents it as
+BACnet objects with no custom mapping; a frozen Pi is detectable via the
+heartbeat; a BMS-originated ACK appears in the audit trail.
+
+---
+
+## Revised sequencing
+
+Slice 8 is **split** (see its section above): 8a (security hardening)
+keeps its original early position; **8b (portability drill, pilot,
+rollout) is deferred to the final slice**, so the pilot exercises the
+system at real scale — 110 devices with blacklisting, the positional
+telemetry payload, and the BMS interface where required — rather than
+validating a 19-joint shape that will not be shipped.
+
+Slice numbers are **stable identifiers, not execution order**. Slice 8
+is not renumbered: ~19 references to "Slice 8" exist across source
+comments, `CLAUDE.md` and this decision log (almost all pointing at the
+portability drill, i.e. 8b), and renumbering would invalidate them for
+no benefit.
+
+| Order | Slice | Note |
+|---|---|---|
+| 1 | **8a — Security hardening** | Not deferred; live credential exposure on a device about to gain outward network access |
+| 2 | **9 — Blacklisting** | Correctness at 110 devices; firmware `comm`-change guard first |
+| 3 | **10 — Scale hardening** | Parallel with 9 except the two-segment item |
+| 4 | **11 — BMS integration** | No cloud dependency; demoable to customers on its own |
+| 5 (last) | **8b — Portability drill, pilot & rollout** | Assessed against the full-scale configuration |
+
+## Additional risks introduced
+
+| Risk | Mitigation |
+|---|---|
+| RoR/A2 alarms firing for the first time (RoR was pinned at 0 until 22 July) — thresholds never validated against live data | Watch closely for false positives; re-record the ProcessLogic regression baseline, which the RoR fix invalidated; be ready to retune 15/30/60 °C/hr |
+| Blacklist churn glitching the bus | Firmware `comm`-change guard is a prerequisite, not an optimisation (Slice 9 step 1) |
+| Held (`STALE`) alarms mistaken for live ones | Distinct HMI/BMS/cloud representation with `last_valid_ts`; omit stale values from telemetry rather than repeating them |
+| BMS register map churn breaking deployed gateways | Versioned, append-only map; never renumber |
+| Gateway BOM cost at volume | Point model designed to carry over to a native BACnet/IP server; revisit when panel volume justifies development |

@@ -38,7 +38,10 @@ const size_t RESPONSE_BUFFER_SIZE = 4096;  // per-packet response builder (one r
 char inputBuffer[BUFFER_SIZE];
 int Modbus_Baud = 9600;
 long Polling = 1700;
-int TimeOut = 5000;
+int TimeOut = 300;   // per-transaction Modbus timeout. At 9600-19200 baud a
+                     // healthy response returns in ~30-40 ms; 300 ms is ample.
+                     // Kept low deliberately: on a 100+ device bus a 5 s timeout
+                     // x retries makes one dead sensor dominate the whole scan.
 #define RS485_CONTROL_PIN 3  // DE/RE pin for RS485 transceiver
 #define WATCHDOG_WINDOW_MS 16000  // must exceed one Modbus transaction (TimeOut, capped below)
 #define MODBUS_TIMEOUT_MAX 15000  // keep one transaction safely under the watchdog window

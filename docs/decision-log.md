@@ -1228,3 +1228,149 @@ companion project chat and recorded in the workplan/design docs there).
   applying; still to review in the companion design chat and re-verify
   live (RoR non-zero on a rising joint; no spurious A2 alarms on stable
   joints).
+
+## 2026-07-24 — Scale to 100 joints + 10 ambient: bus limits, IDs, timeout
+
+Design chat reviewed the repo at `claude/code-handoff-strategy-y551k2`
+(Slices 1–7 complete, 338 tests green) against a new provisioning
+target: **100 joint sensors + 10 ambient sensors on one panel.**
+
+**Hardware fact established (corrects an earlier assumption).** The
+sensor modules use a **MAX487EA**-class transceiver. This is
+**quarter**-unit-load, not 1/8 as previously believed — the ceiling is
+**128 transceivers per RS-485 segment**, not 256 (Analog Devices
+MAX487E/MAX1487E datasheet). At 110 slaves + 1 master = 111 unit loads,
+the panel sits at **87% of the electrical budget with ~17 spare**. The
+part is also slew-rate-limited to 250 kbps, so 19200 baud remains safe.
+
+**Two schema blockers found (both would have failed a real 110-device
+commissioning):**
+
+1. `modbus.slaves.maxItems` was **64** — a 110-device config could not
+   validate at all. Raised to **128**.
+2. `slave_id` pattern was `^sl[0-9]{2}$`, capping IDs at **sl99**. Found
+   by writing the R16 test, not by inspection. Widened to
+   `^sl[0-9]{2,3}$` (existing 2-digit IDs stay valid; no migration
+   needed). `joint_id` already allowed 3 digits, so joints were fine.
+
+**Changes applied in this pass:**
+
+- **New rule R16 — RS-485 bus loading.** Per RTU bus: slaves + 1 (the
+  master's own transceiver is a unit load) must not exceed
+  `rs485_max_devices`; above 80% of the ceiling the config is still
+  accepted but a **warning** is returned. Does not apply to TCP buses.
+- **New optional bus field `rs485_max_devices`** (default 128; set 32
+  for 1 UL parts, 256 for genuine 1/8 UL) so the ceiling follows the
+  hardware rather than being hardcoded.
+- **`validateModbusJoints` now returns `warnings` alongside `errors`.**
+  First non-blocking diagnostic in the validator; callers that only read
+  `valid`/`errors` are unaffected.
+- **Nano firmware default `TimeOut` 5000 ms → 300 ms.** A healthy
+  response at 9600–19200 baud returns in ~30–40 ms. At 5 s × retries,
+  a handful of dead sensors on a 110-device bus dominates the entire
+  scan cycle. `MODBUS_TIMEOUT_MAX` (15 s, watchdog-bounded) is unchanged
+  as a ceiling for remotely-pushed values.
+- 6 new tests (`test/config-service/r16-bus-loading.test.js`).
+  Suite: **345 pass / 0 fail**; cloud-agnostic check still clean.
+
+**Recommendation recorded, not yet implemented: split into two RS-485
+segments.** ~55 devices per segment gives 43% loading, halves worst-case
+scan time, and halves the blast radius of a single faulty transceiver —
+the failure mode already seen at J28 (20 July), where one degraded
+transceiver dragged down neighbours J29/J30. `buses.maxItems` is 4, so
+the schema already supports this; it is a wiring and commissioning
+decision.
+
+### Open items for the next slices (not done here)
+
+- **Device blacklisting** — after N consecutive failures, skip a slave
+  for M cycles and raise a SYSTEM alarm. Nothing in `src/` or firmware
+  does this today. Highest-value remaining fix at 110 devices; the
+  300 ms timeout limits the damage but does not remove it.
+- **Positional-array telemetry payload.** The batcher currently emits
+  keyed JSON and correctly *splits* into chunks over 4800 bytes — but at
+  100 joints that means several messages, hence several AWS 5 KB
+  metering blocks per interval. Positional arrays + an index→joint_id
+  manifest (sent only on config change) fit the whole panel in one
+  message (~2.5 KB).
+- **Ambient outlier rejection.** The 3-level ambient chain (R14:
+  panel → zone → joint) already models 10 sensors well. What is missing
+  is a runtime fallback: with 10 ambients available, a failed or drifting
+  sensor should fall back to the zone median, then the panel median,
+  rather than silently corrupting ΔT for every joint referencing it.
+- **`cfg/integration` domain + Modbus TCP slave (BMS).** Agreed approach:
+  Modbus TCP on the Pi + an off-the-shelf Modbus→BACnet gateway first
+  (certified stack, no BOM risk); native BACnet/IP on the Pi later once
+  panel volume justifies it. Tiered register map (summary / zone /
+  joint detail) so customers can buy the smallest gateway point licence;
+  heartbeat counter mandatory (Modbus has no liveness concept); register
+  map versioned append-only.
+- **Re-baseline ProcessLogic.** The RoR fix (22 July) means the Slice 4
+  "byte-identical" regression baseline no longer covers the KPI engine,
+  and **RoR/A2 alarms are firing for the first time ever** — thresholds
+  (15/30/60 °C/hr) have never been validated against live data. Watch
+  for false positives and be ready to retune.
+
+## 2026-07-24 (later) — Blacklist recovery design + workplan addendum
+
+The open items recorded earlier were unscoped one-liners. Two of them
+had enough design content to lose, so they are now written down:
+
+- **`docs/blacklist-recovery-spec.md`** (new) — the full state model and
+  recovery logic for device blacklisting. Key decisions: never
+  auto-clear a process alarm because measurement was lost (hold as
+  `STALE` with `last_valid_ts`; `OFFLINE` when no alarm was active);
+  freeze and **reset** the EMA baseline on restore so a 20-minute
+  blackout with an 8 °C change cannot produce a spurious RoR alarm;
+  pause and restart persistence timers; probe on backoff
+  (30 s → 5 m) with restore only after 3 consecutive good reads
+  (hysteresis, aimed squarely at the J28 flapping behaviour). Logic
+  lives Pi-side; **prerequisite firmware fix** is to re-init
+  `Serial1`/timeout only when `comm` actually changes, otherwise every
+  blacklist and probe glitches the bus.
+
+- **Workplan Addendum A** (appended to
+  `docs/BusductTherMo_Edge_Implementation_WorkPlan.md`) — adds
+  **Slice 9** (blacklisting, highest priority), **Slice 10** (scale
+  hardening: positional telemetry payload, ambient outlier fallback,
+  two-segment RS-485, full-scale soak) and **Slice 11** (BMS
+  integration: `cfg/integration` domain, Modbus TCP slave, tiered
+  register map, latched worst-joint rollup, heartbeat counter,
+  append-only map versioning). Slices 1–8 unchanged.
+
+Also noted in the addendum: the working agreement's "R1–R13 and A1–A10"
+should now read **R1–R16 and A1–A10**.
+
+## 2026-07-24 (later still) — Slice 8 split and re-sequenced to last
+
+**Decision:** defer Slice 8 to the end of the programme, so the pilot
+runs against the configuration that will actually ship (110 devices,
+blacklisting, positional telemetry, BMS interface) rather than
+validating the 19-joint shape.
+
+**One change from the request:** Slice 8 is **split**, not deferred
+wholesale.
+
+- **Slice 8a — security hardening stays at its original early
+  position.** It removes the hardcoded sudo password
+  (`echo Password@21 | sudo -S ...` in the Debugging tab), secures the
+  Node-RED editor and cleans credentials out of flow exports. The panel
+  is being given a network route outward; holding a known credential
+  exposure behind three more build slices is the wrong trade regardless
+  of pilot timing.
+- **Slice 8b — portability drill, pilot and rollout is now the final
+  slice**, assessed against the full-scale configuration.
+
+**Slice numbers are stable identifiers, not execution order.** Slice 8
+was deliberately **not** renumbered to 12: ~19 references to "Slice 8"
+exist across source comments (`cert-rotation.js`,
+`aws-iot-transport.js`), `CLAUDE.md`, `docs/aws/README.md` and this log
+— almost all pointing at the portability drill, i.e. 8b. Renumbering
+would invalidate them all for no benefit.
+
+**Execution order is now:** 8a → 9 → 10 → 11 → 8b.
+
+**Updated:** workplan Slice 8 section (split), Addendum A sequencing
+table, Timeline Summary (now 16 weeks), `CLAUDE.md` standing
+instructions and current-status block. `CLAUDE.md`'s test rule also
+corrected from "R1–R13" to **R1–R16**.

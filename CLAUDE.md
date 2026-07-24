@@ -14,7 +14,12 @@ across all of them.**
 
 ## Standing instructions
 
-- **Work in the slice order the workplan defines** (Slice 1 → Slice 8).
+- **Work in the slice order the workplan defines.** As of 2026-07-24
+  that order is: Slice 8a (security) → 9 (blacklisting) → 10 (scale
+  hardening) → 11 (BMS integration) → **8b (portability drill, pilot,
+  rollout) last**. Slice numbers are stable identifiers, NOT execution
+  order — see Addendum A of the workplan. Existing references to
+  "Slice 8" in source comments mean the portability drill (8b).
   Each slice has a "Done when" acceptance line — don't start the next
   slice until the current one meets it. Slice 1, Slice 2 (config
   service), Slice 3 (Nano job compiler + resend wiring), and Slice 4
@@ -37,10 +42,15 @@ across all of them.**
   **live-verified (2026-07-20)** — end-to-end push from AWS working:
   telemetry-interval knob, alarm thresholds (A10 live re-evaluation),
   R12 maintenance gate, acks + audit all confirmed on the real panel.
-  **Slices 1–7 are done. Slice 8 (hardening, portability drill, pilot)
-  is next** — note it checks against the still-missing Edge Cloud
-  Readiness Workplan, so ask for that before treating Slice 8 as fully
-  spec'd.**
+  **Slices 1–7 are done.** Slice 8 has been split and re-sequenced
+  (workplan Addendum A): **Slice 8a (security hardening) is next** —
+  remove the hardcoded sudo password, secure the Node-RED editor,
+  credential hygiene. Then Slice 9 (device blacklisting — full design in
+  `docs/blacklist-recovery-spec.md`), Slice 10 (scale hardening for
+  100 joints + 10 ambient), Slice 11 (BMS Modbus TCP integration), and
+  finally Slice 8b (portability drill, pilot, rollout) so the pilot runs
+  against the shipping configuration. The Edge Cloud Readiness Workplan
+  is now present in `docs/`; its §6 checklist is Slice 8b's exit gate.**
 
 - **Cloud-agnostic rule**: no AWS SDK (or any single-cloud SDK) may be
   imported outside `/src/adapters/aws`. Everything else — config
@@ -49,8 +59,9 @@ across all of them.**
   rule or grep check in the test script (per the workplan's Working
   Agreement), not just by convention.
 
-- **Edge validation rules R1–R15** (`cfg/modbus` + `cfg/joints`, in
-  `config/schemas/busduct_modbus_joint_config.schema.json`) and **A1–A10**
+- **Edge validation rules R1–R16** (`cfg/modbus` + `cfg/joints`, in
+  `config/schemas/busduct_modbus_joint_config.schema.json`; R16 = RS-485
+  bus loading, added 2026-07-24 for the 110-device target) and **A1–A10**
   (`cfg/alarms`, in `config/schemas/busduct_alarms_config.schema.json`)
   are mandatory. Every rule needs at least one passing and one failing
   unit test. Do not relax or bypass a rule without explicit instruction.
@@ -72,7 +83,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | `/docs` | Design artifacts, decision log |
 | `/config/schemas` | The JSON Schemas — source of truth for `cfg/modbus`, `cfg/joints`, `cfg/alarms` |
 | `/config/examples` | Reference config instances per domain; migration snapshots (empty — Slice 2) |
-| `/src/config-service` | Config store, validators (R1–R15, A1–A10), version manager, audit writer, Node-RED handlers, Nano job compiler |
+| `/src/config-service` | Config store, validators (R1–R16, A1–A10), version manager, audit writer, Node-RED handlers, Nano job compiler |
 | `/src/cloud-gateway` | Batcher, alarm publisher, heartbeat, outbox, transport interface (empty — Slice 5+) |
 | `/src/adapters/aws` | AWS-specific: endpoint config, Fleet Provisioning, Basic Ingest mapping (empty — Slice 6+) |
 | `/flows` | Node-RED flow exports — `flows_BBT.json` is the current production flow |
@@ -88,7 +99,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | Edge Implementation Work Plan (this plan) | `docs/BusductTherMo_Edge_Implementation_WorkPlan.md` (+ original `.docx`) | present |
 | Edge Cloud Readiness Workplan (phase-level plan this one maps to; §6 is Slice 8's exit checklist) | `docs/BusductTherMo_Edge_Cloud_Readiness_Workplan.docx` (+ extracted `.md`) | present (2026-07-21) |
 | Edge node config spec | `docs/busduct_edge_config.yaml` | present |
-| Modbus/joint schema (R1–R15) | `config/schemas/busduct_modbus_joint_config.schema.json` | present |
+| Modbus/joint schema (R1–R16) | `config/schemas/busduct_modbus_joint_config.schema.json` | present |
 | Alarms schema (A1–A10) | `config/schemas/busduct_alarms_config.schema.json` | present |
 | Existing Node-RED flow | `flows/flows_BBT.json` | present |
 | Arduino Nano firmware | `firmware/Nano_IOT.ino` | present |
@@ -252,7 +263,7 @@ The replacement, on the **Joint Config** dashboard tab (`ui_group`
   holding-register reads). A `+CH` row button pre-fills the next
   channel row for the same unit.
 - `apply` validates through `validateModbusJoints` + `applyIfValid`
-  (R1-R15 for real), with friendly pre-checks: channel numbers within
+  (R1-R16 for real), with friendly pre-checks: channel numbers within
   a unit must be 1..N with no gaps/repeats, base addresses within a
   unit unique and non-overlapping, and deleting a slave *or a channel*
   still mapped to a joint or used as an ambient reference

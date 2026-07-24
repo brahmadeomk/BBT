@@ -9,6 +9,7 @@ const DEFAULTS = {
   retries: 2,
   inter_frame_ms: 20,
   temp_word_count: 1,
+  rs485_max_devices: 128,
 };
 
 function err(rule, message) {
@@ -105,6 +106,7 @@ function validateModbusJoints(doc, context = {}) {
   }
 
   const errors = [];
+  const warnings = [];
   const buses = doc.modbus.buses;
   const slaves = doc.modbus.slaves;
   const joints = doc.joints;
@@ -377,7 +379,42 @@ function validateModbusJoints(doc, context = {}) {
     errors.push(err('R12', 'remote changes to cfg/modbus or cfg/joints are only accepted in maintenance mode'));
   }
 
-  return { valid: errors.length === 0, errors };
+  // R16: RS-485 electrical loading per bus segment.
+  // The ceiling comes from the transceiver's receiver input impedance
+  // (unit load): 32 for 1 UL, 128 for 1/4 UL (MAX487E family), 256 for
+  // 1/8 UL. Exceeding it is a hard error; passing 80% is accepted but
+  // warned, because it leaves no headroom for repeaters, diagnostic
+  // taps or growth.
+  {
+    const countByBus = new Map();
+    for (const slave of slaves) {
+      if (!busIds.has(slave.bus_id)) continue; // already reported by R3
+      countByBus.set(slave.bus_id, (countByBus.get(slave.bus_id) || 0) + 1);
+    }
+    const busById = new Map(buses.map((b) => [b.bus_id, b]));
+    for (const [busId, count] of countByBus) {
+      const bus = busById.get(busId);
+      if (bus?.type !== 'rtu') continue; // unit load is an RS-485 concept
+      const ceiling = bus.rs485_max_devices ?? DEFAULTS.rs485_max_devices;
+      // +1: the master's own transceiver is a unit load on the segment.
+      const loads = count + 1;
+      if (loads > ceiling) {
+        errors.push(
+          err('R16', `bus '${busId}' has ${count} slaves (+1 master = ${loads} unit loads) exceeding rs485_max_devices ${ceiling}`)
+        );
+      } else if (loads > ceiling * 0.8) {
+        warnings.push(
+          err(
+            'R16',
+            `bus '${busId}' is at ${loads}/${ceiling} unit loads (${Math.round((loads / ceiling) * 100)}%); ` +
+              'consider splitting into two segments before adding devices'
+          )
+        );
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors, warnings };
 }
 
 module.exports = { validateModbusJoints, worstCaseSlaveMs, normalFrameMs, stragglerMs, readSpan, DEFAULTS };

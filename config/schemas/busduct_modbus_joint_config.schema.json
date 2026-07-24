@@ -14,7 +14,7 @@
       "required": ["slave_id", "channel"],
       "additionalProperties": false,
       "properties": {
-        "slave_id": { "type": "string", "pattern": "^sl[0-9]{2}$" },
+        "slave_id": { "type": "string", "pattern": "^sl[0-9]{2,3}$" },
         "channel":  { "type": "integer", "minimum": 1, "maximum": 8 }
       }
     }
@@ -57,6 +57,7 @@
               "tcp_port":  { "type": "integer", "minimum": 1, "maximum": 65535, "default": 502 },
               "timeout_ms":       { "type": "integer", "minimum": 50, "maximum": 5000, "default": 500 },
               "retries":          { "type": "integer", "minimum": 0, "maximum": 5, "default": 2 },
+              "rs485_max_devices": { "type": "integer", "minimum": 2, "maximum": 256, "default": 128, "description": "Electrical device ceiling for this segment, set by transceiver unit load: 32 (1 UL), 128 (1/4 UL, e.g. MAX487E family), 256 (1/8 UL). Enforced by R16." },
               "inter_frame_ms":   { "type": "integer", "minimum": 0, "maximum": 500, "default": 20 }
             }
           }
@@ -65,13 +66,13 @@
         "slaves": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 64,
+          "maxItems": 128,
           "items": {
             "type": "object",
             "required": ["slave_id", "bus_id", "unit_address", "model", "registers"],
             "additionalProperties": false,
             "properties": {
-              "slave_id":     { "type": "string", "pattern": "^sl[0-9]{2}$", "description": "Logical ID referenced by joints. Stable even if unit_address changes." },
+              "slave_id":     { "type": "string", "pattern": "^sl[0-9]{2,3}$", "description": "Logical ID referenced by joints. Stable even if unit_address changes." },
               "bus_id":       { "type": "string", "pattern": "^bus[0-9]{1,2}$" },
               "unit_address": { "type": "integer", "minimum": 1, "maximum": 247 },
               "model":        { "type": "string", "maxLength": 32, "description": "Sensor module model, e.g. BT-SCM-4" },
@@ -113,7 +114,7 @@
         "additionalProperties": false,
         "properties": {
           "joint_id":  { "type": "string", "pattern": "^J[0-9]{2,3}$", "description": "Display ID used on HMI, heat map, alarms, cloud payloads" },
-          "slave_id":  { "type": "string", "pattern": "^sl[0-9]{2}$" },
+          "slave_id":  { "type": "string", "pattern": "^sl[0-9]{2,3}$" },
           "channel":   { "type": "integer", "minimum": 1, "maximum": 8 },
           "zone_id":   { "type": "string", "pattern": "^z[0-9]{1,2}$" },
           "label":     { "type": "string", "maxLength": 48, "description": "Human location, e.g. 'Riser bend, above ACB-8'" },
@@ -156,7 +157,8 @@
       "R12 Maintenance gate: remote (cloud-originated) changes to modbus or joints domains are accepted only when panel is in maintenance mode; local UI/commissioning tool changes are exempt.",
       "R13 On any accepted change: write before/after to audit trail, publish applied versions on ack/reported channel, keep last-known-good snapshot for boot fallback.",
       "R14 Referential integrity: any ambient_sensor set at panel (modbus), zone, or joint level must reference an existing slave_id, and its channel must be within that slave's channel count. Checked whenever the field is present, independent of R9/alarms usage.",
-      "R15 Per-channel register integrity: when registers.channel_addrs is present its length must equal channels, addresses must be unique and spaced >= temp_word_count apart (no overlapping reads), and min(channel_addrs) must equal temp_base_addr; when registers.channel_labels is present its length must equal channels."
+      "R15 Per-channel register integrity: when registers.channel_addrs is present its length must equal channels, addresses must be unique and spaced >= temp_word_count apart (no overlapping reads), and min(channel_addrs) must equal temp_base_addr; when registers.channel_labels is present its length must equal channels.",
+      "R16 RS-485 bus loading: the number of slaves assigned to any single bus must not exceed rs485_max_devices for that bus (default 128, the quarter-unit-load ceiling of the MAX487E-class transceiver). A bus loaded above 80% of that ceiling is accepted but reported as a warning, since it leaves no headroom for repeaters, diagnostic taps or growth."
     ]
   },
 
