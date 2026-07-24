@@ -1524,3 +1524,28 @@ Pi.
 - **Slice 8a live-verified:** all five env-driven gate PINs work
   (system/alarm/parameters/comms + the server-side kiosk PIN). No
   credentials remain in the flow export.
+
+## 2026-07-24 — Slice 9 step 6 (EMA/persistence freeze + reset on restore)
+
+RoR live-verified, so step 6 unblocked (user go-ahead). Key realisation:
+the **freeze is automatic** — a blacklisted slave stops being polled, so
+ProcessLogic gets no fresh sample for its joints and their emaState +
+the Alarm Manager's persistState simply don't advance. Step 6 is
+therefore only the **reset on restore**:
+
+- Handler returns `emaResetJoints` (the restored slave's joints) on a
+  restore event; the Blacklist Engine writes them into
+  `global.busduct_ema_reset`.
+- ProcessLogic, right after loading `emaState`, checks the flag and
+  drops that joint's `emaState` + `deltaTEmaState` (and clears the flag)
+  so the first fresh reading re-initialises `emaTemp = sensorVal`,
+  RoR = 0 — **AC4** (no spurious RoR after a 20-min blackout with an
+  8 °C change), building on the validated RoR/EMA path.
+- The Alarm Manager's blacklist-clear branch deletes `PROCESS|<joint>|*`
+  persistence timers for the restored joints, so any re-appearing
+  condition re-proves from zero on fresh data (spec §3.2).
+
+All Slice 9 steps (1-7) now built. 363 tests pass. **Slice 9 code
+complete; live pass on the Pi still pending** (blacklist on forced
+failure, SYSTEM alarm, scan drop, restore + no spurious RoR, held alarm
+not cleared).

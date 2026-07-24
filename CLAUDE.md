@@ -443,7 +443,7 @@ trends and RoR-based (A2) alarms can fire** — previously they never
 could. **Live-verified on the Pi (2026-07-24): RoR tracks real trends,
 no spurious A2 alarms on stable joints.**
 
-## Device blacklisting (Slice 9 — steps 1-5, 7 built; 6 held)
+## Device blacklisting (Slice 9 — all steps built, live pass pending)
 
 Full design: `docs/blacklist-recovery-spec.md`. Removes a dead/marginal
 slave from the scan so one bad device can't tax the other 109.
@@ -478,12 +478,19 @@ slave from the scan so one bad device can't tax the other 109.
   for the HMI. Hold-don't-clear is satisfied by the existing "no data +
   still-configured" behaviour (blacklisted joints stay in config).
 
-**Held — step 6 (user, pending RoR/EMA live check):** freeze/reset the
-EMA baseline + persistence timers in ProcessLogic on blacklist/restore.
-Until it lands, a slave restored after a long blackout can still emit
-one spurious RoR sample (AC4). **Not yet live-verified** — needs the Pi
-(force a slave failure → blacklist + SYSTEM alarm + scan drop; restore →
-alarm clear; held alarm not cleared while dark).
+- **Freeze/reset on restore (step 6, built after RoR live-verified):**
+  freeze is automatic (a blacklisted joint gets no samples, so its EMA +
+  persistence timers don't advance). On restore the handler flags the
+  joints in `global.busduct_ema_reset`; ProcessLogic drops that joint's
+  `emaState`/`deltaTEmaState` on the next sample so it re-inits
+  (`emaTemp=sensorVal`, RoR=0) — **AC4: no spurious RoR after a blackout**.
+  The Alarm Manager's blacklist-clear also resets `PROCESS|<joint>|*`
+  persistence timers so a re-appearing condition re-proves from zero.
+
+**Not yet live-verified** — needs the Pi: force a slave failure →
+blacklist + SYSTEM alarm + scan-time drop; restore → alarm clears + no
+spurious RoR; a joint in alarm stays held (not cleared) while its slave
+is dark. Deploy = git pull → restart Node-RED → re-import flow.
 
 ## Cloud Gateway tab (Slice 5, wired — soak pending)
 

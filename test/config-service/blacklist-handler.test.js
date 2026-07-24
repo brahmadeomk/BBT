@@ -58,6 +58,14 @@ describe('blacklist-handler — read results drive exclusion + alarms', () => {
     assert.equal(r.alarms[0].action, 'clear');
     assert.equal(r.alarms[0].slave_id, 'sl05');
     assert.equal(r.resendNeeded, false, 'restore does not change the read set');
+    // step 6: the restored slave's joints are flagged for EMA/deltaT reset
+    assert.deepEqual(r.emaResetJoints, ['J10', 'J11']);
+  });
+
+  test('no EMA reset is requested outside a restore', () => {
+    const tracker = bh.newTracker(trackerOpts);
+    const r = fail3(tracker, 5); // a blacklist event, not a restore
+    assert.deepEqual(r.emaResetJoints, []);
   });
 
   test('unknown unit address is ignored (no slave mapping)', () => {

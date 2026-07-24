@@ -94,12 +94,19 @@ function _finalize(tracker, events, { doc, prevExcludeKey, activeAlarmJointIds, 
   // a restore doesn't change it (the slave was already polled while probing).
   const resendNeeded = prevExcludeKey === undefined ? excludeSlaveIds.length > 0 : excludeKey !== prevExcludeKey;
   const alarms = events.map((e) => blacklistAlarmCommand(e, doc)).filter(Boolean);
+  // Step 6: on restore, the joints whose ProcessLogic EMA/deltaT baseline
+  // must be reset so RoR starts from 0 (no spurious rate after a blackout).
+  const emaResetJoints = [];
+  for (const e of events) {
+    if (e.type === 'restored') emaResetJoints.push(...jointsForSlave(doc, e.slaveId));
+  }
   return {
     events,
     excludeSlaveIds,
     excludeKey,
     resendNeeded,
     alarms,
+    emaResetJoints,
     jointStates: deriveJointStates(doc, tracker, activeAlarmJointIds, lastValidTs),
   };
 }
