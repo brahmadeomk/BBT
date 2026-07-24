@@ -1418,3 +1418,21 @@ out of 8a scope.
 sudoers rule, enable `adminAuth`, re-import the flow, and confirm each
 gate denies with no PIN / admits with the correct PIN, editor prompts
 for login, and `uhubctl` recovery still works.
+
+## 2026-07-24 (later) — Kiosk PIN fix: server-side, not ${} substitution
+
+Live test showed the kiosk exit PIN didn't work after 8a while the other
+four gates did. Cause: the kiosk used `scope.correctPass =
+"${BUSDUCT_KIOSK_PIN}"` inside the Exit Kiosk `ui_template`, but Node-RED
+does **not** substitute `${ENV}` inside dashboard template body content
+(it does for typed node properties / `env.get()` in function nodes, which
+is why the other gates worked). The browser saw the literal `${...}` and
+the guard locked it.
+
+Fix: validate the kiosk PIN server-side like the others. New "Check
+Kiosk PIN" function node (`env.get('BUSDUCT_KIOSK_PIN')`) sits between the
+kiosk template and the `killall chromium` exec node; the template now
+just sends the entered value and shows the server's verdict via a
+`$watch('msg')`. Bonus: the PIN never reaches the browser. Env var name
+unchanged, so `/etc/busduct/nodered.env` needs no edit — just re-import
+the flow. docs/security-hardening.md corrected.

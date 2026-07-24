@@ -33,9 +33,13 @@ sudo systemctl edit nodered             # add: [Service] / EnvironmentFile=/etc/
 sudo systemctl restart nodered
 ```
 
-`env.get(...)` in a function node reads process environment variables;
-the kiosk template uses Node-RED's `${BUSDUCT_KIOSK_PIN}` deploy-time
-substitution. `/etc/busduct/nodered.env` is git-ignored — never commit
+All five gates validate **server-side**: `env.get(...)` in a function
+node reads process environment variables. (The kiosk PIN is checked by a
+"Check Kiosk PIN" function node too — an earlier attempt to use
+`${BUSDUCT_KIOSK_PIN}` substitution inside the `ui_template` did **not**
+work, because Node-RED does not substitute env vars inside dashboard
+template body content; server-side validation also keeps the PIN out of
+the browser.) `/etc/busduct/nodered.env` is git-ignored — never commit
 the filled-in file.
 
 > These are **low-strength dashboard gates** (client-reachable widgets,
