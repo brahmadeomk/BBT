@@ -144,14 +144,16 @@ class ConfigStore {
 
     if (!result.valid) {
       this._appendAudit({ ...auditBase, result: 'rejected', errors: result.errors });
-      return { applied: false, errors: result.errors };
+      return { applied: false, errors: result.errors, warnings: result.warnings || [] };
     }
 
     atomicWriteJson(this._domainPath(domain), newDoc);
     atomicWriteJson(this._lkgPath(domain), newDoc);
     this._appendAudit({ ...auditBase, result: 'applied' });
 
-    return { applied: true, appliedVersions: this.getAppliedVersions(domain) };
+    // warnings are non-blocking diagnostics (e.g. R16 bus loading > 80%) -
+    // surfaced to the caller so the dashboard can show them on a success.
+    return { applied: true, appliedVersions: this.getAppliedVersions(domain), warnings: result.warnings || [] };
   }
 }
 

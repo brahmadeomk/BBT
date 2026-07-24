@@ -208,3 +208,29 @@ describe('ConfigStore - integration with the real validators', () => {
     assert.ok(result.errors.some((e) => e.rule === 'R11'));
   });
 });
+
+describe('applyIfValid - warnings passthrough (Slice 10)', () => {
+  test('propagates non-blocking validator warnings on a successful apply', () => {
+    const root = tmpRoot();
+    const store = new ConfigStore({
+      root,
+      validators: {
+        modbus_joints: () => ({ valid: true, errors: [], warnings: [{ rule: 'R16', message: 'bus at 111/128 unit loads' }] }),
+        alarms: mockValidator('alarms'),
+      },
+    });
+    const res = store.applyIfValid('modbus_joints', validModbusJointsDoc(), { source: 'local' });
+    assert.equal(res.applied, true);
+    assert.deepEqual(res.warnings, [{ rule: 'R16', message: 'bus at 111/128 unit loads' }]);
+  });
+
+  test('warnings default to [] when the validator omits them', () => {
+    const root = tmpRoot();
+    const store = new ConfigStore({
+      root,
+      validators: { modbus_joints: () => ({ valid: true, errors: [] }), alarms: mockValidator('alarms') },
+    });
+    const res = store.applyIfValid('modbus_joints', validModbusJointsDoc(), { source: 'local' });
+    assert.deepEqual(res.warnings, []);
+  });
+});

@@ -1612,3 +1612,35 @@ relevant), so it's a checkpoint (like the RoR/blacklist engine edits).
 Remaining Slice 10 items carry real design decisions (positional
 telemetry = a cloud wire-format contract; two-segment RS-485 =
 architecture) — to be planned with the design chat before building.
+
+## 2026-07-24 — Slice 10: contained fixes + ambient integration; two items proposed
+
+Implemented the "contained fixes + ambient integration" plan; held the
+two design-sensitive items for the design chat.
+
+- **3-digit slave_id (100+ devices):** two real bugs in
+  modbus-settings-handler — the carried-id regex was `^sl[0-9]{2}$`
+  (a `sl100` would be treated as new and reassigned, breaking joint
+  maps) and `nextFreeId` capped at 64. Fixed to `^sl[0-9]{2,3}$` and
+  `i <= 128`. `padStart(2)` already yields `sl100` correctly.
+- **R16 warnings in the apply UI:** `store.applyIfValid` now returns
+  `warnings`; the Modbus Settings handler appends them to the success
+  toast (`applied. ⚠ R16: bus at 111/128...`) so an >80%-loaded bus is
+  visible without blocking the apply. 2 store tests.
+- **Ambient outlier/fallback -> ProcessLogic:** the ΔT block now resolves
+  the effective ambient via `busductConfigService.resolveAmbient`
+  (configured -> zone median -> panel median, plausibility band
+  -20..80 C). The configured-and-plausible path is byte-identical to
+  before; fallback only engages when the configured ambient is
+  out-of-band or missing. Ambient output carries a `source` field.
+  Note: the band catches gross faults; subtle in-band drift is not
+  rejected (peer-deviation rejection is a possible future enhancement).
+
+**Proposed, not built (design chat) — `docs/slice10-design-proposals.md`:**
+(A) positional-array telemetry payload (cloud wire-format + manifest
+contract; the cloud-side parser must change in lockstep), and (B)
+two-segment RS-485 (per-bus compile/serial/recovery, bus-tagged
+responses). Both need sign-off on their contracts first.
+
+377 tests pass. Ambient ProcessLogic change is alarm-relevant (ΔT) -
+needs a live check like RoR did.

@@ -293,7 +293,7 @@ function groupRowsIntoSlaves(rows) {
       }
     }
 
-    const carriedId = inChannelOrder.map((r) => r.slave_id).find((id) => /^sl[0-9]{2}$/.test(id)) || '';
+    const carriedId = inChannelOrder.map((r) => r.slave_id).find((id) => /^sl[0-9]{2,3}$/.test(id)) || '';
     groups.push({
       unit_address: ua,
       slave_id: carriedId,
@@ -340,7 +340,9 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
   // Stable slave_id per unit: keep the carried one; allocate the lowest unused for new units.
   const carried = new Set(groups.map((g) => g.slave_id).filter(Boolean));
   const nextFreeId = () => {
-    for (let i = 1; i <= 64; i++) {
+    // 128 = schema maxItems (110-device target). padStart(2) keeps sl01..sl99
+    // two-digit and lets sl100+ be three-digit (schema pattern ^sl[0-9]{2,3}$).
+    for (let i = 1; i <= 128; i++) {
       const candidate = `sl${String(i).padStart(2, '0')}`;
       if (!carried.has(candidate)) {
         carried.add(candidate);
@@ -447,8 +449,12 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
 
   const idByAddress = new Map(groups.map((g) => [g.unit_address, g.slave_id]));
   const savedRows = rows.map((r) => ({ ...r, slave_id: idByAddress.get(Number(r.unit_address)), editing: false }));
+  // Non-blocking warnings (e.g. R16 bus loading > 80%) - append to the success
+  // toast so the operator sees them without the apply being rejected.
+  const warnText = (result.warnings || []).map((w) => `${w.rule}: ${w.message}`).join('; ');
+  const successMsg = warnText ? `Modbus configuration applied. ⚠ ${warnText}` : 'Modbus configuration applied';
   return {
-    msg: withPayload(msg, { slaves: savedRows, bus, success: 'Modbus configuration applied', action: 'apply' }),
+    msg: withPayload(msg, { slaves: savedRows, bus, success: successMsg, warnings: result.warnings || [], action: 'apply' }),
     draft: { slaves: savedRows, bus },
     resendNeeded: !nanoJobsEqual(current, newDoc),
     legacy: deriveLegacyBridge(newDoc, legacySlaveList),

@@ -443,6 +443,25 @@ trends and RoR-based (A2) alarms can fire** — previously they never
 could. **Live-verified on the Pi (2026-07-24): RoR tracks real trends,
 no spurious A2 alarms on stable joints.**
 
+## Scale hardening (Slice 10 — in progress)
+
+For the 100-joint + 10-ambient target. Built so far:
+- **Ambient outlier rejection + fallback** (`src/config-service/ambient-resolver.js`,
+  exposed as `busductConfigService.resolveAmbient`): plausibility band
+  (-20..80 C) then configured -> zone median -> panel median. Wired into
+  ProcessLogic's ΔT block (configured-and-plausible path unchanged;
+  fallback only when the ambient is out-of-band/missing; ambient output
+  gains a `source`). **Alarm-relevant (ΔT) — needs a live check.**
+- **100+ device commissioning fixes:** `slave_id` generation now handles
+  3 digits (`sl100+`; carried-id regex `^sl[0-9]{2,3}$`, `nextFreeId` cap
+  128) and **R16 bus-loading warnings** now surface on the Modbus
+  Settings apply toast (`store.applyIfValid` returns `warnings`).
+
+**Proposed, not built (design chat, `docs/slice10-design-proposals.md`):**
+positional-array telemetry payload (cloud wire-format + manifest) and
+two-segment RS-485 (per-bus compile/serial/recovery). Both change
+contracts beyond the edge.
+
 ## Device blacklisting (Slice 9 — all steps built, live pass pending)
 
 Full design: `docs/blacklist-recovery-spec.md`. Removes a dead/marginal
