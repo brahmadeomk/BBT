@@ -1515,3 +1515,12 @@ exposure, not a clear-suppression mechanism.
 362 tests pass. **Held: step 6** (ProcessLogic EMA/persistence
 freeze+reset) pending the RoR live check. Not yet live-verified on the
 Pi.
+
+## 2026-07-24 — Live verifications: RoR fix + Slice 8a
+
+- **RoR fix live-verified on the Pi:** RoR now tracks real trends and no
+  spurious A2 alarms on stable joints. This clears the key dependency for
+  Slice 9 step 6 (the EMA freeze/reset builds on this path).
+- **Slice 8a live-verified:** all five env-driven gate PINs work
+  (system/alarm/parameters/comms + the server-side kiosk PIN). No
+  credentials remain in the flow export.

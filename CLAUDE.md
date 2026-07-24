@@ -43,8 +43,9 @@ across all of them.**
   telemetry-interval knob, alarm thresholds (A10 live re-evaluation),
   R12 maintenance gate, acks + audit all confirmed on the real panel.
   **Slices 1–7 are done.** Slice 8 has been split and re-sequenced
-  (workplan Addendum A): **Slice 8a (security hardening) — code done
-  2026-07-24, live pass pending** — the flow's five hardcoded plaintext
+  (workplan Addendum A): **Slice 8a (security hardening) —
+  live-verified 2026-07-24 (all five gate PINs + kiosk working on the
+  Pi)** — the flow's five hardcoded plaintext
   gate PINs (`system123`/`alarm123`/`AdminPro`/`AdminLite`/`Password@21`)
   are removed and now read from the Node-RED environment (fail closed
   when unset); scoped `uhubctl`-only sudoers, `.gitignore` for
@@ -439,8 +440,8 @@ already time-weighted by `alpha = dtSec/tauSec`, and the first sample
 is naturally 0 because `emaTemp` initialises to `sensorVal`, so no
 sub-2 s special case is needed. **Behaviour change: RoR now tracks real
 trends and RoR-based (A2) alarms can fire** — previously they never
-could. Needs a live re-check on the Pi (RoR non-zero under a rising
-temperature; confirm no spurious RoR alarms on stable joints).
+could. **Live-verified on the Pi (2026-07-24): RoR tracks real trends,
+no spurious A2 alarms on stable joints.**
 
 ## Device blacklisting (Slice 9 — steps 1-5, 7 built; 6 held)
 
