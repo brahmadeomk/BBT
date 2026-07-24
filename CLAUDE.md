@@ -442,6 +442,48 @@ trends and RoR-based (A2) alarms can fire** — previously they never
 could. Needs a live re-check on the Pi (RoR non-zero under a rising
 temperature; confirm no spurious RoR alarms on stable joints).
 
+## Device blacklisting (Slice 9 — steps 1-5, 7 built; 6 held)
+
+Full design: `docs/blacklist-recovery-spec.md`. Removes a dead/marginal
+slave from the scan so one bad device can't tax the other 109.
+
+- **Firmware (step 1):** `Nano_IOT.ino` re-inits `Serial1`/timeout only
+  when baud/timeout actually change (not every job), so a blacklist/
+  probe resend (same comm, different read set) doesn't glitch the bus.
+- **`src/config-service/blacklist-tracker.js` (steps 2-3):** pure
+  `BlacklistTracker` — blacklist after 3 consecutive failures, probe on
+  backoff 30s→5m, restore after 3 consecutive good probe reads
+  (hysteresis, no flap). active/blacklisted/probing states.
+- **Compiler (step 4):** `compileNanoJob(doc, {excludeSlaveIds})` +
+  `buildNanoJobMessage(store, {excludeSlaveIds})` omit blacklisted
+  slaves; comm unchanged. `Send Nano Job` reads
+  `global.busduct_blacklist_exclude`.
+- **`src/config-service/node-red/blacklist-handler.js` (steps 5,7):**
+  pure orchestration exposed at `busductConfigService.blacklist` —
+  `processReadResult`/`processTick` drive the tracker from Nano `{t:'r'}`
+  results, decide resend (exclude-set change), emit blacklist alarm
+  commands, and derive joint **LIVE/STALE/OFFLINE** (STALE = held alarm
+  on a non-measurable joint, carries `last_valid_ts`).
+- **Alarm Manager:** new blacklist section raises/clears one ACK-able
+  `SYSTEM|<slave>|BLACKLIST` alarm (mirrors the COMM watchdog); the
+  `CONFIG_REMOVED` sweep now skips `category:"SYSTEM"` alarms (so a
+  blacklist/COMM alarm isn't auto-cleared — also fixes a latent COMM
+  bug). `buildOutputs` mirrors active alarms to
+  `global.busbartherm.activeAlarms` for joint-state derivation.
+- **Flow:** new **Device Health** tab (nodes `d9b1ac57e0f100xx`) — taps
+  the Nano response stream (via the "Data Out" link), runs the Blacklist
+  Engine (+10s probe tick), resends the trimmed job, injects blacklist
+  alarms into the Alarm Manager, and writes `global.busduct_blacklist_state`
+  for the HMI. Hold-don't-clear is satisfied by the existing "no data +
+  still-configured" behaviour (blacklisted joints stay in config).
+
+**Held — step 6 (user, pending RoR/EMA live check):** freeze/reset the
+EMA baseline + persistence timers in ProcessLogic on blacklist/restore.
+Until it lands, a slave restored after a long blackout can still emit
+one spurious RoR sample (AC4). **Not yet live-verified** — needs the Pi
+(force a slave failure → blacklist + SYSTEM alarm + scan drop; restore →
+alarm clear; held alarm not cleared while dark).
+
 ## Cloud Gateway tab (Slice 5, wired — soak pending)
 
 New "Cloud Gateway" flow tab (nodes `8a1b2c3d4e5f6a10`–`22`) consumes

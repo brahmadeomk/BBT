@@ -1477,3 +1477,41 @@ pause/restart; one ACK-able SYSTEM alarm per blacklisted slave
 results into the tracker and resends the trimmed job. These change alarm
 raise/clear behaviour, so confirm with the user (as with the RoR fix)
 before editing ProcessLogic/Alarm Manager.
+
+## 2026-07-24 — Slice 9 steps 5 + 7 (joint states, SYSTEM alarm, flow wiring)
+
+User authorised steps 5 and 7 (holding step 6, the EMA freeze/reset,
+until the RoR/EMA live check — sensible, since step 6 builds on that
+path). Built:
+
+- **`src/config-service/node-red/blacklist-handler.js`** (pure, exposed
+  at `busductConfigService.blacklist`): maps Nano `{t:'r',id,st}` results
+  to slave_ids, drives the tracker, and returns the exclude set (+ resend
+  decision keyed on exclude-set change), blacklist alarm raise/clear
+  commands, and per-joint LIVE/STALE/OFFLINE (step 5). 7 tests.
+- **Alarm Manager (`de6fcc55794afd9e`):** new DEVICE_BLACKLIST section
+  raises/clears one ACK-able `SYSTEM|<slave>|BLACKLIST` alarm, mirroring
+  the COMM watchdog. Also guarded the CONFIG_REMOVED sweep with
+  `alarm.category !== "SYSTEM"` — without it, a SYSTEM alarm
+  (joint_id "SYSTEM") would be auto-cleared on the next KPI pass (latent
+  COMM-alarm bug too). `buildOutputs` now mirrors active alarms to
+  `global.busbartherm.activeAlarms` so the blacklist engine can tell a
+  held (STALE) joint from an OFFLINE one.
+- **`buildNanoJobMessage(store, {excludeSlaveIds})`** + `Send Nano Job`
+  reads `global.busduct_blacklist_exclude`.
+- **Device Health flow tab** (`d9b1ac57e0f100xx`): taps the Nano response
+  stream (Data Out link), Blacklist Engine (thin, calls the lib) + a 10s
+  probe tick, resends the trimmed job via the existing Resend Nano Job
+  link, injects blacklist alarms into the Alarm Manager via a new
+  link-in, writes `global.busduct_blacklist_state` for the HMI.
+
+**Design note — hold-don't-clear needs no Alarm Manager surgery:** a
+blacklisted slave stops being polled, so ProcessLogic emits no fresh
+sample for its joints → the Alarm Manager never re-evaluates them → held
+process alarms simply persist, and CONFIG_REMOVED doesn't fire because
+the joints remain in config. Step 5 therefore only adds the STALE/OFFLINE
+exposure, not a clear-suppression mechanism.
+
+362 tests pass. **Held: step 6** (ProcessLogic EMA/persistence
+freeze+reset) pending the RoR live check. Not yet live-verified on the
+Pi.
