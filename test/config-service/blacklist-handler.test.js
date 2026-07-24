@@ -82,6 +82,16 @@ describe('blacklist-handler — read results drive exclusion + alarms', () => {
   });
 });
 
+describe('blacklist-handler — getTracker singleton', () => {
+  test('returns the same live instance across calls (must not go through serialised context)', () => {
+    const a = bh.getTracker();
+    const b = bh.getTracker();
+    assert.equal(a, b, 'same process-wide instance');
+    assert.equal(typeof a.tick, 'function', 'methods intact (not a JSON-stripped plain object)');
+    assert.equal(typeof a.recordResult, 'function');
+  });
+});
+
 describe('blacklist-handler — summarizeBlacklist (HMI view)', () => {
   const state = {
     updatedTs: '2026-07-24T12:00:00Z',

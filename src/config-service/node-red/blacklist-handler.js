@@ -23,6 +23,17 @@ function newTracker(opts) {
   return new BlacklistTracker(opts);
 }
 
+// Process-wide singleton (like the cloud-gateway's getGateway). The tracker
+// MUST NOT be stored in Node-RED flow/global context: the Pi's context store
+// is localfilesystem-backed, which JSON-serialises values and strips the
+// class prototype -> "tracker.tick is not a function". Holding it in this
+// module (loaded once at startup) keeps the live instance with its methods.
+let _tracker = null;
+function getTracker(opts) {
+  if (!_tracker) _tracker = new BlacklistTracker(opts);
+  return _tracker;
+}
+
 function unitToSlaveId(doc, unitAddress) {
   const s = (doc?.modbus?.slaves || []).find((x) => x.unit_address === unitAddress);
   return s ? s.slave_id : null;
@@ -181,6 +192,7 @@ function summarizeBlacklist(state, nowMs = Date.now()) {
 
 module.exports = {
   newTracker,
+  getTracker,
   unitToSlaveId,
   jointsForSlave,
   blacklistAlarmCommand,

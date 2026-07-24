@@ -1565,3 +1565,17 @@ the busduct_blacklist_state global). Added:
   devices live" when clear. Documented in edge-user-manual.md.
 
 366 tests pass.
+
+## 2026-07-24 — Fix: blacklist tracker singleton (context serialisation)
+
+Live error: `TypeError: tracker.tick is not a function` in the Blacklist
+Engine. Cause: it stored the BlacklistTracker instance in Node-RED flow
+context, but the Pi's context store is localfilesystem-backed, which
+JSON-serialises values and strips the class prototype -> read-back is a
+plain object with no methods. Same trap the cloud-gateway avoided.
+
+Fix: `getTracker()` process-wide singleton in blacklist-handler.js (held
+in the module, loaded once at startup, never serialised). The engine now
+calls `bl.getTracker()` and keeps `prevExcludeKey` on the tracker rather
+than in the persistent flow store. Test asserts the same live instance
+with methods intact. 367 tests.
