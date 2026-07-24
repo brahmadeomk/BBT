@@ -1374,3 +1374,47 @@ would invalidate them all for no benefit.
 table, Timeline Summary (now 16 weeks), `CLAUDE.md` standing
 instructions and current-status block. `CLAUDE.md`'s test rule also
 corrected from "R1–R13" to **R1–R16**.
+
+## 2026-07-24 — Slice 8a security hardening (code)
+
+Audited the flow for the "hardcoded sudo password" the workplan flagged.
+Reality differed from the description:
+
+- The USB power-cycle exec node uses **plain `sudo uhubctl`** (no
+  embedded password, no `sudo -S`) — it relies on passwordless sudo.
+- The actual embedded secrets were **five plaintext dashboard/kiosk
+  gate PINs** in function/template node source, committed to git:
+  `system123` + `alarm123` (Check Password → system/alarm config),
+  `AdminPro` (Parameters tab, two nodes), `AdminLite` (Communication
+  Settings tab, two nodes), `Password@21` (Exit Kiosk PIN).
+- No plaintext DB/SMTP/MQTT passwords in `flows_BBT.json` — Node-RED
+  keeps those in the encrypted `flows_*_cred.json`, which is not tracked.
+
+**Changes:**
+
+- All five PINs removed from the flow; gates now read from the Node-RED
+  environment (`BUSDUCT_PW_SYSTEM`/`_ALARM`/`_PARAMETERS`/`_COMMS`,
+  `BUSDUCT_KIOSK_PIN`) via `env.get(...)` (function nodes) and
+  `${BUSDUCT_KIOSK_PIN}` deploy substitution (kiosk template). Every
+  gate **fails closed** when its var is unset — no empty-string bypass.
+- `deploy/sudoers.d/busduct-nodered` — NOPASSWD for `uhubctl` only, with
+  install + `visudo -c` steps; instruction to drop any `NOPASSWD: ALL`.
+- `deploy/nodered.env.example` — env template (real file lives at
+  `/etc/busduct/nodered.env`, git-ignored, wired via systemd
+  `EnvironmentFile`).
+- `.gitignore` — added `flows_*_cred.json`, `settings.js`, `*.pem/.key
+  /.crt`, `*.env` (keep `*.env.example`), `/etc/busduct/`, etc.
+- `settings.js.example` — `adminAuth` (bcrypt) block + TLS / loopback /
+  `credentialSecret` options for securing the editor.
+- `docs/security-hardening.md` (new) — full 8a runbook + verification
+  checklist; referenced from `docs/pi-deployment.md` §11.
+
+**Noted, not changed:** the dashboard gate PINs are low-strength
+client-reachable gates; the real boundary is the editor `adminAuth` +
+OS. A hashed/role-based dashboard auth is a possible future improvement,
+out of 8a scope.
+
+**Not yet done:** live pass on the Pi — set the env file, install the
+sudoers rule, enable `adminAuth`, re-import the flow, and confirm each
+gate denies with no PIN / admits with the correct PIN, editor prompts
+for login, and `uhubctl` recovery still works.

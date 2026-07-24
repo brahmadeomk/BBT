@@ -1,0 +1,18 @@
+# Scoped passwordless sudo for the Node-RED user (Slice 8a).
+#
+# The panel's only privileged operation is the USB hub power-cycle used by
+# the RECOVERY CONTROLLER exec node (`sudo uhubctl ...`). This grants
+# NOPASSWD for that ONE binary only — nothing else — so the flow needs no
+# embedded password and the account is not given blanket root.
+#
+# Install:
+#   1. Confirm the uhubctl path:  which uhubctl   (adjust the line below)
+#   2. Confirm the Node-RED user: ps -o user= -C node-red   (usually 'pi')
+#   3. sudo cp deploy/sudoers.d/busduct-nodered /etc/sudoers.d/busduct-nodered
+#      sudo chmod 440 /etc/sudoers.d/busduct-nodered
+#      sudo visudo -cf /etc/sudoers.d/busduct-nodered   # must say "parsed OK"
+#   4. Remove any pre-existing broad NOPASSWD:ALL entry for this user.
+#
+# Tighten further (optional) by pinning the exact arguments, e.g.:
+#   pi ALL=(root) NOPASSWD: /usr/sbin/uhubctl -l 1-1 -a off, /usr/sbin/uhubctl -l 1-1 -a on
+pi ALL=(root) NOPASSWD: /usr/sbin/uhubctl

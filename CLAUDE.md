@@ -43,9 +43,13 @@ across all of them.**
   telemetry-interval knob, alarm thresholds (A10 live re-evaluation),
   R12 maintenance gate, acks + audit all confirmed on the real panel.
   **Slices 1–7 are done.** Slice 8 has been split and re-sequenced
-  (workplan Addendum A): **Slice 8a (security hardening) is next** —
-  remove the hardcoded sudo password, secure the Node-RED editor,
-  credential hygiene. Then Slice 9 (device blacklisting — full design in
+  (workplan Addendum A): **Slice 8a (security hardening) — code done
+  2026-07-24, live pass pending** — the flow's five hardcoded plaintext
+  gate PINs (`system123`/`alarm123`/`AdminPro`/`AdminLite`/`Password@21`)
+  are removed and now read from the Node-RED environment (fail closed
+  when unset); scoped `uhubctl`-only sudoers, `.gitignore` for
+  creds/keys, and editor `adminAuth` template shipped. Full runbook:
+  `docs/security-hardening.md`. Then Slice 9 (device blacklisting — full design in
   `docs/blacklist-recovery-spec.md`), Slice 10 (scale hardening for
   100 joints + 10 ambient), Slice 11 (BMS Modbus TCP integration), and
   finally Slice 8b (portability drill, pilot, rollout) so the pilot runs

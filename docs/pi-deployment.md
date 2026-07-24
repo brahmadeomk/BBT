@@ -208,6 +208,25 @@ JSON to `/var/lib/grafana/dashboards/busduct/`, then
 `sudo systemctl restart grafana-server`. See `docs/historian.md`
 "Visualisation".
 
+## 11. Security hardening (Slice 8a — do this before the pilot)
+
+Full runbook: **`docs/security-hardening.md`**. Three things, none of
+which change the flow's behaviour:
+
+1. **Dashboard/kiosk PINs from the environment.** They are no longer in
+   the flow export. Copy `deploy/nodered.env.example` to
+   `/etc/busduct/nodered.env`, set real values, wire it into the service
+   (`systemctl edit nodered` → `EnvironmentFile=`), restart. Gates fail
+   closed until set.
+2. **Scoped sudo.** Install `deploy/sudoers.d/busduct-nodered`
+   (`uhubctl` only, NOPASSWD) and remove any broad `NOPASSWD: ALL` for
+   the Node-RED user.
+3. **Secure the editor.** Add `adminAuth` (bcrypt) to `settings.js`
+   (snippet in `settings.js.example`), optionally TLS or loopback-only.
+
+After re-importing this flow version, verify each dashboard gate denies
+access with no PIN set and admits with the correct PIN once configured.
+
 ## Updating later
 
 Whenever this repo changes (new commits pushed):

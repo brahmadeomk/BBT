@@ -1,2 +1,24 @@
+# Node dependencies
 node_modules/
+
+# Node-RED runtime secrets — NEVER commit these
+flows_*_cred.json
+*_cred.json
+.node-red/
+settings.js
+# Deployed environment/secret files (only the *.example templates are tracked)
+deploy/nodered.env
+/etc/busduct/
+.env
+*.env
+!*.env.example
+
+# Operational cert/key material (provisioning writes these on-device)
+*.pem
+*.key
+*.crt
+certs/
+
+# Scratch / OS
 *.log
+.DS_Store

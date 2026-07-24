@@ -27,6 +27,30 @@
 module.exports = {
   // ...existing settings...
 
+  // --- Slice 8a: secure the editor (see docs/security-hardening.md) ---
+  // Require a login for the flow editor / admin API. Generate the bcrypt
+  // hash with `node-red admin hash-pw` and paste it below. Without this the
+  // editor at :1880 is open to anyone on the LAN and can run arbitrary code.
+  adminAuth: {
+    type: 'credentials',
+    users: [
+      {
+        username: 'admin',
+        password: '$2b$08$REPLACE_WITH_bcrypt_hash_from_node-red_admin_hash-pw',
+        permissions: '*',
+      },
+    ],
+  },
+  // Optionally serve the editor over TLS and/or bind it to loopback only:
+  // https: { key: require('fs').readFileSync('/etc/busduct/certs/nr-key.pem'),
+  //          cert: require('fs').readFileSync('/etc/busduct/certs/nr-cert.pem') },
+  // requireHttps: true,
+  // uiHost: '127.0.0.1',   // most locked-down: no remote editing at all
+  //
+  // Set a non-default credentialSecret so flows_*_cred.json can't be
+  // decrypted with the built-in key (do NOT commit the value):
+  // credentialSecret: process.env.BUSDUCT_CRED_SECRET,
+
   functionGlobalContext: {
     // ...any existing entries...
     busductConfigService: require('/home/pi/busduct-cloud-edge/src/config-service/node-red'),
