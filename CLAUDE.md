@@ -493,10 +493,12 @@ slave from the scan so one bad device can't tax the other 109.
   The Alarm Manager's blacklist-clear also resets `PROCESS|<joint>|*`
   persistence timers so a re-appearing condition re-proves from zero.
 
-**Not yet live-verified** — needs the Pi: force a slave failure →
-blacklist + SYSTEM alarm + scan-time drop; restore → alarm clears + no
-spurious RoR; a joint in alarm stays held (not cleared) while its slave
-is dark. Deploy = git pull → restart Node-RED → re-import flow.
+**Blacklist live-verified on the Pi (2026-07-24):** disconnecting a
+device blacklists it (after the tap was fixed to read the PARSED Nano
+stream, and the tracker moved to a module singleton) and raises its
+SYSTEM alarm. Still to live-verify: restore path (alarm clear + no
+spurious RoR) and held-alarm-while-dark. Deploy = git pull → restart
+Node-RED → re-import flow.
 
 ## Cloud Gateway tab (Slice 5, wired — soak pending)
 

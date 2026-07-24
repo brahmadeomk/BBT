@@ -1594,3 +1594,21 @@ node's OUTPUT (the parsed `{t:'r',id,st}` objects the working decode
 pipeline uses), and removed it from Data Out. The firmware emits
 `{t:'r',st:'err'}` on every failed read (Nano_IOT.ino), so 3 consecutive
 now blacklist as designed. Flow-only change.
+
+## 2026-07-24 — Slice 10 start: ambient outlier rejection + fallback
+
+Blacklist confirmed working live (disconnect -> blacklist + SYSTEM
+alarm), so Slice 9's core acceptance is met. Started Slice 10.
+
+- `src/config-service/ambient-resolver.js` (pure, 8 tests, exposed as
+  `busductConfigService.resolveAmbient`): resolves a joint's effective
+  ambient VALUE with a plausibility band (default -20..80 C) and
+  fallback — configured sensor -> zone median -> panel median -> none.
+  So one failed/drifting ambient can't poison ΔT for every joint that
+  references it.
+
+**Not yet integrated into ProcessLogic** — that changes ΔT (alarm-
+relevant), so it's a checkpoint (like the RoR/blacklist engine edits).
+Remaining Slice 10 items carry real design decisions (positional
+telemetry = a cloud wire-format contract; two-segment RS-485 =
+architecture) — to be planned with the design chat before building.
