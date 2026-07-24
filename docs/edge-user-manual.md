@@ -337,6 +337,13 @@ who changed it" after any behaviour change.
 
 ## 10. Diagnostics & connection health
 
+- **Device Health** — a live table of **blacklisted** sensor units (a
+  device that failed repeated reads is temporarily dropped from the scan
+  so it can't slow the others), showing each one's recovery countdown and
+  the joints it affects, plus joints currently **STALE** (alarm held while
+  the device is dark) or **OFFLINE**. Each blacklisted unit also raises a
+  `DEVICE_BLACKLIST` alarm in **Active Alarms**. "✔ All devices live" means
+  nothing is blacklisted.
 - **Diagnostics / Modbus Dashboard** — low-level Modbus read/transfer
   status for engineers verifying the RS-485 link.
 - **Connection Analytics → Disconnections** — a history of link drops

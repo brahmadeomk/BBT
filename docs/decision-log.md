@@ -1549,3 +1549,19 @@ All Slice 9 steps (1-7) now built. 363 tests pass. **Slice 9 code
 complete; live pass on the Pi still pending** (blacklist on forced
 failure, SYSTEM alarm, scan drop, restore + no spurious RoR, held alarm
 not cleared).
+
+## 2026-07-24 — Device Health HMI view for blacklisting
+
+User asked how to view blacklisted slaves. There was no dedicated HMI
+panel (only the Active Alarms SYSTEM alarm + the editor node status +
+the busduct_blacklist_state global). Added:
+
+- `summarizeBlacklist(state, nowMs)` in blacklist-handler.js (pure,
+  3 tests): joins the tracker snapshot + joint states into a display
+  summary - blacklisted/probing slaves with recovery countdown and
+  affected joints, plus STALE/OFFLINE joint lists and counts.
+- **Device Health dashboard tab** (`ui_template` d9b1ac57e0f10022, 5 s
+  refresh via a thin function reading the global): live table + "All
+  devices live" when clear. Documented in edge-user-manual.md.
+
+366 tests pass.

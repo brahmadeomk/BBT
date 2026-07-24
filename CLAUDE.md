@@ -477,6 +477,12 @@ slave from the scan so one bad device can't tax the other 109.
   alarms into the Alarm Manager, and writes `global.busduct_blacklist_state`
   for the HMI. Hold-don't-clear is satisfied by the existing "no data +
   still-configured" behaviour (blacklisted joints stay in config).
+- **HMI view:** a **Device Health** dashboard tab
+  (`ui_template` `d9b1ac57e0f10022`, fed by a 5 s refresh) renders
+  `summarizeBlacklist(global.busduct_blacklist_state)` — a live table of
+  blacklisted/probing slaves with recovery countdown + affected joints,
+  and the STALE/OFFLINE joint lists. Each blacklisted slave also shows in
+  **Active Alarms** as its `SYSTEM…DEVICE_BLACKLIST` alarm.
 
 - **Freeze/reset on restore (step 6, built after RoR live-verified):**
   freeze is automatic (a blacklisted joint gets no samples, so its EMA +

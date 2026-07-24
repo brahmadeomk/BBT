@@ -133,6 +133,52 @@ function processTick(tracker, ctx = {}) {
   return _finalize(tracker, events, ctx);
 }
 
+/**
+ * Turn the `busduct_blacklist_state` global into a display summary for the
+ * HMI Device Health panel: which slaves are blacklisted/probing, their
+ * recovery countdown, and the STALE/OFFLINE joints. Pure + testable.
+ */
+function summarizeBlacklist(state, nowMs = Date.now()) {
+  const slaves = state?.slaves || {};
+  const joints = state?.joints || {};
+
+  const jointsBySlave = {};
+  for (const [jid, j] of Object.entries(joints)) {
+    (jointsBySlave[j.slave_id] ||= []).push(jid);
+  }
+
+  const rows = [];
+  for (const [slaveId, s] of Object.entries(slaves)) {
+    if (s.status === 'active') continue;
+    rows.push({
+      slave_id: slaveId,
+      status: s.status, // 'blacklisted' | 'probing'
+      fails: s.fails ?? 0,
+      goods: s.goods ?? 0,
+      next_probe_in_sec:
+        s.status === 'blacklisted' && s.nextProbeMs != null ? Math.max(0, Math.round((s.nextProbeMs - nowMs) / 1000)) : null,
+      joints: (jointsBySlave[slaveId] || []).slice().sort(),
+    });
+  }
+  rows.sort((a, b) => a.slave_id.localeCompare(b.slave_id));
+
+  const staleJoints = Object.entries(joints).filter(([, j]) => j.state === 'STALE').map(([id]) => id).sort();
+  const offlineJoints = Object.entries(joints).filter(([, j]) => j.state === 'OFFLINE').map(([id]) => id).sort();
+
+  return {
+    updatedTs: state?.updatedTs || null,
+    counts: {
+      blacklisted: rows.filter((r) => r.status === 'blacklisted').length,
+      probing: rows.filter((r) => r.status === 'probing').length,
+      stale: staleJoints.length,
+      offline: offlineJoints.length,
+    },
+    slaves: rows,
+    staleJoints,
+    offlineJoints,
+  };
+}
+
 module.exports = {
   newTracker,
   unitToSlaveId,
@@ -141,4 +187,5 @@ module.exports = {
   deriveJointStates,
   processReadResult,
   processTick,
+  summarizeBlacklist,
 };

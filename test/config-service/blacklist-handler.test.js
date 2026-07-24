@@ -82,6 +82,48 @@ describe('blacklist-handler — read results drive exclusion + alarms', () => {
   });
 });
 
+describe('blacklist-handler — summarizeBlacklist (HMI view)', () => {
+  const state = {
+    updatedTs: '2026-07-24T12:00:00Z',
+    slaves: {
+      sl05: { status: 'blacklisted', fails: 3, goods: 0, nextProbeMs: 200000 },
+      sl06: { status: 'probing', fails: 0, goods: 1, nextProbeMs: null },
+      sl07: { status: 'active', fails: 0 },
+    },
+    joints: {
+      J10: { state: 'STALE', slave_id: 'sl05' },
+      J11: { state: 'OFFLINE', slave_id: 'sl05' },
+      J12: { state: 'OFFLINE', slave_id: 'sl06' },
+      J13: { state: 'LIVE', slave_id: 'sl07' },
+    },
+  };
+
+  test('lists only non-active slaves with countdown + affected joints', () => {
+    const v = bh.summarizeBlacklist(state, 170000); // 30s before sl05's probe
+    assert.equal(v.slaves.length, 2);
+    const sl05 = v.slaves.find((r) => r.slave_id === 'sl05');
+    assert.equal(sl05.status, 'blacklisted');
+    assert.equal(sl05.next_probe_in_sec, 30);
+    assert.deepEqual(sl05.joints, ['J10', 'J11']);
+    const sl06 = v.slaves.find((r) => r.slave_id === 'sl06');
+    assert.equal(sl06.status, 'probing');
+    assert.equal(sl06.next_probe_in_sec, null); // no countdown while probing
+  });
+
+  test('reports counts and STALE/OFFLINE joint lists', () => {
+    const v = bh.summarizeBlacklist(state, 170000);
+    assert.deepEqual(v.counts, { blacklisted: 1, probing: 1, stale: 1, offline: 2 });
+    assert.deepEqual(v.staleJoints, ['J10']);
+    assert.deepEqual(v.offlineJoints, ['J11', 'J12']);
+  });
+
+  test('empty/missing state is a clean all-clear summary', () => {
+    const v = bh.summarizeBlacklist(undefined);
+    assert.deepEqual(v.slaves, []);
+    assert.deepEqual(v.counts, { blacklisted: 0, probing: 0, stale: 0, offline: 0 });
+  });
+});
+
 describe('blacklist-handler — joint states (step 5)', () => {
   test('LIVE when the slave is active', () => {
     const tracker = bh.newTracker(trackerOpts);
