@@ -1579,3 +1579,18 @@ in the module, loaded once at startup, never serialised). The engine now
 calls `bl.getTracker()` and keeps `prevExcludeKey` on the tracker rather
 than in the persistent flow store. Test asserts the same live instance
 with methods intact. 367 tests.
+
+## 2026-07-24 — Fix: blacklist engine tapped the raw (unparsed) Nano stream
+
+Live: disconnecting a device raised its sensor-fault alarm but the
+Blacklist Engine stayed "all live". Cause: the engine tapped the
+"Data Out" link, which carries serial-in's RAW STRING output - the JSON
+is only parsed later by the `84353552fed87166` json node (serial-in ->
+filter '{' -> json -> decode parsers). So the engine saw strings,
+`msg.payload.t` was undefined, and every read was ignored.
+
+Fix: re-tapped the engine's "Nano Results (in)" link onto the json
+node's OUTPUT (the parsed `{t:'r',id,st}` objects the working decode
+pipeline uses), and removed it from Data Out. The firmware emits
+`{t:'r',st:'err'}` on every failed read (Nano_IOT.ino), so 3 consecutive
+now blacklist as designed. Flow-only change.
