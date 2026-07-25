@@ -63,5 +63,12 @@ module.exports = {
     // running on the Pi and the busduct database/retention policies
     // created once - see docs/historian.md.
     busductHistorian: require('/home/pi/busduct-cloud-edge/src/historian/node-red'),
+    // Slice 11 - BMS Integration tab (Modbus TCP slave serving the
+    // generated register map to a Modbus->BACnet gateway). Optional: only
+    // active once a cfg/integration doc is applied. Needs the pure-JS
+    // `jsmodbus` package installed on the Pi to bind a real socket
+    // (npm i jsmodbus in this repo); without it the service still computes
+    // the register image but binds no listener. See docs/bms-integration.md.
+    busductIntegration: require('/home/pi/busduct-cloud-edge/src/integration/node-red'),
   },
 };

@@ -95,6 +95,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | `/test` | Unit tests, soak/network-pull scripts, portability drill config (empty — Slice 2+) |
 | `/tools` | Migration script, commissioning helper (empty — Slice 2/6) |
 | `/src/historian` | Local InfluxDB historian: KPI→point transform + Node-RED exposure (not in the workplan's layout table; a local service per the Readiness Workplan) |
+| `/src/integration` | Slice 11 BMS integration: register-map builder, rollup/worst-joint latch, holding-register image, ACK decode, Modbus TCP slave adapter (injected server factory), BmsService orchestration + Node-RED exposure |
 | `/firmware` | Arduino Nano sketch (`Nano_IOT.ino`) — not in the workplan's layout table verbatim, kept as its own dir since it's frozen device source, not prose documentation. See decision log. |
 
 ## Reference documents
@@ -106,6 +107,9 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | Edge node config spec | `docs/busduct_edge_config.yaml` | present |
 | Modbus/joint schema (R1–R16) | `config/schemas/busduct_modbus_joint_config.schema.json` | present |
 | Alarms schema (A1–A10) | `config/schemas/busduct_alarms_config.schema.json` | present |
+| Integration schema (I1–I5, Slice 11) | `config/schemas/busduct_integration_config.schema.json` | present |
+| BMS register map (customer-facing, append-only) | `docs/bms-register-map.md` | present |
+| BMS integration deployment/runbook | `docs/bms-integration.md` | present |
 | Existing Node-RED flow | `flows/flows_BBT.json` | present |
 | Arduino Nano firmware | `firmware/Nano_IOT.ino` | present |
 | Edge device user manual (operator/technician HMI guide) | `docs/edge-user-manual.md` | present |
@@ -125,8 +129,10 @@ OS/boot layout — take it to the design chat before implementing.
 
 ## Config domains
 
-Three independently-versioned domains, validated as separate atomic
-units (R11/R12 govern `cfg/modbus`/`cfg/joints`; A6 governs `cfg/alarms`):
+Four independently-versioned domains, validated as separate atomic
+units (R11/R12 govern `cfg/modbus`/`cfg/joints`; A6 governs `cfg/alarms`;
+I4 governs `cfg/integration`). The fourth, **`cfg/integration`** (Slice 11
+BMS), is described in its own section below; the three original domains:
 
 - **`cfg/modbus` + `cfg/joints`** — wiring/commissioning reality: buses,
   slaves, register maps, joint↔slave↔channel↔zone mapping. Remote
@@ -480,6 +486,55 @@ For the 100-joint + 10-ambient target. Built so far:
   pipeline (2nd serial pair, per-bus Send Nano Job, bus-tagged response
   tap, per-bus recovery) is a **documented runbook** (§B) pending a
   physical second Nano to wire/test.
+
+## BMS integration (Slice 11 — core built, flow wiring + live pending)
+
+Modbus TCP slave on the Pi + off-the-shelf Modbus→BACnet gateway (agreed
+approach — certified stack, no BOM commitment; native BACnet is a later
+product investment the point model carries into unchanged). A **peer
+adapter** of the cloud gateway: fed from the same internal link-node bus,
+computed locally, works with the internet down. Full deployment/runbook:
+`docs/bms-integration.md`; customer-facing register map:
+`docs/bms-register-map.md` (versioned, **append-only** — rule on page 1).
+
+- **Fourth config domain `cfg/integration`** (schema
+  `busduct_integration_config.schema.json`, validator
+  `validate-integration.js`, rules **I1–I5**: I2 privileged-port warning,
+  I3 tier≥2 needs zones, I4 append-only point_map_version + domain-version
+  monotonicity, I5 register-map capacity). Same store/validate/audit path
+  as the other three; registered in `store.js` (`DOMAIN_FILES`/
+  `DOMAIN_VERSION_KEYS`) and `node-red/index.js` `createStore`.
+- **Pure, unit-tested core (`src/integration/`)**: `register-map.js` —
+  deterministic layout from cfg/joints + cfg/integration, **fixed block
+  bases/strides** so adding a joint/zone never renumbers a point
+  (append-only by construction); Tier 1 summary (~12 pts @ base 0) +
+  control/ACK (base 16) + optional severity bitmap (base 32) + Tier 2
+  per-zone (base 100, stride 8) + Tier 3 per-joint (base 500, stride 8).
+  `rollup.js` — `WorstJointLatch` (first-raised holds, reassign only on
+  clear) + per-level instance counts + panel/zone maxima (LIVE joints
+  only). `holding-registers.js` — signed-int16 ×10 image, NO_DATA
+  (−32768) sentinel for dark joints, heartbeat wrap. `ack.js` — decode a
+  BMS write to the ACK register (1 = ACK all active; 1000+i = ACK joint
+  i). `modbus-tcp-slave.js` — adapter with an **injected serverFactory**
+  (same DI pattern as the cloud transport / cert reconnect), so the socket
+  library is swappable and unit-testable. `bms-service.js` — orchestration
+  singleton (ingest KPIs/alarms/blacklist → refresh → image → slave; ACK →
+  alarm ACK path).
+- **`busductIntegration`** Node-RED entry (`src/integration/node-red/`):
+  `getBmsService` (process-wide singleton — holds latch/heartbeat/socket,
+  must NOT go through serialised context), `handleIntegrationMessage`
+  (config apply → reconfigure). Production Modbus server is the pure-JS
+  **`jsmodbus`** (optionalDependency, **lazily required** in
+  `jsmodbus-server-factory.js` — the only file importing it; the
+  cloud-agnostic grep stays green). Without it installed, the service
+  computes images but binds no socket.
+- **Not yet done**: the **BMS Integration flow tab** (thin nodes: server
+  @boot, KPI/alarm/blacklist taps, refresh tick, ACK output — wired like
+  the Cloud Gateway tab; runbook in `docs/bms-integration.md`) and the
+  **reference-gateway live validation** (workplan §11 "Done when": a stock
+  gateway reads Tier 1 as BACnet with no custom mapping; a frozen Pi is
+  detectable via the heartbeat; a BMS-originated ACK lands in the audit
+  trail). Both need the Modbus→BACnet gateway hardware.
 
 ## Device blacklisting (Slice 9 — all steps built, live pass pending)
 

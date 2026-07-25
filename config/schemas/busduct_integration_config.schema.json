@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "busduct/cfg/integration/v1",
+  "title": "BusductTherMo — BMS Integration Domain (cfg/integration)",
+  "description": "Fourth independently-versioned config domain (Slice 11). Describes how the panel exposes its live state to a customer Building Management System: enabled protocols (Modbus TCP first, native BACnet later), TCP listener, exposure tier, the append-only point-map version, and zone-rollup rules. The register map itself is GENERATED deterministically from cfg/joints + this domain (src/integration/register-map.js), so joint-count changes need no schema or code edit. Works with the internet down — the BMS is often the customer's alarm path of record. Follows the same store/validate/audit path as the other three domains; validated by rules I1–I5 (src/config-service/validate-integration.js).",
+  "type": "object",
+  "required": ["config_domain_versions", "modbus_tcp", "exposure_tier", "point_map_version"],
+  "additionalProperties": false,
+
+  "definitions": {
+    "modbus_tcp": {
+      "type": "object",
+      "description": "Modbus TCP slave (server) listener the off-the-shelf Modbus→BACnet gateway polls.",
+      "required": ["enabled", "port", "unit_id"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "description": "Master on/off for the whole BMS interface." },
+        "port": {
+          "type": "integer", "minimum": 1, "maximum": 65535,
+          "description": "TCP listen port. 502 is the Modbus default; >=1024 avoids needing a privileged bind (I2 warns on <1024)."
+        },
+        "unit_id": {
+          "type": "integer", "minimum": 1, "maximum": 247,
+          "description": "Modbus unit/slave id the gateway addresses (single logical device)."
+        },
+        "bind_host": {
+          "type": "string",
+          "description": "Optional interface to bind (e.g. the BMS VLAN address). Absent -> bind all interfaces.",
+          "default": "0.0.0.0"
+        },
+        "max_connections": {
+          "type": "integer", "minimum": 1, "maximum": 16, "default": 4,
+          "description": "Concurrent gateway/poller sockets accepted."
+        }
+      }
+    }
+  },
+
+  "properties": {
+    "config_domain_versions": {
+      "type": "object",
+      "description": "Per-domain applied version. Only 'integration' is authoritative for this domain; the others may be echoed for cross-checking.",
+      "required": ["integration"],
+      "additionalProperties": true,
+      "properties": {
+        "integration": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "modbus_tcp": { "$ref": "#/definitions/modbus_tcp" },
+
+    "exposure_tier": {
+      "type": "integer", "enum": [1, 2, 3],
+      "description": "How much of the generated map to expose: 1 = summary block only (~12 points); 2 = summary + per-zone; 3 = summary + per-zone + per-joint detail. Higher tiers are a strict superset of the lower ones (append-only), so raising the tier never renumbers existing points."
+    },
+
+    "point_map_version": {
+      "type": "integer", "minimum": 1,
+      "description": "Version of the customer-facing register map (docs/bms-register-map.md). APPEND-ONLY: never renumber a point, only append. I4 forbids this from decreasing across an apply — a decrease would mean a renumber that breaks every deployed gateway configuration."
+    },
+
+    "severity_bitmap": {
+      "type": "object",
+      "description": "Optional compact per-joint severity block: 8 joints packed per 16-bit register (2 bits/joint), for point-licence-sensitive customers who cannot afford Tier-3 detail. Additive; does not change any other block.",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean", "default": false }
+      }
+    },
+
+    "zone_rollup": {
+      "type": "object",
+      "description": "Per-zone rollup rules for the Tier-2 block.",
+      "additionalProperties": false,
+      "properties": {
+        "worst_joint_tiebreak": {
+          "type": "string", "enum": ["first_raised"], "default": "first_raised",
+          "description": "How the latched worst-joint point resolves a tie when two joints sit at the same level. Only 'first_raised' is defined (first to reach the level holds it until it clears) — it stops the point oscillating. Declared explicitly so the behaviour is a config contract, not an implementation accident."
+        },
+        "include_ambient_zone": {
+          "type": "boolean", "default": false,
+          "description": "Whether the synthetic AMBIENT zone gets its own Tier-2 block. Off by default (ambient references aren't alarmable joints)."
+        }
+      }
+    }
+  }
+}

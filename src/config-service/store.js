@@ -7,11 +7,13 @@ const crypto = require('node:crypto');
 const DOMAIN_FILES = {
   modbus_joints: 'modbus_joints.json',
   alarms: 'alarms.json',
+  integration: 'integration.json',
 };
 
 const DOMAIN_VERSION_KEYS = {
   modbus_joints: ['modbus', 'joints'],
   alarms: ['alarms'],
+  integration: ['integration'],
 };
 
 /**
@@ -126,10 +128,17 @@ class ConfigStore {
    */
   applyIfValid(domain, newDoc, context = {}, user = 'system') {
     const { doc: currentDoc } = this.readDomain(domain);
-    const versionContext =
-      domain === 'alarms'
-        ? { appliedVersion: currentDoc?.config_domain_versions?.alarms }
-        : { appliedVersions: currentDoc?.config_domain_versions };
+    let versionContext;
+    if (domain === 'alarms') {
+      versionContext = { appliedVersion: currentDoc?.config_domain_versions?.alarms };
+    } else if (domain === 'integration') {
+      versionContext = {
+        appliedVersion: currentDoc?.config_domain_versions?.integration,
+        appliedPointMapVersion: currentDoc?.point_map_version,
+      };
+    } else {
+      versionContext = { appliedVersions: currentDoc?.config_domain_versions };
+    }
 
     const result = this.validators[domain](newDoc, { ...versionContext, ...context });
 

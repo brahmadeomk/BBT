@@ -1691,3 +1691,49 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   response tap, per-bus recovery controller) is a **documented runbook**
   in §B, pending a physical second Nano to wire and bench-test. 389
   tests pass.
+
+- **2026-07-25** — Slice 11 (BMS integration) **core built + unit-tested**;
+  flow tab wiring and reference-gateway live validation are the remaining
+  pending items (need the Modbus→BACnet gateway hardware). Implementation
+  choices:
+  - **Fourth config domain `cfg/integration`** rather than folding BMS
+    knobs into an existing domain — it versions independently (its own
+    append-only `point_map_version`), audits separately, and can be absent
+    (BMS optional). Schema + validator I1–I5 mirror the existing R/A rule
+    style; registered in the store's `DOMAIN_FILES`/`DOMAIN_VERSION_KEYS`
+    and `createStore`.
+  - **Register layout is deterministic with FIXED bases/strides**, not
+    packed tightly. Tier 1 @0, control/ACK @16, optional bitmap @32,
+    Tier 2 @100 (stride 8), Tier 3 @500 (stride 8). This makes the map
+    append-only *by construction* — adding a joint/zone can never move an
+    existing point, satisfying the workplan's "never renumber" rule
+    mechanically instead of by discipline. Reserved gaps at each block's
+    end absorb future appends. I5 rejects a config whose zones/joints would
+    overflow the fixed regions.
+  - **Modbus TCP server library is INJECTED** (`serverFactory`), same DI
+    pattern as the cloud transport interface and the cert rotator's
+    reconnect callback. All testable behaviour (serving, ACK decode,
+    read-only enforcement, no-data sentinel) is unit-tested with a fake
+    factory; the only untestable-here piece — the socket bind — is a thin
+    `jsmodbus` factory (`src/integration/node-red/jsmodbus-server-factory.js`,
+    the sole importer, **lazily required**). `jsmodbus` chosen over
+    `modbus-serial` because it's pure JS (no serialport native build on
+    ARM); added as an **optionalDependency** so `npm i` and CI don't depend
+    on it (tests use the fake). Cloud-agnostic grep unaffected.
+  - **Worst-joint point is latched** (first-raised holds until clear,
+    tiebreak by joint_id for determinism) so it doesn't oscillate when two
+    joints sit at the same level — the latch is stateful, held in the
+    `BmsService` process singleton (never Node-RED context, which would
+    serialise away its methods — same lesson as the blacklist tracker and
+    cloud gateway).
+  - **Heartbeat counter** increments every refresh and wraps 0..32767
+    (signed-int16 safe) — Modbus has no liveness concept, so without it a
+    frozen Pi presents as healthy steady values. **NO_DATA sentinel**
+    −32768 distinguishes a dark/stale joint from a real 0.0.
+  - **ACK write point** decodes 1 = ACK all active (summary), 1000+i = ACK
+    Tier-3 joint i; routed to the same alarm ACK path as the HMI so
+    BMS-originated ACKs hit the audit trail. `setImage` deliberately does
+    not stomp the ACK register so a pending write survives a refresh.
+  Customer-facing `docs/bms-register-map.md` (append-only rule on page 1) +
+  deployment `docs/bms-integration.md` (incl. the flow-wiring runbook).
+  444 tests pass; cloud-agnostic check green.

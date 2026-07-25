@@ -1,0 +1,14 @@
+{
+  "config_domain_versions": { "integration": 1 },
+  "modbus_tcp": {
+    "enabled": true,
+    "port": 1502,
+    "unit_id": 1,
+    "bind_host": "0.0.0.0",
+    "max_connections": 4
+  },
+  "exposure_tier": 3,
+  "point_map_version": 1,
+  "severity_bitmap": { "enabled": false },
+  "zone_rollup": { "worst_joint_tiebreak": "first_raised", "include_ambient_zone": false }
+}

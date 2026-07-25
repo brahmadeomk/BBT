@@ -13,9 +13,13 @@ const modbusJointSchema = require(
 const alarmsSchema = require(
   path.join(__dirname, '..', '..', 'config', 'schemas', 'busduct_alarms_config.schema.json')
 );
+const integrationSchema = require(
+  path.join(__dirname, '..', '..', 'config', 'schemas', 'busduct_integration_config.schema.json')
+);
 
 const validateModbusJointSchema = ajv.compile(modbusJointSchema);
 const validateAlarmsSchema = ajv.compile(alarmsSchema);
+const validateIntegrationSchema = ajv.compile(integrationSchema);
 
 function formatAjvErrors(ajvErrors) {
   return (ajvErrors || []).map((e) => ({
@@ -27,7 +31,9 @@ function formatAjvErrors(ajvErrors) {
 module.exports = {
   modbusJointSchema,
   alarmsSchema,
+  integrationSchema,
   validateModbusJointSchema,
   validateAlarmsSchema,
+  validateIntegrationSchema,
   formatAjvErrors,
 };
