@@ -97,12 +97,13 @@ describe('compileNanoJob - guardrails', () => {
     assert.ok(!result.job);
   });
 
-  test('refuses a document with more than one bus (firmware has one RS-485 port)', () => {
+  test('refuses a multi-bus document without a busId (one Nano per RS-485 segment)', () => {
     const doc = validModbusJointsDoc();
     doc.modbus.buses.push({ bus_id: 'bus2', type: 'rtu', port: '/dev/ttyS2', baud: 9600 });
-    // avoid tripping R8/other rules for the new bus's slaves - it has none, which is fine
+    // two-segment support (Slice 10): multi-bus is allowed, but the caller must
+    // say which segment's Nano to compile for - a bare compile can't guess.
     const result = compileNanoJob(doc);
-    assert.ok(result.error.includes('single bus'));
+    assert.match(result.error, /specify \{busId\}/);
   });
 
   test('refuses a TCP bus (firmware only speaks RTU)', () => {
@@ -163,5 +164,51 @@ describe('nanoJobsEqual', () => {
     const docB = validModbusJointsDoc();
     delete docB.modbus.slaves;
     assert.ok(!nanoJobsEqual(docA, docB));
+  });
+});
+
+describe('compileNanoJob - two-segment RS-485 (Slice 10)', () => {
+  function twoBusDoc() {
+    const d = validModbusJointsDoc();
+    d.modbus.buses.push({
+      bus_id: 'bus2', type: 'rtu', port: '/dev/ttyACM1', baud: 9600,
+      parity: 'N', stop_bits: 1, timeout_ms: 300, retries: 2, inter_frame_ms: 20,
+    });
+    d.modbus.slaves.find((s) => s.slave_id === 'sl02').bus_id = 'bus2';
+    return d;
+  }
+
+  test('compiles a per-bus job with only that bus\'s slaves and comm', () => {
+    const d = twoBusDoc();
+    const j1 = compileNanoJob(d, { busId: 'bus1' });
+    const j2 = compileNanoJob(d, { busId: 'bus2' });
+    assert.equal(j1.job.read[0], 1, 'bus1 has one slave (sl01)');
+    assert.equal(j1.job.read[1][0], 1, 'unit_address 1');
+    assert.deepEqual(j1.job.comm, [20000, 19200, 500]);
+    assert.equal(j2.job.read[0], 1, 'bus2 has one slave (sl02)');
+    assert.equal(j2.job.read[1][0], 2, 'unit_address 2');
+    assert.deepEqual(j2.job.comm, [20000, 9600, 300]);
+  });
+
+  test('a multi-bus document without busId is an error (one Nano per segment)', () => {
+    assert.match(compileNanoJob(twoBusDoc()).error, /specify \{busId\}/);
+  });
+
+  test('an unknown busId is an error', () => {
+    assert.match(compileNanoJob(twoBusDoc(), { busId: 'bus9' }).error, /no bus 'bus9'/);
+  });
+
+  test('single-bus compile is unchanged (busId optional, back-compatible)', () => {
+    const implicit = compileNanoJob(validModbusJointsDoc());
+    const explicit = compileNanoJob(validModbusJointsDoc(), { busId: 'bus1' });
+    assert.deepEqual(implicit.job, explicit.job);
+  });
+
+  test('nanoJobsEqual compares per bus', () => {
+    const a = twoBusDoc();
+    const b = twoBusDoc();
+    b.modbus.slaves.find((s) => s.slave_id === 'sl02').unit_address = 5; // change bus2 only
+    assert.equal(nanoJobsEqual(a, b, 'bus1'), true, 'bus1 job unchanged');
+    assert.equal(nanoJobsEqual(a, b, 'bus2'), false, 'bus2 job changed');
   });
 });

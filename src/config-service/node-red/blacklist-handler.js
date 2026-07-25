@@ -34,8 +34,12 @@ function getTracker(opts) {
   return _tracker;
 }
 
-function unitToSlaveId(doc, unitAddress) {
-  const s = (doc?.modbus?.slaves || []).find((x) => x.unit_address === unitAddress);
+// unit_address is only unique WITHIN a bus, so a bus-tagged response (Slice 10
+// two-segment) must resolve within its bus. busId omitted -> single-bus panel
+// (match on unit_address alone, as before).
+function unitToSlaveId(doc, unitAddress, busId) {
+  const slaves = doc?.modbus?.slaves || [];
+  const s = slaves.find((x) => x.unit_address === unitAddress && (busId == null || x.bus_id === busId));
   return s ? s.slave_id : null;
 }
 
@@ -129,7 +133,8 @@ function _finalize(tracker, events, { doc, prevExcludeKey, activeAlarmJointIds, 
 function processReadResult(tracker, payload, ctx = {}) {
   const events = [];
   if (payload && payload.t === 'r' && payload.id != null) {
-    const slaveId = unitToSlaveId(ctx.doc, payload.id);
+    // ctx.busId (or payload.bus_id) tags which segment the response came from
+    const slaveId = unitToSlaveId(ctx.doc, payload.id, ctx.busId ?? payload.bus_id);
     if (slaveId) {
       const ev = tracker.recordResult(slaveId, payload.st === 'ok', ctx.nowMs ?? Date.now());
       if (ev) events.push(ev);

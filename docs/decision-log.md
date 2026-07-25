@@ -1668,3 +1668,26 @@ parser to break), so the edge side is now implemented:
 
 Two-segment RS-485 (§B) remains a design-chat item (architecture:
 port→bus mapping, bus-tagged responses). 382 tests pass.
+
+- **2026-07-25** — Two-segment RS-485 (§B): the **cloud-agnostic core is
+  now built** after the design-chat decisions were settled (keep bus1 as
+  the current pipeline, add a parallel bus2, tag responses by the
+  serial-in they arrive on, one tracker keyed by global `slave_id`).
+  Changes, all back-compatible (single-bus panels byte-for-byte
+  unchanged, every new arg optional):
+  - `compileNanoJob(doc, {busId})` compiles one job per bus (filters
+    `modbus.slaves` by `s.bus_id`, emits that bus's own `comm`). A
+    multi-bus doc with no `busId` now errors `specify {busId}` instead of
+    the old flat "single bus" rejection — the old guardrail test was
+    updated to assert the new message.
+  - `nanoJobsEqual(a, b, busId)` compares per bus; `buildNanoJobMessage(store, {busId})`
+    threads it through for Send Nano Job.
+  - Blacklist handler: `unitToSlaveId(doc, addr, busId)` resolves a
+    response within its bus (unit addresses are unique per-bus, not
+    globally); `processReadResult` reads the tag from
+    `ctx.busId ?? payload.bus_id`.
+  The flow still wires only bus1 — the second physical pipeline (2nd
+  serial pair on `/dev/ttyACM1`, per-bus Send Nano Job, bus-tagged
+  response tap, per-bus recovery controller) is a **documented runbook**
+  in §B, pending a physical second Nano to wire and bench-test. 389
+  tests pass.

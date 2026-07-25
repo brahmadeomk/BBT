@@ -152,3 +152,26 @@ describe('blacklist-handler — joint states (step 5)', () => {
     assert.equal(js.J12.state, 'LIVE', 'unaffected slave stays live');
   });
 });
+
+describe('blacklist-handler — bus-tagged slave resolution (Slice 10)', () => {
+  test('unitToSlaveId resolves within a bus (addresses are unique per bus, not globally)', () => {
+    const doc = { modbus: { slaves: [
+      { slave_id: 'sl01', unit_address: 5, bus_id: 'bus1' },
+      { slave_id: 'sl09', unit_address: 5, bus_id: 'bus2' },
+    ] } };
+    assert.equal(bh.unitToSlaveId(doc, 5, 'bus1'), 'sl01');
+    assert.equal(bh.unitToSlaveId(doc, 5, 'bus2'), 'sl09');
+    assert.equal(bh.unitToSlaveId(doc, 5), 'sl01'); // no bus tag -> first match (single-bus)
+  });
+
+  test('a bus-tagged read result records against the right slave', () => {
+    const doc = { modbus: { slaves: [
+      { slave_id: 'sl01', unit_address: 5, bus_id: 'bus1' },
+      { slave_id: 'sl09', unit_address: 5, bus_id: 'bus2' },
+    ] }, joints: [{ joint_id: 'J50', slave_id: 'sl09' }] };
+    const tracker = bh.newTracker(trackerOpts);
+    let r;
+    for (let i = 0; i < 3; i++) r = bh.processReadResult(tracker, { t: 'r', id: 5, st: 'err', bus_id: 'bus2' }, { doc, nowMs: T0 + i });
+    assert.deepEqual(r.excludeSlaveIds, ['sl09'], 'blacklisted the bus2 slave, not bus1');
+  });
+});

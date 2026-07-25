@@ -15,14 +15,16 @@ const { compileNanoJob } = require('../nano-compiler');
  *   from the read list (Slice 9). The blacklist handler writes the live set;
  *   the comm block is unchanged so the firmware's comm-change guard skips
  *   the bus re-init on a blacklist/probe resend.
+ * @param {string} [opts.busId] - which RS-485 segment's Nano to build the job
+ *   for (Slice 10 two-segment; omit for the single-bus panel).
  * @returns {{job: {read: Array, comm: number[]}}|{error: string}}
  */
-function buildNanoJobMessage(store, { excludeSlaveIds = [] } = {}) {
+function buildNanoJobMessage(store, { excludeSlaveIds = [], busId } = {}) {
   const { doc } = store.readDomain('modbus_joints');
   if (!doc) {
     return { error: 'no cfg/modbus+joints has been applied yet - nothing to send to the Nano' };
   }
-  return compileNanoJob(doc, { excludeSlaveIds });
+  return compileNanoJob(doc, { excludeSlaveIds, busId });
 }
 
 module.exports = { buildNanoJobMessage };

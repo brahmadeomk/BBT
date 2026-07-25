@@ -30,25 +30,36 @@ const { validateModbusJoints, readSpan } = require('./validate-modbus-joints');
  *   list (Slice 9 blacklisting: a blacklisted slave is temporarily not
  *   polled). The document itself is unchanged/valid — this only trims the
  *   compiled job — so R10 scan-time capacity still assesses the full fleet.
+ * @param {string} [opts.busId] - which RS-485 segment to compile a job for
+ *   (Slice 10 two-segment support: one Nano per bus). Omit for the
+ *   single-bus case; required when the document has more than one bus, since
+ *   each bus is a separate Nano with its own serial port.
  * @returns {{job: {read: Array, comm: number[]}}|{error: string}}
  */
-function compileNanoJob(doc, { excludeSlaveIds = [] } = {}) {
+function compileNanoJob(doc, { excludeSlaveIds = [], busId } = {}) {
   const { valid, errors } = validateModbusJoints(doc);
   if (!valid) {
     return { error: `cannot compile an invalid cfg/modbus+joints document: ${errors.map((e) => `${e.rule}: ${e.message}`).join('; ')}` };
   }
 
   const buses = doc.modbus.buses;
-  if (buses.length !== 1) {
-    return { error: `Nano job compiler only supports a single bus (firmware has one RS-485 port); found ${buses.length}` };
+  let bus;
+  if (busId != null) {
+    bus = buses.find((b) => b.bus_id === busId);
+    if (!bus) return { error: `no bus '${busId}' in cfg/modbus` };
+  } else if (buses.length === 1) {
+    bus = buses[0];
+  } else {
+    // one Nano per RS-485 segment - can't emit a single job for several buses
+    return { error: `cfg/modbus has ${buses.length} buses; specify {busId} to compile one Nano job per RS-485 segment` };
   }
-  const bus = buses[0];
   if (bus.type !== 'rtu') {
     return { error: `bus '${bus.bus_id}' is type '${bus.type}', but the Nano only speaks Modbus RTU over its RS-485 port` };
   }
 
   const exclude = new Set(excludeSlaveIds);
-  const slaves = doc.modbus.slaves.filter((s) => !exclude.has(s.slave_id));
+  // one read per slave ON THIS BUS - each Nano polls only its own segment
+  const slaves = doc.modbus.slaves.filter((s) => s.bus_id === bus.bus_id && !exclude.has(s.slave_id));
   // One contiguous read per slave. readSpan handles both layouts:
   // consecutive channels (channels * temp_word_count from base) and
   // sparse channel_addrs (min..max span, R15 guarantees min == base) -
@@ -77,9 +88,9 @@ function compileNanoJob(doc, { excludeSlaveIds = [] } = {}) {
  * A compile error on either side is treated as "changed" (report it
  * rather than silently skip a resend that might matter).
  */
-function nanoJobsEqual(docA, docB) {
-  const a = compileNanoJob(docA);
-  const b = compileNanoJob(docB);
+function nanoJobsEqual(docA, docB, busId) {
+  const a = compileNanoJob(docA, { busId });
+  const b = compileNanoJob(docB, { busId });
   if (a.error || b.error) return false;
   return JSON.stringify(a.job) === JSON.stringify(b.job);
 }

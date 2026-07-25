@@ -467,10 +467,19 @@ For the 100-joint + 10-ambient target. Built so far:
   the cloud pipeline is built to consume it (cloud is deferred to after
   the edge workplan). Format contract: `docs/slice10-design-proposals.md` §A.
 
-**Still proposed, not built (`docs/slice10-design-proposals.md` §B):**
-two-segment RS-485 (per-bus compile/serial/recovery, bus-tagged
-responses) — an edge architecture change with real decisions
-(port→bus mapping, response tagging); take to the design chat.
+- **Two-segment RS-485 — cloud-agnostic core built (`docs/slice10-design-proposals.md` §B):**
+  `compileNanoJob(doc, {busId})` compiles one job per bus (filters slaves
+  by `bus_id`, emits that bus's own comm), errors `specify {busId}` on a
+  multi-bus doc without one; `nanoJobsEqual(a,b,busId)` and
+  `buildNanoJobMessage(store,{busId})` are bus-aware;
+  `unitToSlaveId(doc,addr,busId)` + `processReadResult` (reads
+  `ctx.busId ?? payload.bus_id`) resolve a response within its bus (unit
+  addresses are unique per-bus, one tracker keys by global `slave_id`).
+  **Single-bus panels are byte-for-byte unchanged** (every new arg
+  optional). The flow still wires only bus1 — adding the second physical
+  pipeline (2nd serial pair, per-bus Send Nano Job, bus-tagged response
+  tap, per-bus recovery) is a **documented runbook** (§B) pending a
+  physical second Nano to wire/test.
 
 ## Device blacklisting (Slice 9 — all steps built, live pass pending)
 
