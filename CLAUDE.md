@@ -457,10 +457,20 @@ For the 100-joint + 10-ambient target. Built so far:
   128) and **R16 bus-loading warnings** now surface on the Modbus
   Settings apply toast (`store.applyIfValid` returns `warnings`).
 
-**Proposed, not built (design chat, `docs/slice10-design-proposals.md`):**
-positional-array telemetry payload (cloud wire-format + manifest) and
-two-segment RS-485 (per-bus compile/serial/recovery). Both change
-contracts beyond the edge.
+- **Positional-array telemetry (edge built, OFF by default):** `Batcher`
+  `positional` mode emits a compact column-oriented payload (dt_min/max/
+  avg, ror_max, t_max, amb_avg as index-aligned arrays) + a
+  self-versioning **manifest** (index→joint_id, QoS 1, republished only
+  on change), with index-range chunking as a safety net. Whole 100-joint
+  panel in ~one message. Enabled via `publish.telemetry.encoding:
+  'positional'` in the edge config; **default keyed** stays live until
+  the cloud pipeline is built to consume it (cloud is deferred to after
+  the edge workplan). Format contract: `docs/slice10-design-proposals.md` §A.
+
+**Still proposed, not built (`docs/slice10-design-proposals.md` §B):**
+two-segment RS-485 (per-bus compile/serial/recovery, bus-tagged
+responses) — an edge architecture change with real decisions
+(port→bus mapping, response tagging); take to the design chat.
 
 ## Device blacklisting (Slice 9 — all steps built, live pass pending)
 

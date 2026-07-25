@@ -7,7 +7,17 @@ surfacing, 3-digit `slave_id`) are built. Status: **proposal, not built.**
 
 ---
 
-## A. Positional-array telemetry payload (cloud wire-format change)
+## A. Positional-array telemetry payload — **EDGE BUILT (off by default)**
+
+**Update 2026-07-24:** the edge side is implemented in `Batcher`
+(`positional` mode, column-oriented payload + self-versioning manifest,
+index-range chunking), **OFF by default** — the live keyed format is
+unchanged until the cloud is ready. Enable with
+`publish.telemetry.encoding: 'positional'` in the edge config. Since the
+cloud pipeline (IoT Rule → DB) isn't built yet, it will be written to
+consume this format directly (no lockstep migration). The section below
+is the format the cloud must match.
+
 
 ### Today
 `src/cloud-gateway/batcher.js` emits **keyed JSON** and splits at

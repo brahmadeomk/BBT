@@ -26,12 +26,62 @@ class Batcher {
    * @param {number} [opts.maxPayloadBytes] - default 4800, matching publish.telemetry.max_payload_bytes
    * @param {boolean} [opts.includeAmbient] - default true, matching publish.telemetry.include_ambient
    */
-  constructor({ outbox, topic, maxPayloadBytes = 4800, includeAmbient = true }) {
+  /**
+   * @param {boolean} [opts.positional] - default false (keyed JSON). When
+   *   true, flush emits a compact COLUMN-oriented positional payload keyed by
+   *   a versioned manifest (index -> joint_id), so the whole 100-joint panel
+   *   fits in ~one message instead of several 5KB metering blocks (Slice 10).
+   *   OFF by default: the live keyed format is unchanged until the cloud
+   *   pipeline is built to consume positional (see docs/slice10-design-proposals.md).
+   */
+  constructor({ outbox, topic, maxPayloadBytes = 4800, includeAmbient = true, positional = false }) {
     this.outbox = outbox;
     this.topic = topic;
     this.maxPayloadBytes = maxPayloadBytes;
     this.includeAmbient = includeAmbient;
+    this.positional = positional;
     this.accumulators = new Map(); // joint_id -> { dtValues, rorValues, tValues, ambientValues }
+    this.manifest = []; // stable ordered joint_ids; index -> joint_id
+    this.manifestVersion = 0;
+    this._manifestDirty = false;
+  }
+
+  /**
+   * Set the stable joint order (called on config apply). Appending keeps
+   * existing indices stable; a reorder/removal bumps the version so the
+   * cloud re-fetches. Positional payloads always reference this order.
+   */
+  setManifest(jointIds) {
+    const next = jointIds.slice();
+    if (JSON.stringify(next) === JSON.stringify(this.manifest)) return;
+    this.manifest = next;
+    this.manifestVersion += 1;
+    this._manifestDirty = true;
+  }
+
+  _ensureManifestFrom(jointIds) {
+    // self-heal: append any reporting joint not yet in the manifest (stable
+    // indices) so positional works even before setManifest is called at boot.
+    let changed = false;
+    for (const id of jointIds) {
+      if (!this.manifest.includes(id)) {
+        this.manifest.push(id);
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.manifestVersion += 1;
+      this._manifestDirty = true;
+    }
+  }
+
+  manifestMessage() {
+    return {
+      type: 'manifest',
+      manifest_version: this.manifestVersion,
+      joints: this.manifest.slice(),
+      timestamp: new Date().toISOString(),
+    };
   }
 
   _accumulatorFor(jointId) {
@@ -79,17 +129,81 @@ class Batcher {
    * @returns {number} number of payload chunks emitted
    */
   flush(intervalMin) {
-    const jointEntries = Object.entries(this._buildJointAggregates());
+    const agg = this._buildJointAggregates();
     this.accumulators.clear();
 
-    if (jointEntries.length === 0) return 0;
+    const reporting = Object.keys(agg);
+    if (reporting.length === 0) return 0;
 
     const nowIso = new Date().toISOString(); // edge_utc, per buffer.timestamp_source
-    const chunks = this._packIntoChunks(jointEntries, intervalMin, nowIso);
+
+    if (!this.positional) {
+      const chunks = this._packIntoChunks(Object.entries(agg), intervalMin, nowIso);
+      for (const chunk of chunks) {
+        this.outbox.enqueue('telemetry', this.topic, chunk, 0); // qos 0, per publish.telemetry.qos
+      }
+      return chunks.length;
+    }
+
+    // Positional mode: publish the manifest first when it changed (QoS 1 so
+    // the cloud can always decode), then the compact column payload(s).
+    this._ensureManifestFrom(reporting);
+    if (this._manifestDirty) {
+      this.outbox.enqueue('telemetry', this.topic, this.manifestMessage(), 1);
+      this._manifestDirty = false;
+    }
+    const chunks = this._packPositional(agg, intervalMin, nowIso);
     for (const chunk of chunks) {
-      this.outbox.enqueue('telemetry', this.topic, chunk, 0); // qos 0, per publish.telemetry.qos
+      this.outbox.enqueue('telemetry', this.topic, chunk, 0);
     }
     return chunks.length;
+  }
+
+  _columns() {
+    const cols = ['dt_min', 'dt_max', 'dt_avg', 'ror_max', 't_max'];
+    if (this.includeAmbient) cols.push('amb_avg');
+    return cols;
+  }
+
+  // Map an aggregate entry field to its positional column value (rounded to
+  // 0.01; null when the joint had no data for that column this interval).
+  _cell(entry, col) {
+    if (!entry) return null;
+    const v = col === 'amb_avg' ? entry.ambient : entry[col];
+    return typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 100) / 100 : null;
+  }
+
+  _buildPositionalChunk(agg, cols, intervalMin, timestamp, start, end) {
+    const slice = this.manifest.slice(start, end);
+    const chunk = {
+      timestamp,
+      interval_min: intervalMin,
+      manifest_version: this.manifestVersion,
+      start_index: start,
+      count: slice.length,
+    };
+    for (const col of cols) chunk[col] = slice.map((jointId) => this._cell(agg[jointId], col));
+    return chunk;
+  }
+
+  _packPositional(agg, intervalMin, timestamp) {
+    const cols = this._columns();
+    const n = this.manifest.length;
+    const fits = (chunk) => Buffer.byteLength(JSON.stringify(chunk), 'utf8') <= this.maxPayloadBytes;
+
+    const full = this._buildPositionalChunk(agg, cols, intervalMin, timestamp, 0, n);
+    if (fits(full)) return [full]; // the common case: whole panel in one message
+
+    // Too big - split into contiguous index ranges, each carrying start_index.
+    const chunks = [];
+    let start = 0;
+    while (start < n) {
+      let end = start + 1;
+      while (end < n && fits(this._buildPositionalChunk(agg, cols, intervalMin, timestamp, start, end + 1))) end++;
+      chunks.push(this._buildPositionalChunk(agg, cols, intervalMin, timestamp, start, end));
+      start = end;
+    }
+    return chunks;
   }
 
   _packIntoChunks(jointEntries, intervalMin, timestamp) {

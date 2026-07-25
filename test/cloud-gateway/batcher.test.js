@@ -185,3 +185,86 @@ describe('Batcher - payload budget', () => {
     }
   });
 });
+
+describe('Batcher - positional mode (Slice 10)', () => {
+  function captureOutbox() {
+    return { sent: [], enqueue(cls, topic, payload, qos) { this.sent.push({ cls, topic, payload, qos }); } };
+  }
+
+  test('emits a manifest (QoS 1) then a column payload keyed by manifest order', () => {
+    const ob = captureOutbox();
+    const b = new Batcher({ outbox: ob, topic: 't/tel', positional: true });
+    b.setManifest(['J01', 'J02', 'J03']);
+    b.ingestJointKpi(jointKpi({ joint_id: 'J01', deltaT: { ema: 10 }, ror: 2, val: 41, ambient: { val: 30 } }));
+    b.ingestJointKpi(jointKpi({ joint_id: 'J03', deltaT: { ema: 12 }, ror: 3, val: 43, ambient: { val: 31 } }));
+    const n = b.flush(10);
+
+    assert.equal(n, 1, 'one telemetry chunk');
+    const manifest = ob.sent.find((m) => m.payload.type === 'manifest');
+    assert.ok(manifest, 'manifest published');
+    assert.equal(manifest.qos, 1);
+    assert.deepEqual(manifest.payload.joints, ['J01', 'J02', 'J03']);
+    assert.equal(manifest.payload.manifest_version, 1);
+
+    const tel = ob.sent.find((m) => m.payload.dt_max !== undefined);
+    assert.equal(tel.payload.manifest_version, 1);
+    assert.equal(tel.payload.start_index, 0);
+    assert.equal(tel.payload.count, 3);
+    // J02 reported nothing this interval -> null at index 1
+    assert.deepEqual(tel.payload.dt_max, [10, null, 12]);
+    assert.deepEqual(tel.payload.t_max, [41, null, 43]);
+    assert.deepEqual(tel.payload.amb_avg, [30, null, 31]);
+  });
+
+  test('manifest is only re-published when it changes', () => {
+    const ob = captureOutbox();
+    const b = new Batcher({ outbox: ob, topic: 't/tel', positional: true });
+    b.setManifest(['J01']);
+    b.ingestJointKpi(jointKpi({ joint_id: 'J01' }));
+    b.flush(10);
+    b.ingestJointKpi(jointKpi({ joint_id: 'J01' }));
+    b.flush(10);
+    const manifests = ob.sent.filter((m) => m.payload.type === 'manifest');
+    assert.equal(manifests.length, 1, 'manifest not re-sent when unchanged');
+  });
+
+  test('self-heals: a reporting joint absent from the manifest is appended and bumps the version', () => {
+    const ob = captureOutbox();
+    const b = new Batcher({ outbox: ob, topic: 't/tel', positional: true });
+    b.setManifest(['J01']); // version 1
+    b.ingestJointKpi(jointKpi({ joint_id: 'J01' }));
+    b.ingestJointKpi(jointKpi({ joint_id: 'J09' })); // not in manifest
+    b.flush(10);
+    assert.deepEqual(b.manifest, ['J01', 'J09']);
+    assert.equal(b.manifestVersion, 2);
+  });
+
+  test('splits into index ranges (each with start_index) when over budget', () => {
+    const ob = captureOutbox();
+    const b = new Batcher({ outbox: ob, topic: 't/tel', positional: true, maxPayloadBytes: 200 });
+    const ids = Array.from({ length: 8 }, (_, i) => `J${String(i + 1).padStart(2, '0')}`);
+    b.setManifest(ids);
+    for (const id of ids) b.ingestJointKpi(jointKpi({ joint_id: id, deltaT: { ema: 5 } }));
+    const n = b.flush(10);
+    const tels = ob.sent.filter((m) => m.payload.dt_max !== undefined);
+    assert.equal(tels.length, n);
+    assert.ok(n > 1, 'split into multiple chunks');
+    // chunks tile the manifest with no gaps/overlap
+    let expected = 0;
+    for (const t of tels.sort((a, b2) => a.payload.start_index - b2.payload.start_index)) {
+      assert.equal(t.payload.start_index, expected);
+      expected += t.payload.count;
+    }
+    assert.equal(expected, ids.length);
+  });
+
+  test('keyed mode remains the default (no manifest, joints object)', () => {
+    const ob = captureOutbox();
+    const b = new Batcher({ outbox: ob, topic: 't/tel' }); // positional defaults false
+    b.ingestJointKpi(jointKpi({ joint_id: 'J01' }));
+    b.flush(10);
+    assert.equal(ob.sent.length, 1);
+    assert.ok(ob.sent[0].payload.joints, 'keyed joints object');
+    assert.equal(ob.sent[0].payload.manifest_version, undefined);
+  });
+});

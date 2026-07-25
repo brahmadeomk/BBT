@@ -59,7 +59,7 @@ function resolveTopic(template, identity) {
  * @param {{telemetry: string, alarm: string}} [opts.topics] - pre-resolved topics (override identity templates)
  * @param {object} [opts.transport] - custom transport (tests); default capped LoopbackTransport
  */
-function createGateway({ outboxDir = DEFAULT_OUTBOX_DIR, identity = DEFAULT_IDENTITY, topics, transport } = {}) {
+function createGateway({ outboxDir = DEFAULT_OUTBOX_DIR, identity = DEFAULT_IDENTITY, topics, transport, positional = false } = {}) {
   let t = transport ?? new LoopbackTransport({ maxPublished: 500 });
 
   // Soak evidence collection (combined Slice 5+6 soak) - inert unless
@@ -78,7 +78,7 @@ function createGateway({ outboxDir = DEFAULT_OUTBOX_DIR, identity = DEFAULT_IDEN
     transport: t,
     soak,
     outbox,
-    batcher: new Batcher({ outbox, topic: telemetryTopic }),
+    batcher: new Batcher({ outbox, topic: telemetryTopic, positional }),
     alarmPublisher: new AlarmPublisher({ outbox, topic: alarmTopic }),
     heartbeat: new Heartbeat({ outbox, topic: telemetryTopic }),
     settings: new RuntimeSettings({ dir: outboxDir }),
@@ -138,7 +138,11 @@ function createGatewayFromEdgeConfig() {
     will: { topic: cfg.topics.telemetry, payload: { lwt: true, thing_name: cfg.identity.thing_name } },
   });
   transport.connect();
-  const gateway = createGateway({ outboxDir: cfg.buffer.path, identity: cfg.identity, topics: cfg.topics, transport });
+  // Positional telemetry is opt-in via publish.telemetry.encoding: 'positional'
+  // in the edge config - OFF (keyed) by default until the cloud pipeline is
+  // built to consume it (Slice 10, docs/slice10-design-proposals.md).
+  const positional = cfg.publish?.telemetry?.encoding === 'positional';
+  const gateway = createGateway({ outboxDir: cfg.buffer.path, identity: cfg.identity, topics: cfg.topics, transport, positional });
   gateway.mode = 'aws';
   return { gateway, mode: 'aws', reason: `connected as ${cfg.identity.thing_name} to ${cfg.mqtt.endpoint}` };
 }

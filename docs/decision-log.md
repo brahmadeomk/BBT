@@ -1644,3 +1644,27 @@ responses). Both need sign-off on their contracts first.
 
 377 tests pass. Ambient ProcessLogic change is alarm-relevant (ΔT) -
 needs a live check like RoR did.
+
+## 2026-07-24 — Slice 10: positional telemetry built on the edge (off by default)
+
+User: edge is the current priority; cloud (DB/dashboard) is built after
+the edge workplan, and only MQTT topics exist cloud-side today. That
+removes the lockstep risk from the positional-telemetry format (no cloud
+parser to break), so the edge side is now implemented:
+
+- `Batcher` gains a `positional` mode (constructor flag, **default
+  false** so the live keyed format is untouched). It emits a
+  column-oriented payload — `dt_min/dt_max/dt_avg/ror_max/t_max/amb_avg`
+  as arrays index-aligned to a **manifest** (index→joint_id) — with
+  `manifest_version`, `start_index`/`count`, values rounded to 0.01, and
+  `null` at an index where a joint had no data. The manifest
+  self-versions (append keeps indices stable; a change bumps the version)
+  and republishes only when changed (QoS 1). Whole-panel-in-one-message
+  is the common case; index-range chunking is the safety net. 5 tests.
+- Enabled via `publish.telemetry.encoding: 'positional'` in the edge
+  config (`createGatewayFromEdgeConfig` reads it); default keyed.
+- The cloud IoT-Rule/DB parser (deferred) will be written to this format
+  directly — the contract is docs/slice10-design-proposals.md §A.
+
+Two-segment RS-485 (§B) remains a design-chat item (architecture:
+port→bus mapping, bus-tagged responses). 382 tests pass.
