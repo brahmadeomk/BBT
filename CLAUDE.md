@@ -473,8 +473,22 @@ For the 100-joint + 10-ambient target. Built so far:
   no-data (0 °C isn't physical for a switchgear ambient). Configurable via
   `zeroEps` (set `null` + raise `band.min` for a genuinely sub-zero site —
   flagged for the design chat). On a single-ambient panel, unplugging the
-  ambient now yields `source:"none"` and no ΔT alarm. **Restore path (alarm
-  clear on reconnect) still to live-verify.**
+  ambient now yields `source:"none"` and no ΔT alarm.
+- **Ambient RECOVERY / ΔT EMA re-init (live-fixed 2026-07-28, 3rd pass):**
+  reconnecting the ambient did not clear the stale ΔT alarms. ProcessLogic
+  had no `else` for the unusable-ambient case, so `deltaTEmaState` stayed
+  frozen at its poisoned value (~32) and, on recovery, **decayed** toward the
+  true ΔT (~3.7) with tau = `timeWindowMin` (20 min) — the alarm looked stuck
+  for 20+ min. Two fixes: (1) ProcessLogic now marks the joint's baseline
+  `{ambInvalid:true}` while no usable ambient exists and **drops it on the
+  first usable sample**, so ΔT re-inits from the real reading (same idea as
+  the Slice 9 blacklist-restore reset); (2) `emaResetJoints` now also includes
+  joints that merely **reference** the restored slave as their ambient
+  (`jointsUsingAmbientSlave` + `ambientSlaveForJoint`, R14 joint→zone→panel
+  chain) — a dedicated ambient slave carries no joints, so a restore used to
+  reset nothing. **Recovering a panel stuck from before this fix:** set
+  `global.busduct_ema_reset = {J01:true, J02:true, ...}` once (inject node);
+  ProcessLogic drops those baselines on the next sample.
 - **100+ device commissioning fixes:** `slave_id` generation now handles
   3 digits (`sl100+`; carried-id regex `^sl[0-9]{2,3}$`, `nextFreeId` cap
   128) and **R16 bus-loading warnings** now surface on the Modbus

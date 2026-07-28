@@ -1780,3 +1780,28 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   panel-environment assumption). ProcessLogic uses the default (0.05), so no
   flow change was needed for this pass — resolver library only. 4 new tests;
   full suite 455 pass.
+
+- **2026-07-28 (3rd pass)** — **Ambient recovery: ΔT EMA re-init.** After the
+  zero-sentinel fix, reconnecting the ambient still did not clear the stale ΔT
+  alarms (live: ambient healthy again at `val 29.28, age 0.5s,
+  source:"configured"`, joint 33.01 -> true ΔT ~3.7, yet the 19:45-20:01 ΔT
+  alarms stayed active). Root cause: ProcessLogic's ΔT block had **no `else`**
+  for the unusable-ambient case, so `deltaTEmaState[joint]` was left frozen at
+  the poisoned value (~32); on recovery the EMA *decayed* toward the truth with
+  tau = `timeWindowMin` (20 min), so the alarm sat there for 20+ minutes and
+  read as "cannot reset". Fixes:
+  - **ProcessLogic** (`39dad91df0c15744`): the unusable-ambient branch now sets
+    `deltaTEmaState[joint] = { ambInvalid: true }`, and the usable branch
+    **deletes** an `ambInvalid` baseline before the `??=` re-init — so ΔT
+    re-initialises from the real reading the moment the ambient recovers
+    (identical in spirit to the Slice 9 blacklist-restore EMA reset).
+  - **blacklist-handler**: `emaResetJoints` now unions `jointsForSlave` with
+    the new `jointsUsingAmbientSlave` (via `ambientSlaveForJoint`, honouring
+    the R14 joint -> zone -> panel override chain). A dedicated ambient slave
+    (sl21/unit 101 here) carries **no joints**, so restoring it previously
+    reset nothing even though every joint referencing it had an invalid ΔT
+    baseline. De-duplicated for a slave that both carries and serves a joint.
+  Operational note for a panel already stuck from before this fix: the existing
+  poisoned baseline has no `ambInvalid` flag, so set
+  `global.busduct_ema_reset = {J01:true, J02:true}` once (inject node) to force
+  the drop. 6 new tests; full suite 459 pass.

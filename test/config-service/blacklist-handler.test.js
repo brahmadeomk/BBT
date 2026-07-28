@@ -153,6 +153,66 @@ describe('blacklist-handler — joint states (step 5)', () => {
   });
 });
 
+// Live 2026-07-28: the ambient slave (sl21/unit 101) carries NO joints, so a
+// restore reset nothing and J01/J02 kept decaying their ΔT EMA from a value
+// built against the dead ambient — a stale ΔT alarm looked stuck for a full tau.
+describe('blacklist-handler — restoring an ambient slave resets its dependent joints', () => {
+  const ambDoc = {
+    modbus: {
+      slaves: [{ slave_id: 'sl01', unit_address: 1 }, { slave_id: 'sl21', unit_address: 101 }],
+      ambient_sensor: { slave_id: 'sl21', channel: 1 },
+    },
+    zones: [{ zone_id: 'Z1' }],
+    joints: [
+      { joint_id: 'J01', slave_id: 'sl01', zone_id: 'Z1' },
+      { joint_id: 'J02', slave_id: 'sl01', zone_id: 'Z1' },
+    ],
+  };
+
+  test('ambientSlaveForJoint follows the joint -> zone -> panel override chain', () => {
+    const doc = {
+      modbus: { ambient_sensor: { slave_id: 'slPANEL' } },
+      zones: [{ zone_id: 'Z1', ambient_sensor: { slave_id: 'slZONE' } }, { zone_id: 'Z2' }],
+      joints: [
+        { joint_id: 'A', zone_id: 'Z1', ambient_sensor: { slave_id: 'slJOINT' } },
+        { joint_id: 'B', zone_id: 'Z1' },
+        { joint_id: 'C', zone_id: 'Z2' },
+      ],
+    };
+    assert.equal(bh.ambientSlaveForJoint(doc, doc.joints[0]), 'slJOINT', 'joint override wins');
+    assert.equal(bh.ambientSlaveForJoint(doc, doc.joints[1]), 'slZONE', 'else the zone override');
+    assert.equal(bh.ambientSlaveForJoint(doc, doc.joints[2]), 'slPANEL', 'else the panel default');
+  });
+
+  test('jointsUsingAmbientSlave finds joints that reference the slave (not carried by it)', () => {
+    assert.deepEqual(bh.jointsUsingAmbientSlave(ambDoc, 'sl21'), ['J01', 'J02']);
+    assert.deepEqual(bh.jointsForSlave(ambDoc, 'sl21'), [], 'the ambient slave carries no joints of its own');
+  });
+
+  test('restoring the ambient slave flags the dependent joints for EMA reset', () => {
+    const tracker = bh.newTracker(trackerOpts);
+    for (let i = 0; i < 3; i++) bh.processReadResult(tracker, { t: 'r', id: 101, st: 'err' }, { doc: ambDoc, nowMs: T0 + i });
+    bh.processTick(tracker, { doc: ambDoc, nowMs: T0 + 30 * 1000 + 5, prevExcludeKey: 'sl21' });
+    let r;
+    for (let i = 0; i < 3; i++) r = bh.processReadResult(tracker, { t: 'r', id: 101, st: 'ok' }, { doc: ambDoc, nowMs: T0 + 40000 + i, prevExcludeKey: '' });
+    assert.equal(r.alarms[0].action, 'clear');
+    assert.deepEqual(r.emaResetJoints, ['J01', 'J02'], 'ΔT baselines built against the dead ambient must re-init');
+  });
+
+  test('a joint both carried by and referencing the slave is listed once', () => {
+    const doc = {
+      modbus: { slaves: [{ slave_id: 'sl05', unit_address: 5 }], ambient_sensor: { slave_id: 'sl05' } },
+      joints: [{ joint_id: 'J10', slave_id: 'sl05' }],
+    };
+    const tracker = bh.newTracker(trackerOpts);
+    for (let i = 0; i < 3; i++) bh.processReadResult(tracker, { t: 'r', id: 5, st: 'err' }, { doc, nowMs: T0 + i });
+    bh.processTick(tracker, { doc, nowMs: T0 + 30 * 1000 + 5, prevExcludeKey: 'sl05' });
+    let r;
+    for (let i = 0; i < 3; i++) r = bh.processReadResult(tracker, { t: 'r', id: 5, st: 'ok' }, { doc, nowMs: T0 + 40000 + i, prevExcludeKey: '' });
+    assert.deepEqual(r.emaResetJoints, ['J10'], 'no duplicate');
+  });
+});
+
 describe('blacklist-handler — bus-tagged slave resolution (Slice 10)', () => {
   test('unitToSlaveId resolves within a bus (addresses are unique per bus, not globally)', () => {
     const doc = { modbus: { slaves: [

@@ -48,6 +48,30 @@ function jointsForSlave(doc, slaveId) {
 }
 
 /**
+ * Which slave provides a joint's ambient reference, via the R14 3-level
+ * override chain: joints[].ambient_sensor -> that joint's zone -> panel default.
+ */
+function ambientSlaveForJoint(doc, joint) {
+  if (joint?.ambient_sensor?.slave_id != null) return joint.ambient_sensor.slave_id;
+  const zone = (doc?.zones || []).find((z) => z.zone_id === joint?.zone_id);
+  if (zone?.ambient_sensor?.slave_id != null) return zone.ambient_sensor.slave_id;
+  return doc?.modbus?.ambient_sensor?.slave_id ?? null;
+}
+
+/**
+ * Joints that USE this slave as their ambient reference (not joints carried by
+ * it). A dedicated ambient slave carries no joints of its own, so without this
+ * a restored ambient would reset nothing — and every joint referencing it would
+ * keep decaying its ΔT EMA from a value built against the dead reference,
+ * taking a full tau (e.g. 20 min) before a stale ΔT alarm could clear.
+ */
+function jointsUsingAmbientSlave(doc, slaveId) {
+  return (doc?.joints || [])
+    .filter((j) => ambientSlaveForJoint(doc, j) === slaveId)
+    .map((j) => j.joint_id);
+}
+
+/**
  * A blacklisted/restored event -> a command for the Alarm Manager's blacklist
  * section (mirrors its commTimeout raise/clear). Probing/probe_failed events
  * don't change the alarm.
@@ -111,9 +135,14 @@ function _finalize(tracker, events, { doc, prevExcludeKey, activeAlarmJointIds, 
   const alarms = events.map((e) => blacklistAlarmCommand(e, doc)).filter(Boolean);
   // Step 6: on restore, the joints whose ProcessLogic EMA/deltaT baseline
   // must be reset so RoR starts from 0 (no spurious rate after a blackout).
+  // Both the joints carried by the restored slave AND the joints that merely
+  // REFERENCE it as their ambient - the latter's ΔT baseline is just as invalid.
   const emaResetJoints = [];
   for (const e of events) {
-    if (e.type === 'restored') emaResetJoints.push(...jointsForSlave(doc, e.slaveId));
+    if (e.type !== 'restored') continue;
+    for (const jid of [...jointsForSlave(doc, e.slaveId), ...jointsUsingAmbientSlave(doc, e.slaveId)]) {
+      if (!emaResetJoints.includes(jid)) emaResetJoints.push(jid);
+    }
   }
   return {
     events,
@@ -200,6 +229,8 @@ module.exports = {
   getTracker,
   unitToSlaveId,
   jointsForSlave,
+  ambientSlaveForJoint,
+  jointsUsingAmbientSlave,
   blacklistAlarmCommand,
   deriveJointStates,
   processReadResult,
