@@ -453,11 +453,21 @@ no spurious A2 alarms on stable joints.**
 
 For the 100-joint + 10-ambient target. Built so far:
 - **Ambient outlier rejection + fallback** (`src/config-service/ambient-resolver.js`,
-  exposed as `busductConfigService.resolveAmbient`): plausibility band
-  (-20..80 C) then configured -> zone median -> panel median. Wired into
-  ProcessLogic's ΔT block (configured-and-plausible path unchanged;
-  fallback only when the ambient is out-of-band/missing; ambient output
-  gains a `source`). **Alarm-relevant (ΔT) — needs a live check.**
+  exposed as `busductConfigService.resolveAmbient`): a reading is usable
+  only if **in-band (-20..80 C) AND fresh (age ≤ `maxAgeSec`, default 60 s)
+  AND status OK**, then configured -> zone median -> panel median -> none.
+  Wired into ProcessLogic's ΔT block (configured-and-usable path unchanged;
+  fallback only when the ambient is out-of-band/**stale**/**faulted**/missing;
+  ambient output gains a `source`). **Live-fixed 2026-07-28:** the first
+  cut only checked the band, so an unplugged ambient that read a *plausible*
+  `0 °C` (age 166 s, comm-failed) was accepted as `source:"configured"` and
+  ΔT = joint − 0 ≈ 31 raised false WATCH/WARNING alarms. Fix: readings now
+  carry `{val, age_sec, status}`; the ambient cache no longer overwrites the
+  last-good value on a faulted read and tracks `lastGoodTsMs`; a stale/faulted
+  ambient is rejected → fall back (or `none` → **ΔT simply isn't computed**
+  rather than fabricated against 0). On a single-ambient panel, unplugging
+  the ambient now yields `source:"none"` and no ΔT alarm. **Restore path
+  (alarm clear on reconnect) still to live-verify.**
 - **100+ device commissioning fixes:** `slave_id` generation now handles
   3 digits (`sl100+`; carried-id regex `^sl[0-9]{2,3}$`, `nextFreeId` cap
   128) and **R16 bus-loading warnings** now surface on the Modbus

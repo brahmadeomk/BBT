@@ -1737,3 +1737,30 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   Customer-facing `docs/bms-register-map.md` (append-only rule on page 1) +
   deployment `docs/bms-integration.md` (incl. the flow-wiring runbook).
   444 tests pass; cloud-agnostic check green.
+
+- **2026-07-28** — **Ambient resolver live bug fix (Slice 10).** First live
+  test of the ambient outlier/fallback on the real Pi: unplugging the panel's
+  only ambient sensor (sl21 / unit 101) raised false ΔT alarms on J02
+  (WATCH then WARNING) after a few minutes, and the joint KPI debug showed
+  `ambient: { val: 0, age_sec: 166, source: "configured" }`, `deltaT.raw ≈
+  31` (= joint temp − 0). Root cause: `resolveAmbient` only checked the
+  plausibility band, and a dead sensor reads `0 °C`, which is **inside**
+  −20..80 — so it was accepted as the configured ambient, and there was **no
+  staleness/status check** (a 166 s-old, comm-failed reading was treated as
+  live). Fixes:
+  - `resolveAmbient` now treats a reading as usable only if in-band **AND**
+    fresh (`age_sec ≤ maxAgeSec`, ProcessLogic passes 60 s) **AND** status
+    OK. Readings may be a plain number (legacy/tests, no age/status → old
+    behaviour under the default `maxAgeSec: null`) or `{val, age_sec,
+    status}`. Return shapes unchanged (existing deep-equal tests still hold).
+  - ProcessLogic ambient cache (`39dad91df0c15744`) no longer overwrites the
+    last-good `val` on a faulted read (a dead sensor's 0 no longer poisons
+    the cache), stores `status`, and tracks `lastGoodTsMs`; `_ambReadings`
+    now ships `{val, age_sec (from lastGoodTsMs), status}` and passes
+    `maxAgeSec: AMBIENT_MAX_AGE_SEC` (60 s).
+  Net behaviour: a stale/faulted configured ambient falls back to zone→panel
+  median; when it's the **only** ambient (this panel), the result is
+  `source:"none"` and **ΔT is not computed at all** — no fabricated ΔT, no
+  false alarm. 7 new resolver tests; full suite 451 pass. Restore path
+  (existing ΔT alarms clearing when the ambient reconnects and ΔT reads real)
+  still to live-verify.

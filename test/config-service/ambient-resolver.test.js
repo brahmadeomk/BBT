@@ -62,3 +62,68 @@ describe('median', () => {
     assert.equal(median([]), null);
   });
 });
+
+// Slice 10 live fix (2026-07-28): a dead ambient sensor read a plausible 0 °C
+// for minutes and raised false ΔT alarms. Readings now carry {val, age_sec,
+// status}; a stale or faulted reading must be rejected even when in-band.
+describe('resolveAmbient — staleness + status (live 2026-07-28 regression)', () => {
+  test('a stale-but-in-band configured reading (0 °C, old) is rejected -> none when it is the only ambient', () => {
+    const r = resolveAmbient({
+      configuredId: 101, zoneId: 'z1',
+      readings: { 101: { val: 0, age_sec: 166, status: 'OK' } },
+      zoneOf: { 101: 'z1' }, maxAgeSec: 60,
+    });
+    assert.deepEqual(r, { val: null, source: 'none', rejected: true });
+  });
+
+  test('a faulted (non-OK status) configured reading is rejected even if fresh and in-band', () => {
+    const r = resolveAmbient({
+      configuredId: 101, zoneId: 'z1',
+      readings: { 101: { val: 0, age_sec: 1, status: 'Communication_Error' } },
+      zoneOf: { 101: 'z1' }, maxAgeSec: 60,
+    });
+    assert.equal(r.source, 'none');
+    assert.equal(r.rejected, true);
+  });
+
+  test('a dead configured ambient falls back to a healthy zone peer', () => {
+    const r = resolveAmbient({
+      configuredId: 101, zoneId: 'z1',
+      readings: {
+        101: { val: 0, age_sec: 200, status: 'OK' },        // stale -> unusable
+        102: { val: 30.5, age_sec: 1, status: 'OK' },        // healthy peer
+      },
+      zoneOf: { 101: 'z1', 102: 'z1' }, maxAgeSec: 60,
+    });
+    assert.equal(r.source, 'zone_median');
+    assert.equal(r.val, 30.5);
+    assert.equal(r.rejected, true);
+  });
+
+  test('a fresh, healthy object reading is used as configured', () => {
+    const r = resolveAmbient({
+      configuredId: 101, zoneId: 'z1',
+      readings: { 101: { val: 31.2, age_sec: 2, status: 'OK' } },
+      zoneOf: { 101: 'z1' }, maxAgeSec: 60,
+    });
+    assert.deepEqual(r, { val: 31.2, source: 'configured', ambient_id: 101, rejected: false });
+  });
+
+  test('with maxAgeSec null (default), age is ignored — plain-number back-compat', () => {
+    const r = resolveAmbient({ configuredId: 101, zoneId: 'z1', readings: { 101: { val: 30, age_sec: 9999, status: 'OK' } }, zoneOf: { 101: 'z1' } });
+    assert.equal(r.source, 'configured');
+  });
+});
+
+describe('isUsable', () => {
+  const { isUsable, DEFAULT_BAND } = require('../../src/config-service/ambient-resolver');
+  test('bare number in band is usable; out of band is not', () => {
+    assert.equal(isUsable(30, DEFAULT_BAND, null), true);
+    assert.equal(isUsable(250, DEFAULT_BAND, null), false);
+  });
+  test('object reading: stale or faulted is unusable', () => {
+    assert.equal(isUsable({ val: 30, age_sec: 5, status: 'OK' }, DEFAULT_BAND, 60), true);
+    assert.equal(isUsable({ val: 30, age_sec: 120, status: 'OK' }, DEFAULT_BAND, 60), false);
+    assert.equal(isUsable({ val: 30, age_sec: 5, status: 'Sensor_Error' }, DEFAULT_BAND, 60), false);
+  });
+});
