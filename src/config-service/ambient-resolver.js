@@ -34,6 +34,15 @@
 
 const DEFAULT_BAND = { min: -20, max: 80 }; // deg C: an electrical panel's ambient lives well inside this
 const DEFAULT_MAX_AGE_SEC = 60; // ProcessLogic passes this; a good ambient updates far faster
+// A disconnected temperature transmitter commonly keeps answering Modbus with a
+// register of 0x0000 -> 0.0 degC, which is IN-BAND, FRESH and status-OK, so it
+// slips past every other check and makes ΔT = joint - 0 (~30) raise false
+// alarms (live 2026-07-28: ~20 min of 0 degC before the bus finally comm-failed).
+// For a busduct/switchgear panel an ambient at/near 0 degC is not physical, so a
+// value within this epsilon of 0 is treated as the no-data sentinel, not a
+// reading. NOTE: this assumes a warm-environment panel; a genuinely sub-zero
+// ambient site must raise DEFAULT_BAND.min above 0 instead and set this to 0.
+const DEFAULT_ZERO_EPS = 0.05;
 
 function inBand(v, band) {
   return typeof v === 'number' && Number.isFinite(v) && v >= band.min && v <= band.max;
@@ -53,9 +62,13 @@ function readingValue(r) {
   return undefined;
 }
 
-/** Whether a reading is fresh + healthy + in-band and may be trusted. */
-function isUsable(r, band, maxAgeSec) {
-  if (!inBand(readingValue(r), band)) return false;
+/** Whether a reading is fresh + healthy + in-band + non-sentinel and may be trusted. */
+function isUsable(r, band, maxAgeSec, zeroEps = DEFAULT_ZERO_EPS) {
+  const v = readingValue(r);
+  if (!inBand(v, band)) return false;
+  // 0.0 is the Modbus no-data/fault value; reject it (and its neighbourhood)
+  // for a panel ambient rather than computing ΔT against a fabricated 0.
+  if (zeroEps != null && Math.abs(v) <= zeroEps) return false;
   if (r && typeof r === 'object') {
     if (r.status != null && String(r.status).trim().toUpperCase() !== 'OK') return false;
     if (maxAgeSec != null && Number.isFinite(r.age_sec) && r.age_sec > maxAgeSec) return false;
@@ -71,11 +84,12 @@ function isUsable(r, band, maxAgeSec) {
  * @param {Object<string,string>} [opts.zoneOf] - zone id of each ambient sensor id
  * @param {{min:number,max:number}} [opts.band] - plausibility band
  * @param {number|null} [opts.maxAgeSec] - reject readings older than this (seconds); null disables the age check
+ * @param {number|null} [opts.zeroEps] - reject readings within this of 0 (Modbus no-data sentinel); null disables
  * @returns {{val: number|null, source: 'configured'|'zone_median'|'panel_median'|'none', ambient_id?: string|number, count?: number, rejected: boolean}}
  */
-function resolveAmbient({ configuredId, zoneId, readings = {}, zoneOf = {}, band = DEFAULT_BAND, maxAgeSec = null }) {
+function resolveAmbient({ configuredId, zoneId, readings = {}, zoneOf = {}, band = DEFAULT_BAND, maxAgeSec = null, zeroEps = DEFAULT_ZERO_EPS }) {
   const key = (id) => String(id);
-  const usable = (id) => isUsable(readings[key(id)], band, maxAgeSec);
+  const usable = (id) => isUsable(readings[key(id)], band, maxAgeSec, zeroEps);
 
   // 1. configured sensor, if its reading is usable
   if (configuredId != null && usable(configuredId)) {
@@ -105,4 +119,4 @@ function resolveAmbient({ configuredId, zoneId, readings = {}, zoneOf = {}, band
   return { val: null, source: 'none', rejected };
 }
 
-module.exports = { resolveAmbient, median, inBand, isUsable, readingValue, DEFAULT_BAND, DEFAULT_MAX_AGE_SEC };
+module.exports = { resolveAmbient, median, inBand, isUsable, readingValue, DEFAULT_BAND, DEFAULT_MAX_AGE_SEC, DEFAULT_ZERO_EPS };

@@ -1764,3 +1764,19 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   false alarm. 7 new resolver tests; full suite 451 pass. Restore path
   (existing ΔT alarms clearing when the ambient reconnects and ΔT reads real)
   still to live-verify.
+
+- **2026-07-28 (2nd pass)** — **Ambient zero-sentinel.** The staleness/status
+  fix above wasn't enough: on the real panel the disconnected ambient
+  transmitter kept answering Modbus with a **fresh, in-band, status-OK
+  `0.0 °C`** for ~20 minutes (register `0x0000`) before the bus finally
+  comm-failed — the ΔT alarms (J01/J02) fired well before the
+  "AMBIENT_101 sensor communication failure"/blacklist events. So band + age
+  + status all passed and ΔT = joint − 0 ≈ 30 kept raising WATCH/WARNING.
+  The only discriminator is the value: for a busduct/switchgear panel `0 °C`
+  is not a physical ambient, it's the Modbus no-data value. `isUsable` now
+  rejects a reading within `DEFAULT_ZERO_EPS` (0.05) of 0. Configurable via
+  the new `zeroEps` param (a genuinely sub-zero site sets `zeroEps: null` and
+  raises `band.min` above 0 instead — **flagged for the design chat** as a
+  panel-environment assumption). ProcessLogic uses the default (0.05), so no
+  flow change was needed for this pass — resolver library only. 4 new tests;
+  full suite 455 pass.

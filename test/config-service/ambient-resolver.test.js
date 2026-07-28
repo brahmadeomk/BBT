@@ -113,6 +113,38 @@ describe('resolveAmbient — staleness + status (live 2026-07-28 regression)', (
     const r = resolveAmbient({ configuredId: 101, zoneId: 'z1', readings: { 101: { val: 30, age_sec: 9999, status: 'OK' } }, zoneOf: { 101: 'z1' } });
     assert.equal(r.source, 'configured');
   });
+
+  // The decisive live case (2026-07-28): the disconnected transmitter kept
+  // answering with a FRESH, in-band, status-OK 0.0 degC for ~20 min.
+  test('a fresh, status-OK, in-band 0 degC (Modbus no-data sentinel) is rejected', () => {
+    const r = resolveAmbient({
+      configuredId: 101, zoneId: 'z1',
+      readings: { 101: { val: 0, age_sec: 2, status: 'OK' } },
+      zoneOf: { 101: 'z1' }, maxAgeSec: 60,
+    });
+    assert.deepEqual(r, { val: null, source: 'none', rejected: true }, 'ΔT must not be computed against a fabricated 0');
+  });
+
+  test('a sentinel 0 configured ambient falls back to a healthy peer', () => {
+    const r = resolveAmbient({
+      configuredId: 101, zoneId: 'z1',
+      readings: { 101: { val: 0, age_sec: 2, status: 'OK' }, 102: { val: 31, age_sec: 1, status: 'OK' } },
+      zoneOf: { 101: 'z1', 102: 'z1' }, maxAgeSec: 60,
+    });
+    assert.equal(r.source, 'zone_median');
+    assert.equal(r.val, 31);
+  });
+
+  test('a real reading just above the zero epsilon is still used', () => {
+    const r = resolveAmbient({ configuredId: 101, zoneId: 'z1', readings: { 101: { val: 0.2, age_sec: 1, status: 'OK' } }, zoneOf: { 101: 'z1' }, maxAgeSec: 60 });
+    assert.equal(r.source, 'configured');
+  });
+
+  test('zeroEps:null lets a genuine 0 through (cold-site opt-out)', () => {
+    const r = resolveAmbient({ configuredId: 101, zoneId: 'z1', readings: { 101: { val: 0, age_sec: 1, status: 'OK' } }, zoneOf: { 101: 'z1' }, maxAgeSec: 60, zeroEps: null });
+    assert.equal(r.source, 'configured');
+    assert.equal(r.val, 0);
+  });
 });
 
 describe('isUsable', () => {

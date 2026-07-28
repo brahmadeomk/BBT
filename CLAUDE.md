@@ -465,9 +465,16 @@ For the 100-joint + 10-ambient target. Built so far:
   carry `{val, age_sec, status}`; the ambient cache no longer overwrites the
   last-good value on a faulted read and tracks `lastGoodTsMs`; a stale/faulted
   ambient is rejected → fall back (or `none` → **ΔT simply isn't computed**
-  rather than fabricated against 0). On a single-ambient panel, unplugging
-  the ambient now yields `source:"none"` and no ΔT alarm. **Restore path
-  (alarm clear on reconnect) still to live-verify.**
+  rather than fabricated against 0). **Live-fixed again 2026-07-28 (2nd
+  pass):** the disconnected transmitter kept answering Modbus with a
+  FRESH, in-band, status-OK `0.0 °C` for ~20 min (register 0x0000) before
+  the bus comm-failed — so band/age/status all passed. Added a **zero
+  sentinel**: a reading within `DEFAULT_ZERO_EPS` (0.05) of 0 is treated as
+  no-data (0 °C isn't physical for a switchgear ambient). Configurable via
+  `zeroEps` (set `null` + raise `band.min` for a genuinely sub-zero site —
+  flagged for the design chat). On a single-ambient panel, unplugging the
+  ambient now yields `source:"none"` and no ΔT alarm. **Restore path (alarm
+  clear on reconnect) still to live-verify.**
 - **100+ device commissioning fixes:** `slave_id` generation now handles
   3 digits (`sl100+`; carried-id regex `^sl[0-9]{2,3}$`, `nextFreeId` cap
   128) and **R16 bus-loading warnings** now surface on the Modbus
