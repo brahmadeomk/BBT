@@ -10,7 +10,7 @@ const trackerOpts = { blacklistAfterFailures: 3, probeBackoffS: [30, 60, 120, 30
 
 // sl05 (addr 5) carries joints J10, J11; sl06 (addr 6) carries J12
 const doc = {
-  modbus: { slaves: [{ slave_id: 'sl05', unit_address: 5 }, { slave_id: 'sl06', unit_address: 6 }] },
+  modbus: { slaves: [{ slave_id: 'sl05', unit_address: 5, label: 'Riser A' }, { slave_id: 'sl06', unit_address: 6 }] },
   joints: [
     { joint_id: 'J10', slave_id: 'sl05' },
     { joint_id: 'J11', slave_id: 'sl05' },
@@ -35,6 +35,9 @@ describe('blacklist-handler — read results drive exclusion + alarms', () => {
     assert.equal(r.alarms[0].slave_id, 'sl05');
     assert.deepEqual(r.alarms[0].joints, ['J10', 'J11']);
     assert.match(r.alarms[0].description, /J10, J11 not measurable/);
+    // operator-facing identity: the commissioned unit address + label, not 'sl05'
+    assert.match(r.alarms[0].description, /Slave 5 \(Riser A\)/);
+    assert.equal(r.alarms[0].unit_address, 5);
   });
 
   test('an ok read on an active slave produces no alarm and no resend', () => {
@@ -187,6 +190,41 @@ describe('blacklist-handler — restoring an ambient slave resets its dependent 
   test('jointsUsingAmbientSlave finds joints that reference the slave (not carried by it)', () => {
     assert.deepEqual(bh.jointsUsingAmbientSlave(ambDoc, 'sl21'), ['J01', 'J02']);
     assert.deepEqual(bh.jointsForSlave(ambDoc, 'sl21'), [], 'the ambient slave carries no joints of its own');
+  });
+
+  // Live 2026-07-28: the alarm read "Slave sl21 ... joint(s) (none mapped) not
+  // measurable" — an internal id the operator never typed, and an impact line
+  // that understated a fault which actually disables ΔT for every joint.
+  test('the blacklist alarm names the unit address/label and the ambient impact', () => {
+    const withLabel = JSON.parse(JSON.stringify(ambDoc));
+    withLabel.modbus.slaves[1].label = 'AMBIENT_101';
+    const tracker = bh.newTracker(trackerOpts);
+    let r;
+    for (let i = 0; i < 3; i++) r = bh.processReadResult(tracker, { t: 'r', id: 101, st: 'err' }, { doc: withLabel, nowMs: T0 + i });
+    const a = r.alarms[0];
+    assert.match(a.description, /Slave 101 \(AMBIENT_101\)/, 'operator-facing address, not sl21');
+    assert.ok(!a.description.includes('sl21'), 'the internal slave_id is not shown to the operator');
+    assert.match(a.description, /ambient reference for joint\(s\) J01, J02/);
+    assert.ok(!a.description.includes('none mapped'), 'no misleading "(none mapped)" for an ambient slave');
+    assert.equal(a.unit_address, 101);
+    assert.deepEqual(a.ambient_for_joints, ['J01', 'J02']);
+  });
+
+  test('summarizeBlacklist exposes the unit address when given the config doc', () => {
+    const withLabel = JSON.parse(JSON.stringify(ambDoc));
+    withLabel.modbus.slaves[1].label = 'AMBIENT_101';
+    const state = { slaves: { sl21: { status: 'blacklisted', fails: 3, nextProbeMs: null } }, joints: {} };
+    const v = bh.summarizeBlacklist(state, T0, { doc: withLabel });
+    assert.equal(v.slaves[0].display, '101 (AMBIENT_101)');
+    assert.equal(v.slaves[0].unit_address, 101);
+    assert.deepEqual(v.slaves[0].ambient_for_joints, ['J01', 'J02']);
+  });
+
+  test('summarizeBlacklist without a doc still works (display falls back to slave_id)', () => {
+    const state = { slaves: { sl21: { status: 'blacklisted', fails: 3, nextProbeMs: null } }, joints: {} };
+    const v = bh.summarizeBlacklist(state, T0);
+    assert.equal(v.slaves[0].display, 'sl21');
+    assert.equal(v.slaves[0].unit_address, null);
   });
 
   test('restoring the ambient slave flags the dependent joints for EMA reset', () => {

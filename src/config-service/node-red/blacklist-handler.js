@@ -72,24 +72,57 @@ function jointsUsingAmbientSlave(doc, slaveId) {
 }
 
 /**
+ * How an OPERATOR identifies a device: the Modbus unit address they typed into
+ * the Modbus Settings table (plus its display label), not the internal schema
+ * `slave_id`. `sl21` is meaningless on the panel; "101 (AMBIENT_101)" is what
+ * was commissioned. Falls back to the slave_id if the device isn't in the doc.
+ */
+function slaveDisplayName(doc, slaveId) {
+  const s = (doc?.modbus?.slaves || []).find((x) => x.slave_id === slaveId);
+  if (!s) return String(slaveId);
+  const addr = s.unit_address != null ? String(s.unit_address) : String(slaveId);
+  return s.label ? `${addr} (${s.label})` : addr;
+}
+
+/**
  * A blacklisted/restored event -> a command for the Alarm Manager's blacklist
  * section (mirrors its commTimeout raise/clear). Probing/probe_failed events
  * don't change the alarm.
+ *
+ * The description names the device by unit address/label and distinguishes the
+ * two ways a dead device hurts: joints it CARRIES stop being measurable, and
+ * joints that merely REFERENCE it as their ambient lose ΔT. A dedicated ambient
+ * slave carries no joints, so the old text read "(none mapped) not measurable",
+ * which understated a fault that actually disables ΔT panel-wide.
  */
 function blacklistAlarmCommand(event, doc) {
   const joints = jointsForSlave(doc, event.slaveId);
+  const ambientFor = jointsUsingAmbientSlave(doc, event.slaveId).filter((j) => !joints.includes(j));
   if (event.type === 'blacklisted') {
+    const impact = [];
+    if (joints.length) impact.push(`joint(s) ${joints.join(', ')} not measurable`);
+    if (ambientFor.length) impact.push(`ambient reference for joint(s) ${ambientFor.join(', ')} - ΔT unavailable`);
+    if (!impact.length) impact.push('no joints affected');
     return {
       action: 'raise',
       slave_id: event.slaveId,
+      unit_address: (doc?.modbus?.slaves || []).find((x) => x.slave_id === event.slaveId)?.unit_address ?? null,
       joints,
+      ambient_for_joints: ambientFor,
       description:
-        `Slave ${event.slaveId} blacklisted after ${event.failures} consecutive read failures; ` +
-        `joint(s) ${joints.length ? joints.join(', ') : '(none mapped)'} not measurable`,
+        `Slave ${slaveDisplayName(doc, event.slaveId)} blacklisted after ${event.failures} consecutive read failures; ` +
+        impact.join('; '),
     };
   }
   if (event.type === 'restored') {
-    return { action: 'clear', slave_id: event.slaveId, joints };
+    return {
+      action: 'clear',
+      slave_id: event.slaveId,
+      unit_address: (doc?.modbus?.slaves || []).find((x) => x.slave_id === event.slaveId)?.unit_address ?? null,
+      joints,
+      ambient_for_joints: ambientFor,
+      description: `Slave ${slaveDisplayName(doc, event.slaveId)} restored`,
+    };
   }
   return null;
 }
@@ -182,10 +215,15 @@ function processTick(tracker, ctx = {}) {
  * Turn the `busduct_blacklist_state` global into a display summary for the
  * HMI Device Health panel: which slaves are blacklisted/probing, their
  * recovery countdown, and the STALE/OFFLINE joints. Pure + testable.
+ *
+ * @param {object} [opts.doc] - applied cfg/modbus+joints; when supplied each row
+ *   also carries the operator-facing `unit_address`/`display` (the address the
+ *   device was commissioned with) instead of only the internal `slave_id`.
  */
-function summarizeBlacklist(state, nowMs = Date.now()) {
+function summarizeBlacklist(state, nowMs = Date.now(), opts = {}) {
   const slaves = state?.slaves || {};
   const joints = state?.joints || {};
+  const doc = opts.doc;
 
   const jointsBySlave = {};
   for (const [jid, j] of Object.entries(joints)) {
@@ -195,14 +233,18 @@ function summarizeBlacklist(state, nowMs = Date.now()) {
   const rows = [];
   for (const [slaveId, s] of Object.entries(slaves)) {
     if (s.status === 'active') continue;
+    const cfg = (doc?.modbus?.slaves || []).find((x) => x.slave_id === slaveId);
     rows.push({
       slave_id: slaveId,
+      unit_address: cfg?.unit_address ?? null,
+      display: doc ? slaveDisplayName(doc, slaveId) : String(slaveId),
       status: s.status, // 'blacklisted' | 'probing'
       fails: s.fails ?? 0,
       goods: s.goods ?? 0,
       next_probe_in_sec:
         s.status === 'blacklisted' && s.nextProbeMs != null ? Math.max(0, Math.round((s.nextProbeMs - nowMs) / 1000)) : null,
       joints: (jointsBySlave[slaveId] || []).slice().sort(),
+      ambient_for_joints: doc ? jointsUsingAmbientSlave(doc, slaveId).filter((j) => !(jointsBySlave[slaveId] || []).includes(j)) : [],
     });
   }
   rows.sort((a, b) => a.slave_id.localeCompare(b.slave_id));
@@ -231,6 +273,7 @@ module.exports = {
   jointsForSlave,
   ambientSlaveForJoint,
   jointsUsingAmbientSlave,
+  slaveDisplayName,
   blacklistAlarmCommand,
   deriveJointStates,
   processReadResult,

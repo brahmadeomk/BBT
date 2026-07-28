@@ -1805,3 +1805,29 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   poisoned baseline has no `ambInvalid` flag, so set
   `global.busduct_ema_reset = {J01:true, J02:true}` once (inject node) to force
   the drop. 6 new tests; full suite 459 pass.
+
+- **2026-07-28 (4th pass)** — **Blacklist alarm identifies the device the way
+  the operator commissioned it.** Live report: the alarm read *"Slave **sl21**
+  blacklisted after 3 consecutive read failures; joint(s) **(none mapped)** not
+  measurable"*, but the device was commissioned as **unit address 101**
+  (`AMBIENT_101`) — `sl21` is the internal schema `slave_id`, which no operator
+  ever types. Two fixes in `blacklist-handler.js`:
+  - `slaveDisplayName(doc, slaveId)` resolves the commissioned identity
+    (`unit_address` + optional `label`, e.g. `101 (AMBIENT_101)`), used in every
+    raise/clear description; the alarm command also carries `unit_address` as a
+    structured field. `slave_id` is still on the command for traceability, just
+    not shown as the primary identity.
+  - The impact clause now distinguishes the two ways a dead device hurts:
+    joints it **carries** (`... not measurable`) vs joints that merely
+    **reference** it as their ambient (`ambient reference for joint(s) ... - ΔT
+    unavailable`). A dedicated ambient slave carries no joints, so the old text
+    said "(none mapped) not measurable" — understating a fault that actually
+    disables ΔT for every joint on the panel. Restore now carries a description
+    too (`Slave 101 (AMBIENT_101) restored`).
+  - `summarizeBlacklist(state, nowMs, { doc })` gained an optional doc so the
+    Device Health HMI rows carry `unit_address`/`display`/`ambient_for_joints`;
+    without a doc it falls back to the old `slave_id` display (back-compatible).
+  Flow: the "Blacklist View" node (`d9b1ac57e0f10024`) now reads the applied
+  cfg and passes it in; the Device Health table (`d9b1ac57e0f10022`) shows
+  "Device (addr)" and an "Affected" column listing carried + ambient-dependent
+  joints. 3 new tests; full suite 462 pass.
