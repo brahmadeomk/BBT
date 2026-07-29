@@ -174,4 +174,11 @@ function getGatewayInfo() {
   return singletonInfo;
 }
 
-module.exports = { createGateway, createGatewayFromEdgeConfig, getGateway, getGatewayInfo, resolveTopic, setupRemoteConfig, drainRemoteConfig, setupCertRotation, drainCertRotation, ...handlers };
+// Local Pi power/throttling alarm (2026-07-29). Exposed on the EXISTING
+// busductCloudGateway global rather than a new functionGlobalContext entry, so
+// enabling it needs no settings.js change on deployed panels - it lives here
+// because collectPiHealth() (its only input) already does.
+const { derivePowerAlarm, summarizePower, initialState: initialPowerState, POWER_KEY } = require('../power-health');
+const { collectPiHealth } = require('../pi-health');
+
+module.exports = { createGateway, createGatewayFromEdgeConfig, getGateway, getGatewayInfo, resolveTopic, setupRemoteConfig, drainRemoteConfig, setupCertRotation, drainCertRotation, collectPiHealth, derivePowerAlarm, summarizePower, initialPowerState, POWER_KEY, ...handlers };

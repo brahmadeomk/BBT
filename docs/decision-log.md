@@ -1935,3 +1935,33 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
     this in minutes was invisible on the panel. **Open item: raise a local
     SYSTEM alarm + Device Health tile on under-voltage/throttling.** Proposed,
     not yet built (see the note in CLAUDE.md's firmware section).
+
+- **2026-07-29 (3rd)** — **Built: local Pi power/throttling alarm + HMI tile**
+  (the open item from the correction above). Turns the signal that would have
+  diagnosed the week-long "Nano hang" into something the panel says out loud.
+  - `src/cloud-gateway/power-health.js` — pure, state-injected
+    `derivePowerAlarm(health, prevState)` + `summarizePower()`. **Raise is
+    immediate** (the `now` bits are already momentary; debouncing the raise
+    would hide exactly the short brown-outs that wedge a USB device), **clear
+    needs 3 consecutive good samples** so a supply hovering at the threshold
+    can't flap the alarm, and an escalation WARNING→CRITICAL re-raises.
+    Under-voltage = CRITICAL; throttling *without* under-voltage = WARNING
+    (that can be thermal). A missing `vcgencmd` yields `ok: null` — **unknown,
+    never a fabricated "healthy"** (the same 0-as-no-data discipline adopted
+    across the ambient/InfluxDB fixes).
+  - Placed in `src/cloud-gateway/` and exported from the **existing**
+    `busductCloudGateway` global (alongside `collectPiHealth`, its only input)
+    specifically so deployed panels need **no settings.js edit** — only a
+    restart + flow re-import.
+  - Flow: "power tick (30 s)" + "Pi Power Health" nodes
+    (`d9b1ac57e0f10041/42`) on the Device Health tab, feeding the existing
+    alarm link pair (renamed "Health Alarm (out)/(in)" — it now carries both
+    blacklist and power alarms). Alarm Manager gained a `PI_POWER` section
+    mirroring the blacklist one (`SYSTEM|PI|POWER`, ACK-able, emails on
+    raise/clear); the `CONFIG_REMOVED` sweep already skips `category:"SYSTEM"`,
+    so it won't auto-clear.
+  - HMI: colour-coded banner on the Device Health dashboard, which keeps
+    reporting *"under-voltage since boot"* after recovery — the forensic bit
+    that catches an intermittent fault that has already passed.
+  - 12 unit tests + an end-to-end simulation of the flow node (raise → no
+    repeat → clear after 3 good). Full suite 474 pass.

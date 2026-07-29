@@ -417,10 +417,18 @@ particular still buys automatic recovery from any wedge, whatever its
 cause), but **none of them is the fix** and they should not be cited as
 one. Note the panel already samples the under-voltage flags in
 `src/cloud-gateway/pi-health.js` (`vcgencmd get_throttled` →
-`low_voltage.under_voltage_now` / `throttled_now` /
-`throttled_since_boot`) — but only inside the **cloud heartbeat**, with
-no local HMI/alarm surface, which is why this took so long to spot.
-Surfacing it locally is an open item.
+`low_voltage.now` / `throttled_now` / `*_since_boot`) — but only inside
+the **cloud heartbeat**, with no local HMI/alarm surface, which is why
+this took so long to spot. **Now surfaced locally (2026-07-29):**
+`src/cloud-gateway/power-health.js` (`derivePowerAlarm`/`summarizePower`,
+exposed on the existing `busductCloudGateway` global — no settings.js
+change) drives a **`SYSTEM|PI|POWER`** alarm from a 30 s "Pi Power Health"
+node on the Device Health tab: raises immediately (CRITICAL for
+under-voltage, WARNING for throttling-only), clears after 3 consecutive
+good samples so a marginal supply can't flap it, and writes
+`global.busduct_power_health` for a colour-coded banner on the Device
+Health dashboard. The banner keeps showing *"under-voltage since boot"*
+after recovery — the forensic bit that catches an intermittent brown-out.
 
 **Original (superseded) diagnosis, 2026-07-22 firmware rev:** the Nano
 stopped transmitting
