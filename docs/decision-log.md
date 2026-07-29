@@ -2146,3 +2146,15 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
     The expensive dump stays on its own tick.
   This is the same split used for the blacklist data: cheap status in the
   per-message gate, expensive detail on a timer.
+
+- **2026-07-29 (live)** — **cfg/integration applied on the Pi; BMS banner live.**
+  `tools/apply-integration-config.js` worked end to end on the real panel and
+  the Diagnostics page now shows the BMS status banner. That confirms the whole
+  chain up to the socket: the CLI applied + audited the fourth config domain,
+  `getBmsService` built the singleton from the applied doc, the register map
+  generated from the live cfg/joints, and the 5 s refresh is bumping the
+  heartbeat. **Not yet confirmed:** that a Modbus master can actually READ the
+  socket — the banner reports the service's own view. `serving on port N` means
+  a listener was bound (jsmodbus present); `image only` means the registers are
+  computed but nothing is listening. Next check is a `modpoll`/`pymodbus` read
+  from another host, then the reference gateway (workplan §11 "Done when").
