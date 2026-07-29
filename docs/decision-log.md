@@ -1831,3 +1831,19 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   cfg and passes it in; the Device Health table (`d9b1ac57e0f10022`) shows
   "Device (addr)" and an "Affected" column listing carried + ambient-dependent
   joints. 3 new tests; full suite 462 pass.
+
+- **2026-07-28 (live pass)** — **Ambient chain + blacklist restore verified on
+  the real Pi.** User-confirmed across the four fix passes above:
+  1. Disconnecting the ambient → `ambient: null`, `deltaT: null` on the joint
+     KPI stream (ΔT is not fabricated against a phantom 0) and **no false ΔT
+     alarm** is raised.
+  2. Reconnecting → the ΔT EMA re-inits from the real reading and the ΔT alarms
+     **CLEAR** (observed in Cleared Alarm History at 20:28:36 / 20:29:21),
+     instead of decaying for a full tau (~20 min).
+  3. The blacklist alarm raises/clears correctly and now reads
+     `Slave 101 (AMBIENT_101) ... ambient reference for joint(s) J01, J02 - ΔT
+     unavailable`.
+  This closes **Slice 9's** remaining live items (restore path + alarm clear)
+  and the **Slice 10 ambient-hardening** live check. Still dormant on this
+  panel by design: positional telemetry (OFF — no cloud consumer yet) and
+  two-segment RS-485 (needs a second physical Nano).

@@ -449,9 +449,16 @@ trends and RoR-based (A2) alarms can fire** — previously they never
 could. **Live-verified on the Pi (2026-07-24): RoR tracks real trends,
 no spurious A2 alarms on stable joints.**
 
-## Scale hardening (Slice 10 — in progress)
+## Scale hardening (Slice 10)
 
-For the 100-joint + 10-ambient target. Built so far:
+For the 100-joint + 10-ambient target. **The ambient chain is
+live-verified on the Pi (2026-07-28)** after four fix passes (see the
+decision log): disconnecting the ambient yields `ambient:null`/
+`deltaT:null` with **no false ΔT alarm**, reconnecting **clears** the ΔT
+alarms promptly (no 20-minute EMA decay), and the blacklist alarm names
+the commissioned device with its real ambient impact. Positional
+telemetry stays OFF (no cloud consumer yet) and two-segment RS-485 needs
+a second physical Nano — both dormant on the current panel. Built:
 - **Ambient outlier rejection + fallback** (`src/config-service/ambient-resolver.js`,
   exposed as `busductConfigService.resolveAmbient`): a reading is usable
   only if **in-band (-20..80 C) AND fresh (age ≤ `maxAgeSec`, default 60 s)
@@ -567,7 +574,7 @@ computed locally, works with the internet down. Full deployment/runbook:
   detectable via the heartbeat; a BMS-originated ACK lands in the audit
   trail). Both need the Modbus→BACnet gateway hardware.
 
-## Device blacklisting (Slice 9 — all steps built, live pass pending)
+## Device blacklisting (Slice 9 — done, live-verified 2026-07-28)
 
 Full design: `docs/blacklist-recovery-spec.md`. Removes a dead/marginal
 slave from the scan so one bad device can't tax the other 109.
@@ -620,9 +627,13 @@ slave from the scan so one bad device can't tax the other 109.
 **Blacklist live-verified on the Pi (2026-07-24):** disconnecting a
 device blacklists it (after the tap was fixed to read the PARSED Nano
 stream, and the tracker moved to a module singleton) and raises its
-SYSTEM alarm. Still to live-verify: restore path (alarm clear + no
-spurious RoR) and held-alarm-while-dark. Deploy = git pull → restart
-Node-RED → re-import flow.
+SYSTEM alarm. **Restore path + alarm wording live-verified 2026-07-28**
+— reconnecting clears the blacklist alarm (seen in Cleared Alarm
+History), and the raise text now names the commissioned device
+(`Slave 101 (AMBIENT_101)`, not `sl21`) and states the real impact
+(`ambient reference for joint(s) J01, J02 - ΔT unavailable`) instead of
+the misleading `(none mapped) not measurable`. **Slice 9 is done.**
+Deploy = git pull → restart Node-RED → re-import flow.
 
 ## Cloud Gateway tab (Slice 5, wired — soak pending)
 
