@@ -1871,3 +1871,22 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   whether the legacy `Busbar` writer should be retired now that the Historian
   tab is the supported path — it is a second, unvalidated data pipeline whose
   only remaining consumer is the legacy dashboard.
+
+- **2026-07-29 (2nd)** — **Legacy InfluxDB ambient wrote a fabricated 0.**
+  Live report: `Ambient_101` reached the InfluxDB node with `value: 0` while the
+  sensor actually read ~29.3. Root cause in the same point-builder
+  (`2978fd45db77d953`): the joint branch reads the **commissioned** register
+  address (`sensorData[sID][sregisterAddress{i}]`) but the ambient branch
+  **hardcoded register 0** (`sensorData[ambientID][0]`). This panel commissions
+  every device at register address 3, so the ambient lookup returned
+  `undefined`, and `validateValue()` turned that into its default **0** — a
+  fabricated reading indistinguishable from a real one, stored as history.
+  Fixes: (1) a pre-pass builds `addrBySid` from all legacy rows so the ambient
+  uses its real commissioned address; (2) when there is genuinely no reading the
+  point is **omitted** rather than written as 0. Same 0-as-no-data trap that
+  caused the false ΔT alarms upstream — this was its third appearance today, in
+  a different pipeline. Verified by simulation against the real panel shape
+  (all devices at register 3): before → `Ambient_101 = 0`; after → `29.34`.
+  Reinforces the open question above about retiring the legacy `Busbar` writer:
+  it is an unvalidated parallel pipeline that has now produced two distinct
+  data-integrity bugs the supported Historian path never had.
