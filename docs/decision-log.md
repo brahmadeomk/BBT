@@ -1161,6 +1161,14 @@ companion project chat and recorded in the workplan/design docs there).
 
 ## 2026-07-22 — Nano 33 IoT firmware hang fix
 
+> **⚠️ SUPERSEDED — see the 2026-07-29 correction at the end of this log.
+> The real root cause was Raspberry Pi UNDER-VOLTAGE, not firmware.** The
+> team later re-tested both the reduced-memory build and the **original
+> unmodified sketch**; both ran fine once the Pi was given adequate power.
+> Everything below is a plausible-but-unconfirmed diagnosis that was
+> reached by code inspection alone, without ever measuring the failure.
+> The changes were kept as hardening, but none of them fixed the hang.
+
 - **Symptom (user):** the Nano stops transmitting after some hours,
   behaviour repeats. Classic memory/back-pressure signature, not a
   logic bug.
@@ -1894,3 +1902,36 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   Historical `Busbar` ambient values are 0 for the whole period the hardcoded
   register-0 lookup ran — treat that series as unusable before this date and use
   `bt_kpi` for any back-analysis.
+
+- **2026-07-29** — **CORRECTION: the Nano "hang" was Raspberry Pi
+  under-voltage, not firmware.** Supersedes the 2026-07-22 entry above.
+  The team found the Pi's **power LED blinking randomly** — the classic
+  under-voltage signature — and the problem disappeared once the Pi was given
+  an adequate supply. They then re-tested **both** the reduced-memory build
+  **and the original unmodified sketch**: **both ran fine**. So the
+  RAM-exhaustion / stack-heap-collision diagnosis was wrong, and the "some
+  hours, repeatable" timing that seemed to corroborate it was just the supply
+  sagging under load.
+  - **What we got wrong, methodologically:** the 2026-07-22 root cause was
+    derived entirely from **reading the code** — a 12 KB stack buffer next to a
+    12 KB static buffer on a 32 KB part is a genuinely suspicious pattern, so it
+    was accepted without ever measuring the failure (no free-RAM logging, no
+    hard-fault handler, no power rail check). A plausible mechanism was mistaken
+    for the confirmed one. **For any future "device stops responding": check the
+    power rail FIRST** (`vcgencmd get_throttled`, power LED) before theorising
+    about firmware; it is cheaper to rule out and far more common.
+  - **What we keep:** the firmware changes stay as defensive hardening — the
+    SleepyDog **watchdog** genuinely buys automatic recovery from a wedge of
+    *any* cause (including a brown-out), the `comm` validation prevents a bad
+    job setting baud 0, and the `if (Serial)` guards are correct regardless.
+    But they are **hardening, not the fix**, and the log must not imply
+    otherwise. The 4 KB response buffer is retained (proven adequate, and it
+    was never harmful) though it is now known to have been unnecessary.
+  - **Gap this exposed:** `src/cloud-gateway/pi-health.js` has sampled the
+    under-voltage flags since Slice 6 (`vcgencmd get_throttled` →
+    `low_voltage.under_voltage_now` / `throttled_now` /
+    `throttled_since_boot`), but only inside the **cloud heartbeat** — there is
+    no local HMI tile or SYSTEM alarm, so the one signal that would have named
+    this in minutes was invisible on the panel. **Open item: raise a local
+    SYSTEM alarm + Device Health tile on under-voltage/throttling.** Proposed,
+    not yet built (see the note in CLAUDE.md's firmware section).

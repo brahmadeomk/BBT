@@ -404,8 +404,27 @@ change this wire format without updating the firmware in lockstep:
   `"err_write"` for transfers). The Cloud Gateway / Node-RED side needs
   to parse this framing, not assume a single batched response.
 
-**Hang fix (2026-07-22, firmware rev):** the Nano stopped transmitting
-after some hours, repeatably. Root causes, all fixed internally with
+**⚠️ ROOT CAUSE CORRECTED (2026-07-29): the hang was a Raspberry Pi
+POWER-SUPPLY problem, not firmware.** The Pi's power LED was blinking
+randomly (the classic under-voltage indicator); supplying adequate power
+fixed it. The team re-tested **both** the reduced-memory build *and* the
+**original unmodified sketch** — **both ran fine** once power was sound,
+so the RAM-exhaustion theory below was wrong. Keep this in mind before
+attributing any future "device stops transmitting" to firmware: **check
+Pi power first** (`vcgencmd get_throttled`, power LED). The firmware
+changes below were retained as defensive hardening (the watchdog in
+particular still buys automatic recovery from any wedge, whatever its
+cause), but **none of them is the fix** and they should not be cited as
+one. Note the panel already samples the under-voltage flags in
+`src/cloud-gateway/pi-health.js` (`vcgencmd get_throttled` →
+`low_voltage.under_voltage_now` / `throttled_now` /
+`throttled_since_boot`) — but only inside the **cloud heartbeat**, with
+no local HMI/alarm surface, which is why this took so long to spot.
+Surfacing it locally is an open item.
+
+**Original (superseded) diagnosis, 2026-07-22 firmware rev:** the Nano
+stopped transmitting
+after some hours, repeatably. Suspected causes, all changed internally with
 **no wire-format change** (Node-RED side untouched): (1) RAM exhaustion
 — the per-loop response builder used a 12 KB `StaticJsonBuffer` on the
 stack every `loop()` next to the 12 KB static `inputBuffer` on a 32 KB
@@ -423,9 +442,10 @@ before `Serial1.begin` (a bad comm used to set baud 0 and kill Modbus);
 `delayMicroseconds` >16383 µs routed through `delay()`. **New build
 dependency: Adafruit SleepyDog library.** After a watchdog reset the
 Nano waits for the Pi to resend the job — the Pi's serial-silence
-watchdog already triggers that resend. **Flashed to the real Nano
-(2026-07-22) — confirmed transmitting; a 24 h soak is in progress to
-confirm the hang is gone.**
+watchdog already triggers that resend. Flashed to the real Nano
+(2026-07-22) and confirmed transmitting — but, per the correction above,
+**the hang was resolved by fixing the Pi's power supply, not by these
+changes.**
 
 ## Internal bus (Slice 4)
 
