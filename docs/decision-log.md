@@ -2079,3 +2079,29 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   (61.5 °C ×10), `panel_max_deltaT` = 282, level 2, and the ACK bridge emitting
   the correct message. Remaining for Slice 11: the reference-gateway live
   validation (needs the Modbus→BACnet hardware). 474 tests pass.
+
+- **2026-07-29 (9th)** — **`tools/apply-integration-config.js` added.** Gap in
+  my own delivery: the Slice 11 runbook said "apply a `cfg/integration`
+  document" but there was **no way to do it** — the domain has no dashboard
+  screen (unlike cfg/alarms and cfg/modbus+joints) and `processRemoteConfig`
+  routes only `alarms` / `modbus_joints` / `edge`, so the BMS service could
+  never leave its "no cfg/integration applied" state on a real panel.
+  A CLI is the right shape here: this is commissioning-time configuration set
+  once when the BMS is wired, not day-to-day tuning — the same role
+  `apply-migrated-config.js` plays for the bootstrap domains. Design points:
+  - **Domain version is auto-bumped** past whatever is applied. I4 monotonicity
+    is a correctness rule for the *system*, not a puzzle to hand to the
+    commissioning engineer.
+  - **Flag-only runs edit the applied doc in place** rather than silently
+    reverting to the shipped example — otherwise `--port=1600` would quietly
+    discard an earlier `--tier` choice.
+  - **`point_map_version` can only rise.** A file carrying a stale value gets
+    raised back with a warning, never regressing a map a gateway is already
+    configured against (the append-only rule, enforced instead of trusted).
+  - Refuses to run before the panel is commissioned, pointing at
+    `apply-migrated-config.js`.
+  9 tests (incl. the regression guard and the reject path). 483 pass.
+  **Still not routed through the remote config channel** — a fleet-wide push
+  would need `processRemoteConfig` to learn the `integration` domain; not done,
+  and worth a design-chat decision since cfg/integration is arguably
+  wiring-reality (R12-like maintenance gating) rather than a free-to-tune knob.

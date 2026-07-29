@@ -49,16 +49,36 @@ bottom of that doc) with each commissioned panel.
    the gateway).
 2. **settings.js** — add the `busductIntegration` functionGlobalContext entry
    (see `src/config-service/node-red/settings.js.example`). Restart Node-RED.
-3. **Apply a `cfg/integration` document** (example:
-   `config/examples/integration.json`) — through the remote config channel or
-   a local apply. Pick:
-   - `modbus_tcp.port` — **1502 recommended** (a privileged <1024 port such
-     as 502 needs `CAP_NET_BIND_SERVICE` on the Node-RED process or an
-     nftables redirect; I2 warns about this). Point the gateway at whatever
-     you choose.
-   - `exposure_tier` — 1 (summary only), 2 (+per-zone), or 3 (+per-joint).
-   - `severity_bitmap.enabled` — compact per-joint levels for
-     point-licence-sensitive sites.
+3. **Apply a `cfg/integration` document** with `tools/apply-integration-config.js`.
+   There is no dashboard screen for this domain: it is commissioning-time
+   configuration, set once when the BMS is wired, not tuned day to day.
+
+   ```bash
+   cd /home/pi/busduct-cloud-edge
+   node tools/apply-integration-config.js --show            # what's applied now
+   node tools/apply-integration-config.js                   # apply the shipped example
+   node tools/apply-integration-config.js --port=1502 --tier=3
+   node tools/apply-integration-config.js my-panel.json     # or a full document
+   node tools/apply-integration-config.js --disable         # stop serving Modbus TCP
+   ```
+
+   It prints the resolved listener, tier, register extent and joint count, and
+   is **safe to re-run**: the domain version is auto-bumped past whatever is
+   applied, so you never hit the I4 monotonicity error by hand. A flag-only run
+   **edits the applied document in place** rather than reverting to the example.
+   Every apply goes through the same validate + audit path as the other domains.
+
+   What to choose:
+   - `--port` — **1502 recommended**. A privileged <1024 port such as 502 needs
+     `CAP_NET_BIND_SERVICE` on the Node-RED process or an nftables redirect; I2
+     warns but still applies. Point the gateway at whatever you choose.
+   - `--tier` — 1 (summary only), 2 (+per-zone), 3 (+per-joint).
+   - `--bitmap` — compact per-joint levels for point-licence-sensitive sites.
+   - `--bind` — restrict the listener to the BMS-facing interface.
+
+   `point_map_version` is **append-only**: if a file carries a value below what
+   the panel already published, the tool raises it back and warns rather than
+   regressing a map a gateway is configured against.
 4. **Firewall** the Modbus port to the BMS VLAN only (Modbus TCP is
    unauthenticated); optionally set `modbus_tcp.bind_host` to the BMS-facing
    interface address.
