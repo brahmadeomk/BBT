@@ -2015,3 +2015,13 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   poll rate; the blacklist state itself is a cheap global read and stays live.
   Verified by simulating the gate with sl21/unit 101 blacklisted: the ambient
   row renders `BLACKLISTED (retry 45s)` while the two joint rows stay `Active`.
+
+- **2026-07-29 (live pass)** — **Diagnostics page power + device banners
+  verified on the Pi.** "Live Parameter Data – Modbus" now renders
+  `Pi Power: OK — power: OK [0x0]` and `Devices: all responding`, with the new
+  per-row **Device** column showing Active for units 1, 101 and 2.
+  Two things confirmed by the `[0x0]`: the probe is genuinely executing
+  `vcgencmd` (a failed probe would render grey UNKNOWN, not green OK), and the
+  under-voltage/throttling **since-boot** bits are clear — i.e. the Pi has not
+  sagged once since it was re-powered, independently corroborating that the
+  power-supply fix (not firmware) resolved the Nano "hang".
