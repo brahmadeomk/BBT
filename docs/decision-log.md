@@ -1997,3 +1997,21 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   under its header (green OK / red FAULT / grey UNKNOWN, with the raw
   `vcgencmd` flags). No new node, no new state, no extra probe — one global,
   two views. The Device Health banner stays as well.
+
+- **2026-07-29 (6th)** — **Blacklist status added to the Diagnostics page**
+  (user request, alongside the power banner). Two surfaces on "Live Parameter
+  Data – Modbus":
+  - **Per-row "Device" column** — Active / **BLACKLISTED** / **PROBING** with the
+    retry countdown, keyed by **unit address** so it lines up with the table's
+    existing "Slave ID" column (the blacklist state itself is keyed by internal
+    `slave_id`, which the operator never sees — the same identity mismatch fixed
+    in the alarm text earlier today).
+  - **Summary banner** — "all responding" or the blacklisted/probing counts,
+    plus each affected device by its commissioned name and its ambient impact
+    (`101 (AMBIENT_101): blacklisted — ambient for J01, J02`).
+  Implementation note: this UI gate (`6e03c48901abfc87`) runs on **every Modbus
+  data message**, so the applied-config read needed for unit_address/label is
+  **cached in node context for 30 s** rather than hitting the cfg files at the
+  poll rate; the blacklist state itself is a cheap global read and stays live.
+  Verified by simulating the gate with sl21/unit 101 blacklisted: the ambient
+  row renders `BLACKLISTED (retry 45s)` while the two joint rows stay `Active`.
