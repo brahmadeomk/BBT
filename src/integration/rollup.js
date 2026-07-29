@@ -70,6 +70,18 @@ class WorstJointLatch {
   get current() {
     return this._current ? { ...this._current } : null;
   }
+
+  /**
+   * Detached copy carrying the same latched winner. Lets a read-only view run
+   * the rollup without advancing the real latch — computeRollup() mutates the
+   * latch it is handed, so a diagnostic dump would otherwise reassign the
+   * worst-joint point the BMS is reading.
+   */
+  clone() {
+    const c = new WorstJointLatch();
+    c._current = this._current ? { ...this._current } : null;
+    return c;
+  }
 }
 
 /**

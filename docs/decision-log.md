@@ -2105,3 +2105,28 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   would need `processRemoteConfig` to learn the `integration` domain; not done,
   and worth a design-chat decision since cfg/integration is arguably
   wiring-reality (R12-like maintenance gating) rather than a free-to-tune knob.
+
+- **2026-07-29 (10th)** — **BMS register dump (`describe-image.js`) + HMI view.**
+  "What is the Modbus TCP server actually sending?" cannot be answered from a
+  raw register array: the ×10 scaling and the −32768 NO_DATA sentinel are
+  exactly the things a human misreads (−32768 looks like −3276.8 °C). Commissioning
+  a gateway means proving "address 8 really is panel_max_temp = 61.5 °C", so the
+  dump renders address → block → point → raw → **engineering value**, names the
+  enumerations (`2 (WARNING)`, `0 (OK)`, `2 (OFFLINE)`), explains the
+  `worst_joint_index` sentinels (`-1 (none)` / `-2 (set, Tier 3 not exposed)`),
+  and always lists the writable ACK register (which `buildImage` deliberately
+  never writes, so it would otherwise look absent).
+  - **`BmsService.snapshot()`** added for the view: recomputes the image
+    **without** advancing the heartbeat or writing to the slave. A diagnostic
+    read must not perturb the liveness signal a BMS depends on.
+  - **Bug caught while building it:** `snapshot()` initially passed the live
+    `this.latch` to `computeRollup`, which **mutates** it — so opening a
+    read-only view could reassign the latched worst joint a gateway is reading.
+    Fixed with `WorstJointLatch.clone()`; three tests now assert snapshot
+    changes neither heartbeat, served registers, nor the latch.
+  - Flow: "registers view (5s)" + "BMS Registers View" on the BMS tab feeding a
+    collapsible **BMS Registers** group on the Device Health dashboard tab.
+    Deliberately *not* cached in Node-RED context — a 658-entry image written to
+    the localfilesystem context store every 5 s would be needless flash wear.
+  Verified against the real migrated config: 154 rows, Tier-1 `panel_max_temp`
+  615 → `61.5 °C`, zone z2 and joint J01 blocks correct. 497 tests pass.

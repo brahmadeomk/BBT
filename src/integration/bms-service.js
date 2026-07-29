@@ -134,6 +134,19 @@ class BmsService {
     return { image, rollup, heartbeat: this._heartbeat, map: this.map, nowMs: nowMs ?? Date.now() };
   }
 
+  /**
+   * Recompute the current image WITHOUT advancing the heartbeat or touching the
+   * slave. For views/diagnostics: a register dump must never perturb the
+   * heartbeat a BMS is using as its liveness signal, and must never be able to
+   * push a half-built image to a live gateway.
+   */
+  snapshot() {
+    // clone the latch: computeRollup mutates it, and a view must not reassign
+    // the worst-joint point a gateway is reading.
+    const rollup = computeRollup(this._liveJoints(), this._activeAlarms, this.latch.clone(), { systemFault: this._systemFault });
+    return { image: buildImage(this.map, rollup, { heartbeat: this._heartbeat }), rollup, heartbeat: this._heartbeat, map: this.map };
+  }
+
   get heartbeat() {
     return this._heartbeat;
   }

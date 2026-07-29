@@ -79,3 +79,47 @@ describe('BmsService — end-to-end with a fake server', () => {
     assert.equal(svc.map.tier3.joints.length, before + 1);
   });
 });
+
+describe('BmsService.snapshot — read-only', () => {
+  const { factory } = fakeFactory();
+  function svcWithAlarm() {
+    const svc = new BmsService({ integrationDoc: validIntegrationDoc({ exposure_tier: 3 }), jointsDoc: jointsDocTwoZones(), serverFactory: factory });
+    svc.ingestJoint({ joint_id: 'J01', zone_id: 'Z1', emaTemp: 61, ror: 5 });
+    svc.ingestAlarmsActive([activeAlarm({ joint_id: 'J01', level: 'WARNING', raisedTs: '2026-07-29T10:00:00Z' })]);
+    svc.refresh();
+    return svc;
+  }
+
+  test('does not advance the heartbeat (the BMS liveness signal)', () => {
+    const svc = svcWithAlarm();
+    const hb = svc.heartbeat;
+    svc.snapshot();
+    svc.snapshot();
+    assert.equal(svc.heartbeat, hb, 'a diagnostic view must not look like a live scan');
+  });
+
+  test('does not push to the slave', () => {
+    const svc = svcWithAlarm();
+    const before = svc.slave.readHoldingRegisters(0, 12).join(',');
+    svc.snapshot();
+    assert.equal(svc.slave.readHoldingRegisters(0, 12).join(','), before);
+  });
+
+  test('does not reassign the latched worst joint', () => {
+    const svc = svcWithAlarm();
+    assert.equal(svc.latch.current.joint_id, 'J01');
+    // a joint that raised LATER at the same level must not steal the point via a view
+    svc.ingestAlarmsActive([
+      activeAlarm({ joint_id: 'J02', level: 'WARNING', raisedTs: '2026-07-29T11:00:00Z', instanceId: 'PROCESS|J02|DELTA_T|WARNING' }),
+    ]);
+    svc.snapshot();
+    assert.equal(svc.latch.current.joint_id, 'J01', 'the real latch is untouched by a read-only view');
+  });
+
+  test('still reports the current image contents', () => {
+    const svc = svcWithAlarm();
+    const s = svc.snapshot();
+    const addr = s.map.tier3.joints.find((j) => j.joint_id === 'J01').points.find((p) => p.key === 'temp').addr;
+    assert.equal(s.image[addr], 610);
+  });
+});
