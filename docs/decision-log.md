@@ -1865,3 +1865,9 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   Note this is the **legacy** path (measurement `Busbar`, legacy `Mecha` DB),
   independent of the Slice 10 Historian tab (`bt_kpi` in the `busduct` DB,
   fed from the ProcessLogic KPI taps), which never had this bug.
+  **Live-verified on the Pi (2026-07-29): J02 now writes.** Historical `Busbar`
+  data still has the gap for however long the off-by-one ran — `bt_kpi` is the
+  complete series for any back-analysis. **Open question for the design chat:**
+  whether the legacy `Busbar` writer should be retired now that the Historian
+  tab is the supported path — it is a second, unvalidated data pipeline whose
+  only remaining consumer is the legacy dashboard.
