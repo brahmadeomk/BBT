@@ -65,11 +65,13 @@ bottom of that doc) with each commissioned panel.
 
 ## Flow wiring (BMS Integration tab)
 
-> **Status:** the tested core is built; the flow tab that hosts it is wired
-> the same way as the Cloud Gateway tab and is the **live-pending** piece
-> (needs a reference gateway to validate end-to-end — workplan §11 step 8).
+> **Status (2026-07-29): BUILT.** The tab ships in `flows/flows_BBT.json`
+> (nodes `b115ac57e0f100xx`) and was verified end-to-end against the real
+> 21-slave migrated config with a fake server factory. What remains is the
+> **reference-gateway live validation** (workplan §11 step 8), which needs
+> the Modbus→BACnet hardware.
 
-Add a **BMS Integration** flow tab with thin function nodes that call
+The shipped **BMS Integration** tab, all thin nodes calling
 `global.get('busductIntegration')`:
 
 1. **Server host node** (`inject` @boot → function): build the singleton with

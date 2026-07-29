@@ -596,9 +596,22 @@ computed locally, works with the internet down. Full deployment/runbook:
   `jsmodbus-server-factory.js` — the only file importing it; the
   cloud-agnostic grep stays green). Without it installed, the service
   computes images but binds no socket.
-- **Not yet done**: the **BMS Integration flow tab** (thin nodes: server
-  @boot, KPI/alarm/blacklist taps, refresh tick, ACK output — wired like
-  the Cloud Gateway tab; runbook in `docs/bms-integration.md`) and the
+- **BMS Integration flow tab — BUILT (2026-07-29)**, nodes
+  `b115ac57e0f100xx`: "BMS server @boot" (builds the singleton with the
+  production `jsmodbusServerFactory`, wires the ACK bridge **once per
+  process** — the singleton survives a Deploy, so an unguarded `onAck`
+  would stack handlers and ACK each alarm N times), `link in` taps off
+  the existing Slice 4 `KPI Stream - Joint` and `Alarm Events - Active`
+  link-outs, and a 5 s "BMS Refresh" tick that ingests
+  `busduct_blacklist_state`, recomputes the image and bumps the
+  heartbeat. A BMS write to the ACK register is expanded into one
+  `{action:'ACK', instanceId, user:'BMS'}` per matching active alarm —
+  the same shape the HMI's table sends, so it takes the identical path
+  into the audit trail. Verified end-to-end against the real 21-slave
+  migrated config with a fake server factory: 20 live joints, 658
+  registers, Tier-1 `panel_max_temp` 615 (61.5 °C ×10), and the ACK
+  bridge emitting correctly.
+- **Not yet done**: the
   **reference-gateway live validation** (workplan §11 "Done when": a stock
   gateway reads Tier 1 as BACnet with no custom mapping; a frozen Pi is
   detectable via the heartbeat; a BMS-originated ACK lands in the audit

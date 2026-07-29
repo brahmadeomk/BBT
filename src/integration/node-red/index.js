@@ -18,6 +18,11 @@ const { buildRegisterMap, mapExtent } = require('../register-map');
 const { computeRollup, WorstJointLatch } = require('../rollup');
 const { buildImage } = require('../holding-registers');
 const { decodeAck } = require('../ack');
+// Re-exported so the flow's thin function nodes can pass a production server
+// factory without require()ing a path themselves (function nodes can't).
+// jsmodbus itself is required lazily INSIDE the factory, so importing this
+// module never hard-depends on the optional package.
+const { jsmodbusServerFactory } = require('./jsmodbus-server-factory');
 
 let _service = null;
 
@@ -77,4 +82,5 @@ module.exports = {
   WorstJointLatch,
   buildImage,
   decodeAck,
+  jsmodbusServerFactory,
 };

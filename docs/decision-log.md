@@ -2048,3 +2048,34 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   caught by a single unit test of a pure builder. Proposed follow-up: extract it
   to `/src` (e.g. `src/historian/legacy-busbar-points.js`) with tests, leaving a
   thin function node — not yet done, offered to the user.
+
+- **2026-07-29 (8th)** — **Slice 11: BMS Integration flow tab built.** Nodes
+  `b115ac57e0f100xx` on a new "BMS Integration" tab, all thin per the standing
+  rule (logic stays in `src/integration`):
+  - **"BMS server @boot"** builds the singleton with the production
+    `jsmodbusServerFactory` and wires the BMS→alarm ACK bridge. The bridge is
+    guarded by `svc._ackWired`: `getBmsService` returns a **module** singleton
+    that survives a Deploy (settings.js `require()`s the library once at
+    startup), so an unguarded `onAck` would stack a new handler on every deploy
+    and ACK each alarm N times.
+  - **Taps** are `link in` nodes appended to the existing Slice 4 link-outs
+    (`KPI Stream - Joint`, `Alarm Events - Active`) — no change to the
+    producers, same peer-adapter pattern as the Cloud Gateway tab.
+  - **"BMS Refresh" (5 s)** ingests `busduct_blacklist_state`, recomputes the
+    rollup/image and bumps the heartbeat.
+  - **ACK expansion**: a BMS write to the ACK register becomes one
+    `{action:'ACK', instanceId, user:'BMS'}` per matching active alarm — the
+    exact shape the HMI's Active Alarms table sends, so a BMS-originated ACK
+    takes the identical path and lands in the audit trail attributed to the BMS
+    (workplan §11 "Done when", third bullet).
+  - `jsmodbusServerFactory` is now re-exported from
+    `src/integration/node-red/index.js` so the function node needn't
+    `require()` a path (function nodes can't); `jsmodbus` is still required
+    lazily inside the factory, so the import never hard-depends on the optional
+    package.
+  Verified end-to-end by driving the actual node source against a real
+  ConfigStore + the migrated 21-slave production config with a fake server
+  factory: 20 live joints, 658 registers, Tier-1 `panel_max_temp` = 615
+  (61.5 °C ×10), `panel_max_deltaT` = 282, level 2, and the ACK bridge emitting
+  the correct message. Remaining for Slice 11: the reference-gateway live
+  validation (needs the Modbus→BACnet hardware). 474 tests pass.
