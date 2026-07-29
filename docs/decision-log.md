@@ -1985,3 +1985,15 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   corrected too. Rationale: the sketch is the artifact an engineer actually
   reads at 2 a.m.; leaving a confident-but-wrong root cause in its header is how
   the same misdiagnosis gets made twice.
+
+- **2026-07-29 (5th)** — **Pi power banner added to the Diagnostics page**
+  (user request). The alarm/tile built earlier lives on the Device Health tab,
+  but "Live Parameter Data – Modbus" (`ui_template` `db41c2b5077e83fc`, group
+  "Modbus Dashboard", tab **Diagnostics**) is the page an engineer already has
+  open when something looks wrong — which is exactly when the power state
+  matters. The UI-gate function that feeds it (`6e03c48901abfc87`) now attaches
+  `msg.payload.power` from the same `global.busduct_power_health` the Device
+  Health tile reads, and the template renders a colour-coded banner directly
+  under its header (green OK / red FAULT / grey UNKNOWN, with the raw
+  `vcgencmd` flags). No new node, no new state, no extra probe — one global,
+  two views. The Device Health banner stays as well.
