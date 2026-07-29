@@ -1887,6 +1887,10 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   caused the false ΔT alarms upstream — this was its third appearance today, in
   a different pipeline. Verified by simulation against the real panel shape
   (all devices at register 3): before → `Ambient_101 = 0`; after → `29.34`.
-  Reinforces the open question above about retiring the legacy `Busbar` writer:
-  it is an unvalidated parallel pipeline that has now produced two distinct
-  data-integrity bugs the supported Historian path never had.
+  **Live-verified on the Pi (2026-07-29): the ambient now writes its real
+  value.** Reinforces the open question above about retiring the legacy
+  `Busbar` writer: it is an unvalidated parallel pipeline that has now produced
+  two distinct data-integrity bugs the supported Historian path never had.
+  Historical `Busbar` ambient values are 0 for the whole period the hardcoded
+  register-0 lookup ran — treat that series as unusable before this date and use
+  `bt_kpi` for any back-analysis.
