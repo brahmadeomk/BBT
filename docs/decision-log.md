@@ -1879,6 +1879,9 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   whether the legacy `Busbar` writer should be retired now that the Historian
   tab is the supported path — it is a second, unvalidated data pipeline whose
   only remaining consumer is the legacy dashboard.
+  **RESOLVED 2026-07-29 — KEEP it (see the entry at the end of this log): it
+  feeds the Grafana-backed "BusbarTherMo — Main Dashboard (Zone Overview)",
+  which is a live customer-facing page, not a legacy leftover.**
 
 - **2026-07-29 (2nd)** — **Legacy InfluxDB ambient wrote a fabricated 0.**
   Live report: `Ambient_101` reached the InfluxDB node with `value: 0` while the
@@ -2025,3 +2028,23 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   under-voltage/throttling **since-boot** bits are clear — i.e. the Pi has not
   sagged once since it was re-powered, independently corroborating that the
   power-supply fix (not firmware) resolved the Nano "hang".
+
+- **2026-07-29 (7th)** — **User decision: KEEP the legacy `Busbar` InfluxDB
+  writer.** My earlier recommendation was to retire it (two data-integrity bugs
+  in one day, both traceable to it being an untested parallel pipeline). That
+  recommendation was **wrong about its status**: the `Busbar` measurement feeds
+  the Grafana-backed **"BusbarTherMo™ — Main Dashboard (Zone Overview)"** —
+  Zone Health Overview + System KPIs (No. of Zones, Max/Avg RoR, Max/Avg ΔT,
+  TOTAL/LIVE/OFFLINE counts), embedded in the HMI as the operator's **Home**
+  page. It is a live customer-facing surface, not a legacy leftover, so the two
+  pipelines are not duplicates: `bt_kpi` (Historian tab) serves the Trends
+  screen and long-horizon analysis; `Busbar` serves the main dashboard.
+  **Consequence to act on:** because it is load-bearing, the point builder must
+  stop being untested. It currently lives entirely inside the Node-RED function
+  node `2978fd45db77d953`, which is exactly what CLAUDE.md's standing rule
+  forbids ("Node-RED function nodes stay thin — real logic lives in
+  unit-testable library modules under `/src`"). **Both** of today's bugs (the
+  `i < n - 1` off-by-one and the hardcoded ambient register 0) would have been
+  caught by a single unit test of a pure builder. Proposed follow-up: extract it
+  to `/src` (e.g. `src/historian/legacy-busbar-points.js`) with tests, leaving a
+  thin function node — not yet done, offered to the user.
