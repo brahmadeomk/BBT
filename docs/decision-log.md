@@ -1847,3 +1847,21 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   and the **Slice 10 ambient-hardening** live check. Still dormant on this
   panel by design: positional telemetry (OFF — no cloud consumer yet) and
   two-segment RS-485 (needs a second physical Nano).
+
+- **2026-07-29** — **Legacy InfluxDB point builder off-by-one (J02 missing).**
+  Live report: the legacy `Busbar` InfluxDB write path on `modbusMaster_V2`
+  showed J01 and Ambient_101 but never J02. Root cause in the point-builder
+  function node (`2978fd45db77d953`): the loop over the legacy per-channel
+  globals was `for (var i = 0; i < n - 1; i++)` where `n = slaveLength`. Rows
+  are written at indices `0 .. slaveLength-1` (`writeLegacyModbusGlobals`), so
+  the bound **always dropped the last commissioned row**. Ambient sensors kept
+  appearing because they're emitted by a *separate* `ambientMap` loop after the
+  main one — which disguised a systematic "last row is lost" bug as "one
+  specific joint is missing". Whether the lost row is a joint or the ambient
+  depends purely on `modbus.slaves[]` ordering. Fixed to `i < n` with a
+  `sID == null` guard. Reproduced and verified with a simulated 3-row panel
+  ordered [unit 1, unit 101, unit 2]: before → `J01, Ambient_101`; after →
+  `J01, J02, Ambient_101`.
+  Note this is the **legacy** path (measurement `Busbar`, legacy `Mecha` DB),
+  independent of the Slice 10 Historian tab (`bt_kpi` in the `busduct` DB,
+  fed from the ProcessLogic KPI taps), which never had this bug.
