@@ -1,14 +1,35 @@
-//Last modified - 22/07/2026
+//Last modified - 29/07/2026
 //
-// Hang fix (stops transmitting after some hours, repeatably). Root causes
-// addressed in this revision, all internal - the Pi<->Nano wire format
+// ============================================================================
+// IMPORTANT - READ BEFORE BLAMING THIS FILE FOR A "STOPS TRANSMITTING" FAULT
+// ============================================================================
+// The 2026-07 fault where the Nano stopped transmitting after some hours was
+// NOT a firmware bug. It was Raspberry Pi UNDER-VOLTAGE (power LED blinking
+// randomly); it went away when the Pi was given an adequate supply. Both the
+// hardened build below AND the original unmodified sketch run fine on good
+// power - so none of the changes listed below is the fix.
+//
+// They are KEPT DELIBERATELY as defensive hardening (user decision,
+// 2026-07-29): the watchdog in particular recovers from a wedge of ANY cause,
+// including the brown-outs that were actually happening.
+//
+// If a device stops responding in future: CHECK THE POWER RAIL FIRST
+// (`vcgencmd get_throttled` on the Pi, and the Pi's power LED). The panel now
+// raises a SYSTEM|PI|POWER alarm and shows a Device Health banner for exactly
+// this. The original diagnosis below was reached by reading code without ever
+// measuring the failure - don't repeat that.
+// ============================================================================
+//
+// Hardening in this revision, all internal - the Pi<->Nano wire format
 // (read/write/transfer/comm in, {"t":..,"st":..} lines out) is UNCHANGED,
 // so the Node-RED side needs no change:
-//   1. RAM exhaustion on the 32 KB SAMD21: the per-loop response builder
+//   1. (Believed at the time to be RAM exhaustion; retained as it is strictly
+//      better sizing, but it was NOT the cause.)
+//      On the 32 KB SAMD21 the per-loop response builder
 //      used a 12 KB StaticJsonBuffer on the stack every loop() on top of
-//      the 12 KB static inputBuffer -> stack/heap collision -> hard fault
-//      after hours. The response builder only ever holds ONE small packet
-//      result, so it now uses RESPONSE_BUFFER_SIZE (4 KB).
+//      the 12 KB static inputBuffer, which looked like a stack/heap collision
+//      risk. The response builder only ever holds ONE small packet result, so
+//      it now uses RESPONSE_BUFFER_SIZE (4 KB) - right-sized either way.
 //   2. USB-CDC back-pressure: Serial.print/flush block when the host (Pi)
 //      stops reading, wedging the poll loop. Writes are now guarded by
 //      `if (Serial)` and the blocking flush() calls are gone.
@@ -284,8 +305,10 @@ void JobManager() {
 
 void processModbusPackets() {
   // Small per-packet builder (one result at a time) - NOT the 12 KB job
-  // buffer. This is the key RAM fix: it used to push 12 KB of stack every
-  // loop() on a 32 KB part, next to the 12 KB static inputBuffer.
+  // buffer. It used to push 12 KB of stack every loop() on a 32 KB part, next
+  // to the 12 KB static inputBuffer; 4 KB is simply the right size for one
+  // result. (Once believed to be the "hang" fix - it was not; see the header:
+  // the real cause was Pi under-voltage.)
   StaticJsonBuffer<RESPONSE_BUFFER_SIZE> jsonBuffer;
 
   for (size_t i = 0; i < readPacketCount; i++) {

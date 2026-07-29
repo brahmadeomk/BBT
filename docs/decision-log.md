@@ -1965,3 +1965,23 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
     that catches an intermittent fault that has already passed.
   - 12 unit tests + an end-to-end simulation of the flow node (raise → no
     repeat → clear after 3 good). Full suite 474 pass.
+
+- **2026-07-29 (4th)** — **User decision: KEEP the hardened Nano firmware.**
+  With the real root cause known (Pi under-voltage), the 2026-07-22 firmware
+  revision could have been reverted to the original sketch — both run fine on
+  good power. Decision is to **keep the new code**, on the merits rather than
+  because it fixed anything: the SleepyDog **watchdog** recovers from a wedge of
+  any cause (a brown-out included, so it is *more* valuable now, not less), the
+  `comm` validation stops a malformed job setting baud 0, the `if (Serial)`
+  guards are correct regardless of host behaviour, and the 4 KB response buffer
+  is simply the right size for a one-packet result. No functional change; the
+  wire format was never touched.
+  `firmware/Nano_IOT.ino`'s header comment was rewritten to lead with the
+  correction — a prominent "READ BEFORE BLAMING THIS FILE" block stating that
+  the fault was Pi under-voltage, that both builds work on good power, that the
+  listed items are hardening rather than the fix, and that a future
+  "stops responding" investigation must **check the power rail first**. The
+  inline comment at `RESPONSE_BUFFER_SIZE` (previously "the key RAM fix") was
+  corrected too. Rationale: the sketch is the artifact an engineer actually
+  reads at 2 a.m.; leaving a confident-but-wrong root cause in its header is how
+  the same misdiagnosis gets made twice.

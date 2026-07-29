@@ -411,11 +411,13 @@ fixed it. The team re-tested **both** the reduced-memory build *and* the
 **original unmodified sketch** — **both ran fine** once power was sound,
 so the RAM-exhaustion theory below was wrong. Keep this in mind before
 attributing any future "device stops transmitting" to firmware: **check
-Pi power first** (`vcgencmd get_throttled`, power LED). The firmware
-changes below were retained as defensive hardening (the watchdog in
-particular still buys automatic recovery from any wedge, whatever its
-cause), but **none of them is the fix** and they should not be cited as
-one. Note the panel already samples the under-voltage flags in
+Pi power first** (`vcgencmd get_throttled`, power LED). **User decision (2026-07-29): KEEP the
+new firmware.** The changes below stay as deliberate defensive hardening
+(the watchdog in particular buys automatic recovery from any wedge,
+whatever its cause — including a brown-out), but **none of them is the
+fix** and they must not be cited as one. `firmware/Nano_IOT.ino`'s header
+carries the same warning so a future reader doesn't re-derive the wrong
+story from the code. Note the panel already samples the under-voltage flags in
 `src/cloud-gateway/pi-health.js` (`vcgencmd get_throttled` →
 `low_voltage.now` / `throttled_now` / `*_since_boot`) — but only inside
 the **cloud heartbeat**, with no local HMI/alarm surface, which is why
