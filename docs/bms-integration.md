@@ -74,33 +74,49 @@ bottom of that doc) with each commissioned panel.
 The shipped **BMS Integration** tab, all thin nodes calling
 `global.get('busductIntegration')`:
 
-1. **Server host node** (`inject` @boot → function): build the singleton with
-   the production factory and start it:
-   ```js
-   const I = global.get('busductIntegration');
-   const { jsmodbusServerFactory } = require('/home/pi/busduct-cloud-edge/src/integration/node-red/jsmodbus-server-factory');
-   const store = global.get('busductConfigService').getStore();  // or however the store is exposed
-   const svc = I.getBmsService(store, { serverFactory: jsmodbusServerFactory });
-   flow.set('bmsStarted', !!svc);
-   ```
-2. **KPI joint tap** — a `link in` from the existing `KPI Stream - Joint
-   (link out)` → function → `svc.ingestJoint(msg.payload)`.
-3. **Active-alarm tap** — `link in` from `Alarm Events - Active (link out)` →
-   `svc.ingestAlarmsActive(msg.payload)`.
-4. **Blacklist state** — a 5 s `inject` reading
-   `global.busduct_blacklist_state` → `svc.ingestBlacklistState(state)`.
-5. **Refresh tick** — an `inject` every 2–5 s → `svc.refresh()`. This bumps
-   the heartbeat and pushes the new image to the slave. (Choose the period
-   with the customer; the heartbeat's usefulness as a liveness signal depends
-   on it being faster than the BMS's poll interval.)
-6. **ACK output** — once, wire `svc.onAck(cmd => …)` to emit a message into
-   the **same** node the HMI's ACK button feeds (summary ACK → ack all
-   active; joint ACK → ack that joint's alarms). This is what puts a
-   BMS-originated ACK into the audit trail.
+| Node | id | What it does |
+|---|---|---|
+| `BMS server @boot` (inject, once +10 s) | `…01` | fires the server node once at startup |
+| `BMS Server + ACK bridge` (function) | `…02` | builds the singleton with `I.jsmodbusServerFactory`, wires the ACK bridge (once per process), `svc.start()` |
+| `KPI Joint -> BMS` (link in) | `…03` | tap off the existing `KPI Stream - Joint (link out)` |
+| `BMS Ingest KPI` (function) | `…04` | `svc.ingestJoint(msg.payload)` |
+| `Alarms Active -> BMS` (link in) | `…05` | tap off `Alarm Events - Active (link out)` |
+| `BMS Ingest Alarms` (function) | `…06` | `svc.ingestAlarmsActive(msg.payload)` |
+| `BMS refresh (5s)` (inject) | `…07` | refresh tick |
+| `BMS Refresh` (function) | `…08` | ingests `busduct_blacklist_state`, `svc.refresh()`, sets node status |
+| `bms refresh` (debug, off) | `…09` | heartbeat / level / live-joint counts when enabled |
+| `BMS Ack (out)` → `BMS Ack (in)` | `…0a` / `…0b` | carries expanded ACK messages to the Alarm Manager |
+
+Every function node opens with the same guard, so a missing library or an
+unapplied `cfg/integration` degrades to a node status instead of an exception:
+
+```js
+const I = global.get('busductIntegration');
+const cs = global.get('busductConfigService');
+if (!I || !cs) { node.status({fill:'red',shape:'ring',text:'lib missing (settings.js)'}); return null; }
+const svc = I.getBmsService(cs.createStore(), { serverFactory: I.jsmodbusServerFactory });
+if (!svc) { node.status({fill:'grey',shape:'ring',text:'no cfg/integration applied'}); return null; }
+```
+
+Two details that matter if you ever edit these nodes:
+
+- **The ACK bridge is registered once per PROCESS** (`if (!svc._ackWired)`).
+  `getBmsService` returns a module-level singleton that survives a Deploy —
+  settings.js `require()`s the library once at Node-RED startup — so an
+  unguarded `svc.onAck(...)` would stack a new handler on every deploy and
+  acknowledge each alarm N times.
+- **A BMS ACK is expanded into the HMI's own message shape**
+  (`{action:'ACK', instanceId, user:'BMS'}`, one per matching active alarm,
+  read from `global.busbartherm.activeAlarms`). That is deliberate: it makes a
+  BMS acknowledgement take the identical path as an operator's, so it lands in
+  the audit trail with no separate code path to keep in sync.
+
+The refresh period (5 s) must stay **faster than the BMS's poll interval**, or
+the heartbeat is useless as a liveness signal — agree the number with the
+customer.
 
 All heavy logic is in the library; the function nodes stay thin, per the
-standing rule. `flows-integrity.test.js` will guard the new `link`
-references once the tab is added.
+standing rule. `flows-integrity.test.js` guards the new `link` references.
 
 ## Reference-gateway validation (Done-when)
 
