@@ -2130,3 +2130,19 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
     the localfilesystem context store every 5 s would be needless flash wear.
   Verified against the real migrated config: 154 rows, Tier-1 `panel_max_temp`
   615 → `61.5 °C`, zone z2 and joint J01 blocks correct. 497 tests pass.
+
+- **2026-07-29 (11th)** — **BMS register table + status moved to the Diagnostics
+  page** (user request: keep the diagnostics in one place, next to the Pi power
+  and device banners). Two surfaces:
+  - The **BMS Registers** ui_group was re-pointed from the Device Health tab to
+    the **Diagnostics** tab (order 2, **collapsed** by default — 154 rows would
+    otherwise bury the Live Parameter Data table). It keeps its own 5 s tick and
+    `snapshot()` call, so it is independent of the Modbus message rate.
+  - A compact **BMS status banner** was added to the Modbus page alongside the
+    power/devices banners: serving vs image-only, port, tier, register count,
+    heartbeat. Deliberately **O(1)** — it reads `svc.heartbeat`/`svc.map` only
+    and never calls `describeImage()`, because that gate runs on **every Modbus
+    data message** (~2/s) and walking 154 rows at that rate would be pure waste.
+    The expensive dump stays on its own tick.
+  This is the same split used for the blacklist data: cheap status in the
+  per-message gate, expensive detail on a timer.
