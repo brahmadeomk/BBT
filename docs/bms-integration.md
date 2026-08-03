@@ -163,7 +163,22 @@ against the HMI.
 | Symptom | Cause |
 |---|---|
 | **Connection Timeout** | Almost always the **wrong IP** — a host that isn't the Pi silently drops. Ping the Pi first and use *that* address. (Seen live 2026-08: the master was pointed at the laptop's own address while the Pi was a different one.) A firewall between the hosts looks identical. |
-| **Connection refused / actively refused** | Right host, **nothing listening**. Check `ss -tlnp \| grep <port>` on the Pi, and the Diagnostics banner: `serving on port N` = bound, `image only` = `jsmodbus` not installed (`npm i jsmodbus`, restart Node-RED). |
+| **Connection refused / actively refused** | Right host, **nothing listening**. On the Pi: `ss -tlnp \| grep <port>` should show `0.0.0.0:<port> LISTEN`. Also check the Diagnostics banner: `serving on port N` = bound, `image only` = `jsmodbus` not installed. |
+
+> **Checking `jsmodbus` — run it from the repo, not `~`:**
+> ```bash
+> cd /home/pi/busduct-cloud-edge && node -e "require('jsmodbus')" && echo "jsmodbus OK"
+> ```
+> From the home directory this reports `Cannot find module 'jsmodbus'` even on a
+> perfectly good install — Node resolves from the **current** directory's
+> `node_modules`, and the package lives in the repo's. Note the giveaway in the
+> error: `Require stack: /home/pi/[eval]`.
+>
+> A bound socket on the configured port is itself proof the module is present:
+> **only the jsmodbus factory can bind it.** If `ss` shows the port LISTENing,
+> `jsmodbus` is installed regardless of what a `node -e` from the wrong
+> directory says.
+
 | **Illegal data address** | Read beyond `map.extent`, or a tier you didn't expose (Tier 2 starts at 100, Tier 3 at 500 — absent at `exposure_tier: 1`). |
 | **Values look 10× too big** | Working as designed: temperature/ΔT/RoR are ×10 scaled. `615` = 61.5 °C. |
 | **−32768 / 32768** | The NO_DATA sentinel — that joint is dark (blacklisted/stale), not −3276.8 °C. |
