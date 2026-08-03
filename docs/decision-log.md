@@ -2195,3 +2195,18 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
     implements an interface I invented proves only that my code is
     self-consistent. Anything crossing a real boundary — a socket, a device, a
     power rail — needs one genuine end-to-end test before it ships. 502 tests.
+
+- **2026-08-03 (live)** — **Modbus TCP verified over a real socket on the Pi.**
+  After the factory rewrite, `tools/bms-read.js` on the panel returns the whole
+  Tier-1 block and the heartbeat advances (6 → 7, *"OK, the panel is alive"*),
+  where the previous build died with ECONNRESET. Live values on the 2-joint
+  bench panel: `system_health 0 (OK)`, `highest_alarm_level 0 (none)`,
+  `worst_joint_index -1 (none)`, `panel_max_temp 319 → 31.9 °C`,
+  `panel_max_ror 14 → 1.4 °C/hr`, `live_joint_count 2`, map extent 514 (tier 3,
+  2 joints → 500 + 2×8 = 516, last written 513). This clears **two of Slice 11's
+  three "Done when" criteria**: a plain Modbus master reads the map with no
+  custom mapping, and a frozen panel is detectable via the heartbeat (the first
+  run, taken before the refresh tick had fired, correctly reported
+  **FROZEN** — the check works in both directions). Remaining: a BMS-originated
+  ACK in the audit trail (testable now with `--ack=1`), and the reference
+  Modbus→BACnet gateway.
