@@ -19,6 +19,11 @@
 //   node tools/bms-read.js --start=500 --count=8
 //   node tools/bms-read.js --host=192.168.1.110 --port=1502 --unit=1
 //   node tools/bms-read.js --watch            # re-read every 2s (heartbeat should tick)
+//
+// Runs from ANY machine with this repo — a second Pi, an engineer's laptop —
+// even without the panel's applied config: Tier 1 and the control block sit at
+// fixed addresses, so the summary decodes standalone. Point it at the panel:
+//   node tools/bms-read.js --host=192.168.1.110 --port=1502
 //   node tools/bms-read.js --ack=1            # WRITE 1 to the ACK register (acks all active)
 
 const path = require('node:path');
@@ -50,13 +55,28 @@ async function main() {
     root,
     validators: { modbus_joints: validateModbusJoints, alarms: validateAlarms, integration: validateIntegration },
   });
-  const integrationDoc = store.readDomain('integration').doc;
-  const jointsDoc = store.readDomain('modbus_joints').doc;
+  let integrationDoc = null;
+  let jointsDoc = null;
+  try {
+    integrationDoc = store.readDomain('integration').doc;
+    jointsDoc = store.readDomain('modbus_joints').doc;
+  } catch { /* no local config store - standalone mode below */ }
 
-  if (!integrationDoc) {
-    console.error(`No cfg/integration applied at ${root} - run tools/apply-integration-config.js first.`);
-    process.exit(1);
+  // STANDALONE MODE — run from any machine (a second Pi, an engineer's laptop)
+  // that has this repo but NOT the panel's applied config.
+  //
+  // This works because Tier 1 and the control block are at FIXED addresses by
+  // the register map's append-only contract: their layout is a constant in
+  // register-map.js, not derived from any panel's config. So the summary block
+  // decodes fully without the panel. Only Tier 2/3 LABELS (which zone, which
+  // joint) come from cfg/joints, so those addresses print raw.
+  const standalone = !integrationDoc;
+  if (standalone) {
+    integrationDoc = { config_domain_versions: { integration: 1 }, point_map_version: 0, exposure_tier: 1,
+      modbus_tcp: { enabled: true, port: 1502, unit_id: 1 } };
+    jointsDoc = { joints: [], zones: [] };
   }
+
   const map = buildRegisterMap(integrationDoc, jointsDoc);
   if (map.error) {
     console.error(`Cannot build register map: ${map.error}`);
@@ -66,6 +86,13 @@ async function main() {
   const host = opts.host || '127.0.0.1';
   const port = Number(opts.port || integrationDoc.modbus_tcp.port);
   const unit = Number(opts.unit || integrationDoc.modbus_tcp.unit_id);
+
+  if (standalone) {
+    console.log(`No applied config at ${root} - STANDALONE mode.`);
+    console.log('Tier 1 + control decode from the fixed map; Tier 2/3 print raw (no joint/zone names).');
+    if (!opts.host) console.log('Tip: pass --host=<panel-ip> to read a remote panel.');
+    console.log('');
+  }
 
   let modbus, net;
   try {
@@ -81,7 +108,7 @@ async function main() {
   }
 
   const start = opts.start != null ? Number(opts.start) : 0;
-  const count = opts.count != null ? Number(opts.count) : (opts.all ? map.extent : 12);
+  const count = opts.count != null ? Number(opts.count) : (opts.all ? (standalone ? 600 : map.extent) : 12);
 
   console.log(`Reading ${host}:${port} unit ${unit} - registers ${start}..${start + count - 1} (map extent ${map.extent}, tier ${map.exposure_tier})\n`);
 
@@ -102,12 +129,19 @@ async function main() {
 
   const render = (image) => {
     const d = describeImage(map, image);
-    const rows = d.rows.filter((r) => r.addr >= start && r.addr < start + count);
+    const known = new Map(d.rows.map((r) => [r.addr, r]));
     console.log('  addr  block    point                    raw  value');
-    for (const r of rows) {
-      console.log(
-        `${String(r.addr).padStart(6)}  ${r.block.padEnd(8)} ${r.point.padEnd(20)} ${String(r.raw).padStart(7)}  ${r.value}${r.label ? `   [${r.label}]` : ''}`
-      );
+    for (let a = start; a < start + count; a++) {
+      if (!(a in image)) continue;
+      const r = known.get(a);
+      if (r) {
+        console.log(
+          `${String(r.addr).padStart(6)}  ${r.block.padEnd(8)} ${r.point.padEnd(20)} ${String(r.raw).padStart(7)}  ${r.value}${r.label ? `   [${r.label}]` : ''}`
+        );
+      } else {
+        // Outside the map we can name (standalone mode, or a reserved gap).
+        console.log(`${String(a).padStart(6)}  ${'(raw)'.padEnd(8)} ${'-'.padEnd(20)} ${String(image[a]).padStart(7)}  ${image[a]}`);
+      }
     }
   };
 

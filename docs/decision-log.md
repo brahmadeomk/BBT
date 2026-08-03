@@ -2224,3 +2224,22 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   real impact, not `sl21`/`(none mapped)`.
   **Slice 11 now has 3 of 4 acceptance criteria met**; only the reference
   Modbus→BACnet gateway remains, and it needs the hardware.
+
+- **2026-08-03** — **`tools/bms-read.js` gains a STANDALONE mode** so it runs
+  from a second Pi / an engineer's laptop, not only on the panel. As shipped it
+  exited early if `/var/busduct/cfg` held no applied config — it needed the
+  panel's own cfg to build the register map, so on any other machine it died
+  before opening the socket even though `--host` was supported.
+  The fix leans on a property the map already guarantees: **Tier 1 and the
+  control block are at FIXED addresses** (the append-only contract — their
+  layout is a constant in `register-map.js`, not derived from config), so the
+  summary block decodes with no panel config at all. Absent a config the tool
+  synthesises a tier-1 map, says so, and defaults port 1502/unit 1; Tier 2/3
+  addresses still read but print as `(raw)` rows because only their **labels**
+  (zone/joint ids) need `cfg/joints`. Copying the panel's two cfg files and
+  passing `--root=` restores full labelling.
+  Verified against a real server on the migrated 21-slave config: standalone
+  decoded all 12 Tier-1 points (`panel_max_temp 615 → 61.5 °C`,
+  `live_joint_count 20`) with the heartbeat advancing 1 → 4, and a Tier-3 read
+  printed raw standalone but fully labelled (`[J01] temp 61.5 °C`) with a config
+  copy. 502 tests pass.

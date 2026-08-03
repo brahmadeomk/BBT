@@ -162,10 +162,32 @@ fails here too, the server itself isn't up.
 (To check `pymodbus` anyway: `python3 -c "import pymodbus; print(pymodbus.__version__)"`.
 It isn't needed for any of this.)
 
-### From another host
+### From another host (a second Pi, an engineer's laptop)
 
-Use Modbus Poll / `modpoll` / `pymodbus` from another machine on the same LAN,
-or point `tools/bms-read.js` at the panel: `node tools/bms-read.js --host=<pi-ip>`.
+`tools/bms-read.js` runs from **any machine with this repo**, with or without
+the panel's applied config:
+
+```bash
+# Anywhere: Tier 1 decodes standalone (fixed addresses), no panel config needed
+node tools/bms-read.js --host=192.168.1.110 --port=1502
+
+# With a copy of the panel's config, Tier 2/3 resolve zone/joint names too
+scp pi@<panel>:/var/busduct/cfg/{integration,modbus_joints}.json ./panelcfg/
+node tools/bms-read.js --root=./panelcfg --host=192.168.1.110 --start=500 --count=8
+```
+
+**Why standalone works:** Tier 1 and the control block sit at addresses fixed by
+the append-only contract — their layout is a constant in `register-map.js`, not
+derived from any panel's config. So the summary block always decodes. Only the
+Tier 2/3 **labels** (which zone, which joint) come from `cfg/joints`; without it
+those addresses still read, just printed raw as `(raw)` rows.
+
+Requirements on that machine: this repo, Node 18+, and `npm i jsmodbus` (the
+client comes from the same package as the server). Modbus Poll / `modpoll` /
+`pymodbus` work equally well if you prefer them.
+
+The port defaults to 1502 in standalone mode — pass `--port` if the panel uses
+another.
 
 **First read — prove the socket, not a single point:**
 
