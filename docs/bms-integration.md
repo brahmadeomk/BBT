@@ -138,6 +138,42 @@ customer.
 All heavy logic is in the library; the function nodes stay thin, per the
 standing rule. `flows-integrity.test.js` guards the new `link` references.
 
+## Bench test with a Modbus master (before the gateway)
+
+Use Modbus Poll / `modpoll` / `pymodbus` from another host on the same LAN.
+
+**First read — prove the socket, not a single point:**
+
+| Setting | Value |
+|---|---|
+| Connection | Modbus TCP/IP |
+| IP address | **the Pi's address** (the same host as the `:1880/ui` dashboard) |
+| Port | as applied (`1502` unless changed) |
+| Slave/Unit ID | `1` (`modbus_tcp.unit_id`) |
+| Function | `03` Read Holding Registers |
+| Address / Quantity | `0` / `12` — the whole Tier-1 block |
+
+**Register 0 is the heartbeat and must increment every ~5 s.** That, not a
+plausible-looking value, is the proof the socket is live and the refresh tick is
+running. Register 8 is `panel_max_temp` ×10 (`615` = 61.5 °C) — cross-check it
+against the HMI.
+
+### Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| **Connection Timeout** | Almost always the **wrong IP** — a host that isn't the Pi silently drops. Ping the Pi first and use *that* address. (Seen live 2026-08: the master was pointed at the laptop's own address while the Pi was a different one.) A firewall between the hosts looks identical. |
+| **Connection refused / actively refused** | Right host, **nothing listening**. Check `ss -tlnp \| grep <port>` on the Pi, and the Diagnostics banner: `serving on port N` = bound, `image only` = `jsmodbus` not installed (`npm i jsmodbus`, restart Node-RED). |
+| **Illegal data address** | Read beyond `map.extent`, or a tier you didn't expose (Tier 2 starts at 100, Tier 3 at 500 — absent at `exposure_tier: 1`). |
+| **Values look 10× too big** | Working as designed: temperature/ΔT/RoR are ×10 scaled. `615` = 61.5 °C. |
+| **−32768 / 32768** | The NO_DATA sentinel — that joint is dark (blacklisted/stale), not −3276.8 °C. |
+| **Off-by-one addresses** | Base convention. Our addresses are raw protocol addresses: `0` = `40001` in 4x notation. Modbus Poll shows the 4xxxx equivalent next to the field — use it to confirm. |
+| **Heartbeat frozen but reads succeed** | The socket is up but the refresh tick isn't running — check the "BMS Refresh" node status on the BMS Integration tab. This is exactly the frozen-Pi case the heartbeat exists to catch. |
+
+Cross-check a few registers against the **BMS Registers** card on the
+Diagnostics dashboard page, which shows the same image decoded (address → point
+→ raw → engineering value).
+
 ## Reference-gateway validation (Done-when)
 
 Per the workplan, Slice 11 is done when:
