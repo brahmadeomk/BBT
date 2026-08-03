@@ -140,7 +140,32 @@ standing rule. `flows-integrity.test.js` guards the new `link` references.
 
 ## Bench test with a Modbus master (before the gateway)
 
-Use Modbus Poll / `modpoll` / `pymodbus` from another host on the same LAN.
+### Fastest check — from the Pi itself, no installs
+
+```bash
+cd /home/pi/busduct-cloud-edge
+node tools/bms-read.js                 # Tier 1 over a real socket, decoded
+node tools/bms-read.js --all           # every mapped register
+node tools/bms-read.js --start=500 --count=8
+node tools/bms-read.js --ack=1         # write the ACK register, then check the Audit page
+```
+
+This uses the **jsmodbus client** — already present as the server's own
+dependency, so no `pymodbus`, no `modpoll`, nothing to install. It connects over
+TCP to `127.0.0.1` and prints what a gateway would actually receive, then
+re-reads to confirm the **heartbeat advances**.
+
+Run this **before** blaming the network: if it works on the Pi but not from a
+laptop/BMS, the fault is the IP, the port or a firewall — not the panel. If it
+fails here too, the server itself isn't up.
+
+(To check `pymodbus` anyway: `python3 -c "import pymodbus; print(pymodbus.__version__)"`.
+It isn't needed for any of this.)
+
+### From another host
+
+Use Modbus Poll / `modpoll` / `pymodbus` from another machine on the same LAN,
+or point `tools/bms-read.js` at the panel: `node tools/bms-read.js --host=<pi-ip>`.
 
 **First read — prove the socket, not a single point:**
 
