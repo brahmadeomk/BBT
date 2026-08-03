@@ -46,6 +46,21 @@ class ModbusTcpSlave {
     this._server = null;
   }
 
+  /** The authoritative register array (unsigned 16-bit), for a server factory. */
+  registers() {
+    return this._regs;
+  }
+
+  /** Number of registers served (== map extent). */
+  size() {
+    return this._regs.length;
+  }
+
+  /** Push the current registers to the server, if it mirrors them (jsmodbus does). */
+  _syncServer() {
+    if (this._server && typeof this._server.sync === 'function') this._server.sync(this._regs);
+  }
+
   /** Replace the served image. `image` is the sparse signed map from buildImage. */
   setImage(image) {
     const next = new Uint16Array(this.map.extent);
@@ -58,6 +73,7 @@ class ModbusTcpSlave {
     const ackAddr = this.map.control?.ack;
     if (ackAddr != null && ackAddr < next.length) next[ackAddr] = this._regs[ackAddr];
     this._regs = next;
+    this._syncServer();
   }
 
   /** Re-point at a new register map (config re-apply changed the layout). */
@@ -66,6 +82,7 @@ class ModbusTcpSlave {
     const resized = new Uint16Array(map.extent);
     resized.set(this._regs.subarray(0, Math.min(this._regs.length, resized.length)));
     this._regs = resized;
+    this._syncServer();
   }
 
   onAck(cb) {
@@ -109,8 +126,13 @@ class ModbusTcpSlave {
       io: {
         readHoldingRegisters: (s, q) => this.readHoldingRegisters(s, q),
         writeRegister: (a, v) => this.writeRegister(a, v),
+        // A buffer-mirroring server (jsmodbus) needs the whole array + its size
+        // up front rather than a per-request callback.
+        registers: () => this._regs,
+        size: () => this._regs.length,
       },
     });
+    this._syncServer();
   }
 
   stop() {

@@ -2158,3 +2158,40 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   a listener was bound (jsmodbus present); `image only` means the registers are
   computed but nothing is listening. Next check is a `modpoll`/`pymodbus` read
   from another host, then the reference gateway (workplan §11 "Done when").
+
+- **2026-08-03** — **jsmodbus server factory was wrong; rewritten against the
+  real API and now covered by a REAL SOCKET test.** Live bench read from the Pi
+  itself (`tools/bms-read.js`) failed with **ECONNRESET** — the TCP connect
+  succeeded, then the server tore the socket down. Root cause: the factory was
+  written against an **assumed** jsmodbus API and shipped without ever opening a
+  socket. jsmodbus's `ModbusServer` serves reads **itself out of a `holding`
+  Buffer** (`ReadHoldingRegistersResponseBody.fromRequest(body, server.holding)`);
+  the per-request handlers the first version registered
+  (`client.on('readHoldingRegisters', …)`) only fire when that buffer is
+  ABSENT. So the handler never ran, the request threw inside the library, and
+  the connection was reset. Everything upstream was fine — config, map,
+  heartbeat, the earlier fake-factory tests all passed, because the fake
+  implemented the interface I had imagined rather than the one jsmodbus has.
+  - **Rewrite:** the factory now owns a `holding` Buffer sized to the map, and
+    `ModbusTcpSlave` mirrors its authoritative register array into it on every
+    `setImage`/`setMap`/`start` (new `registers()`/`size()`/`_syncServer()`).
+    Writes come back via `postWriteSingleRegister`/`postWriteMultipleRegisters`
+    and are routed into `writeRegister`, which still enforces read-only
+    addresses — and because jsmodbus has *already* mutated its buffer by then, a
+    rejected write triggers a re-sync so a gateway can't leave a stray value
+    visible until the next refresh. `netServer.on('error')` is handled so a bind
+    failure (EADDRINUSE/EACCES) can't take Node-RED down.
+  - **New `test/integration/jsmodbus-server-factory.test.js`** binds a real
+    ephemeral port and drives a real Modbus client: read round trip, signed→
+    unsigned on the wire, ACK write reaching the handler, read-only write
+    reverted, and out-of-range behaviour. It **skips** when the optional
+    dependency is absent so CI stays green without it.
+  - **Verified jsmodbus behaviour worth documenting:** it applies **no bounds
+    check on reads** — an out-of-range read returns an **empty response**, not
+    exception 0x02 (the socket survives). Recorded in
+    `docs/bms-register-map.md` so gateway integrators size their poll blocks to
+    the map instead of probing.
+  - **Lesson (the same one as the Nano firmware misdiagnosis):** a fake that
+    implements an interface I invented proves only that my code is
+    self-consistent. Anything crossing a real boundary — a socket, a device, a
+    power rail — needs one genuine end-to-end test before it ships. 502 tests.

@@ -38,6 +38,9 @@ you are safe across upgrades.
 - **No-data sentinel:** `-32768` (0x8000) on a measurement point means "no
   reading" (device blacklisted / joint dark) — distinct from a real `0.0`.
 - **Levels:** `0` = none, `1` = WATCH, `2` = WARNING, `3` = CRITICAL.
+- **Reading past the map:** a request beyond the last mapped register returns an
+  **empty/short response**, not Modbus exception 0x02. Size your gateway's poll
+  blocks to the map (see the per-panel extent) rather than probing blindly.
 
 ---
 
