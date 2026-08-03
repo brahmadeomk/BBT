@@ -2210,3 +2210,17 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   **FROZEN** — the check works in both directions). Remaining: a BMS-originated
   ACK in the audit trail (testable now with `--ack=1`), and the reference
   Modbus→BACnet gateway.
+
+- **2026-08-03 (live, ACK)** — **BMS-originated ACK verified on the Pi.** A
+  Modbus write to the ACK register (`tools/bms-read.js --ack=1`) acknowledged
+  the active alarms: the Cleared Alarm History rows show **Ack timestamps ~2 s
+  after raise** (18:55:34 raised → 18:55:36 acked → 18:56:12 cleared), i.e. the
+  write travelled Modbus → `decodeAck` → the expanded per-alarm
+  `{action:'ACK', instanceId, user:'BMS'}` → the same Alarm Manager path the
+  HMI's table uses. That is Slice 11's third "Done when" criterion.
+  Same screen also confirms the 2026-07-29 alarm-wording fix in production:
+  *"Slave 101 (AmbientT) blacklisted after 3 consecutive read failures; ambient
+  reference for joint(s) J01, J02 - ΔT unavailable"* — commissioned identity and
+  real impact, not `sl21`/`(none mapped)`.
+  **Slice 11 now has 3 of 4 acceptance criteria met**; only the reference
+  Modbus→BACnet gateway remains, and it needs the hardware.

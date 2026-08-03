@@ -611,6 +611,14 @@ computed locally, works with the internet down. Full deployment/runbook:
   migrated config with a fake server factory: 20 live joints, 658
   registers, Tier-1 `panel_max_temp` 615 (61.5 °C ×10), and the ACK
   bridge emitting correctly.
+- **Live-verified on the Pi (2026-08-03)** — Modbus TCP working end to end
+  after the jsmodbus factory rewrite (see the decision log: the first
+  factory was written against an assumed API and reset every connection).
+  `tools/bms-read.js` reads the whole Tier-1 block over a real socket
+  (`panel_max_temp 319 -> 31.9 °C`, `live_joint_count 2`), the **heartbeat
+  advances** (and correctly reported FROZEN before the tick had started),
+  and a **BMS-originated ACK lands in the alarm history** with its Ack
+  timestamp. **Three of the four §11 "Done when" criteria are met.**
 - **Not yet done**: the
   **reference-gateway live validation** (workplan §11 "Done when": a stock
   gateway reads Tier 1 as BACnet with no custom mapping; a frozen Pi is
