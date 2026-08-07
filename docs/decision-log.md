@@ -2243,3 +2243,29 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   `live_joint_count 20`) with the heartbeat advancing 1 → 4, and a Tier-3 read
   printed raw standalone but fully labelled (`[J01] temp 61.5 °C`) with a config
   copy. 502 tests pass.
+
+- **2026-08-03** — **COMM watchdog alarm could never clear (live: stuck 85 min
+  with Modbus running).** `SYSTEM|MODULE|COMM_FAILURE` raised at 15:58 and was
+  still ACTIVE at 17:23 despite healthy communication. Root cause in the
+  **trigger node** `9c6f2b1a18f8c113` (BusbarTherMo tab), which implements the
+  60 s silence watchdog: its `op2` correctly sends `{"commTimeout":true}` after
+  the timeout, but its **`op1` — what it emits when a message arrives and the
+  trigger leaves idle, i.e. when data RESUMES — was an empty string**
+  (`op1type:"str"`, `op1:""`). The Alarm Manager clears this alarm only on
+  `msg.payload.commTimeout === false`, so nothing ever told it comms were back:
+  the alarm was raise-only and stuck until a Node-RED restart. The clear branch
+  itself was correct all along and simply never fired.
+  - **Fix 1:** trigger `op1` = `{"commTimeout":false}` (`op1type:"json"`). The
+    trigger's state machine gives exactly the right semantics: idle → first
+    message sends op1 (**clear**), further messages extend the 60 s timer
+    (`extend:true`), timeout sends op2 (**raise**) and returns to idle — so the
+    next message after an outage clears the alarm. Node renamed to
+    "COMM watchdog (60s silence -> alarm, data resume -> clear)" since an
+    unnamed trigger gave no hint it was the watchdog.
+  - **Fix 2 (robustness):** the `commTimeout === false` branch did **not
+    return** — it fell through into the process-alarm evaluation with a payload
+    carrying no sensor reading. It now returns `buildOutputs` whether or not an
+    alarm was present.
+  Verified by driving the real Alarm Manager source: raise → hold → clear on
+  resume (with a cleared-alarm message emitted) → idempotent on repeat. 502
+  tests pass.
