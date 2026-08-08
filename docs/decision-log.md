@@ -2603,3 +2603,64 @@ with no second Nano that sensor is commissioned but unpolled, its joint goes
 dark and blacklists, and moving the *ambient* unit costs every joint its ΔT. The
 guards block the common form (repeated unit address) but not a genuinely unused
 address, so this is a documented human caution rather than an enforced rule.
+
+## 2026-08-08 — Multi-bus apply guards LIVE-VERIFIED on the panel (+ a config/reality mismatch found)
+
+`node tools/multibus-guard-drill.js` on the real Pi: **ALL GUARDS PASS
+(8 passed, 0 failed)**, against a read-only copy of the live
+`cfg/modbus+joints`. Every guard rejected with an intelligible message naming
+the panel's own devices, no rejection bumped the config version, and the
+per-bus resend behaved (`label-only -> []`, `bus3-only change -> ["bus3"]`).
+The guard half of the multi-bus commissioning work is done.
+
+### Finding: bus1's configured serial port does not match the live wiring
+
+The drill's header reported the live panel as:
+
+```
+Panel: 3 unit(s), 2 joint(s), buses: bus1@/dev/ttyUSB0, bus2@/dev/ttyACM1
+```
+
+Two things worth recording:
+
+1. **3 units / 2 joints is correct** for this bench panel (J01, J02 + the
+   ambient at unit 101) — it matches the live BMS read of `live_joint_count 2`
+   on 2026-08-03. The 21-slave figure quoted elsewhere is the *migrated* config
+   used for fixture-based verification, not what is applied here.
+
+2. **`bus1.port` is `/dev/ttyUSB0`, but the flow's `serial-port` config node —
+   the one the live `serial in`/`serial out` pair actually uses — is
+   `/dev/ttyACM0` @115200.** So the applied configuration describes a port the
+   panel does not use.
+
+   **Impact today: none functionally.** Nothing opens a serial device from
+   `cfg/modbus`; the path lives in the Node-RED `serial-port` config node.
+   `bus.port` is used for R8 validation (present/non-empty for an RTU bus), the
+   apply-time "two buses on one port" guard, the audit line, and the legacy
+   `port` global. All of those are satisfied by *any* non-empty string, which is
+   exactly why a wrong value has gone unnoticed.
+
+   **Impact when the second Nano arrives: real.** The whole two-segment scheme
+   keys a segment to its port — §B step 2 says "point the new serial pair at the
+   bus2 port", and the duplicate-port guard is only meaningful if the values
+   describe reality. A panel where bus1 claims `/dev/ttyUSB0` while its Nano is
+   on `/dev/ttyACM0` would let someone commission bus2 on `/dev/ttyACM0` with no
+   complaint from the guard — pointing the second Nano's pipeline at the first
+   Nano's port.
+
+   Left for the user to correct in the dashboard (edit bus1's Port to
+   `/dev/ttyACM0` and APPLY — a port-only change compiles the same Nano job, so
+   `nanoJobsEqual` reports no change and it will **not** resend or disturb
+   polling). Flagged rather than auto-fixed: only the person at the panel can
+   confirm which device node the Nano actually enumerates as.
+
+Also noted while checking: a second `serial-port` config node (`/dev/ttyUSB2`
+@115200) exists in the flow with no `serial in`/`serial out` referencing it —
+dead configuration, harmless, worth removing on the next flow tidy-up.
+
+### Still outstanding
+The dashboard half of the acceptance drill (clicking ADD BUS / duplicate port /
+DEL through the UI) — the drill exercises the handler directly and cannot tell
+whether the widget sends the right thing. The applied config already containing
+`bus2@/dev/ttyACM1` suggests ADD BUS + APPLY has been through the UI at least
+once, but that was not observed here.
