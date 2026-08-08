@@ -2350,3 +2350,36 @@ Pi re-test (git pull → restart Node-RED → re-import flow), and the second
 physical pipeline (2nd serial pair, cloned Send Nano Job with
 `BUSDUCT_BUS_ID=bus2`, bus-tagged response tap, per-bus recovery) remains the
 runbook in `docs/slice10-design-proposals.md` §B, pending a second Nano.
+
+## 2026-08-08 — Fix: Modbus Settings action buttons clipped after the Bus column landed
+
+**User report:** *"Delete button not appearing in action column of slave channel
+table. Also table's action column is partially visible on HMI page."*
+
+Both symptoms, one cause. The slave table went from 10 to 11 columns when the
+Bus dropdown was added, but it was still `table-layout:fixed; width:100%` with
+no per-column widths — so every column, Actions included, was squeezed
+proportionally. Two compounding details turned "narrow" into "invisible":
+
+1. `.mbs-table td { overflow:hidden }` (there to ellipsize long labels) also
+   clipped the button row, so DEL simply vanished rather than wrapping.
+2. `.mbs-slaves td:last-child { display:flex }` — a `display:flex` on a `<td>`
+   takes the cell **out of the table's column-sizing algorithm**, so it could
+   not claim a width of its own even once widths were specified.
+
+**Fix:** explicit `<colgroup>` widths on both tables, a `min-width` equal to
+their sum so a narrow screen scrolls the panel (`.mbs-panel` is already
+`overflow-x:auto`) instead of crushing the columns, the button row moved into a
+flex `<div>` *inside* a normal table cell, and slightly tighter button padding
+(12px→11px font, 6px→5px padding).
+
+**Verified by rendering, not by reading.** The template was extracted, its
+`ng-repeat`/`ng-if` expanded into static rows (including one mid-edit row so the
+SAVE variant is exercised), and screenshotted in headless Chromium at the
+dashboard's real widths. At 900px the reproduction showed exactly the reported
+clipping — EDIT plus a half-visible SAVE, no +CH or DEL — and the fixed version
+shows all three buttons on every row in both variants. At 720px the panel
+scrolls with columns intact. The group is 23 dashboard units (~1236px), so the
+default HMI has room to spare. Preview harness is throwaway (scratchpad); it is
+worth rebuilding for any future `ui_template` layout change, since nothing in
+the repo's test suite exercises client-side Angular markup.
