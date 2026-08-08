@@ -2664,3 +2664,14 @@ DEL through the UI) — the drill exercises the handler directly and cannot tell
 whether the widget sends the right thing. The applied config already containing
 `bus2@/dev/ttyACM1` suggests ADD BUS + APPLY has been through the UI at least
 once, but that was not observed here.
+
+**Confirmed at the panel (2026-08-08):** `ls /dev/ttyACM*` returns only
+`/dev/ttyACM0`. So there is exactly one Nano, on the port the flow's
+`serial-port` config node already uses, and `bus1.port = /dev/ttyUSB0` in the
+applied config is simply wrong — it should read `/dev/ttyACM0`. The `bus2`
+entry left in the applied config points at `/dev/ttyACM1`, which does not
+exist; harmless while it carries no sensors (its resend is addressed to `bus2`
+and the sole `Send Nano Job`, env `BUSDUCT_BUS_ID` = `bus1`, drops it), but it
+should be deleted until a second Nano is physically present, on the same
+principle as the port fix: the configuration must describe reality, because
+that is the only thing the duplicate-port guard has to work with.
