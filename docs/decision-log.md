@@ -2269,3 +2269,84 @@ port→bus mapping, bus-tagged responses). 382 tests pass.
   Verified by driving the real Alarm Manager source: raise → hold → clear on
   resume (with a cleared-alarm message emitted) → idempotent on repeat. 502
   tests pass.
+
+## 2026-08-08 — Multi-bus commissioning UI (Slice 10 §B): defining the second RS-485 segment
+
+**User report:** *"Although we have created two 485 buses but in modbus settings
+and comm settings there is no option to define other bus."* Correct — the
+schema has allowed up to 4 buses since Slice 2 and the `/src` core has been
+bus-aware since 2026-07-25, but the Modbus Settings dashboard still rendered a
+single fixed bus form. There was no path from "the code supports it" to "the
+commissioning engineer can enter it."
+
+**Wiring decision (user, this session): two Nanos, one per segment.** The
+firmware drives exactly one RS-485 port (`Serial1`), so a second segment is a
+second Nano on its own serial port with its own baud/timeout and its own
+compiled job. That is what the UI now models.
+
+### Built
+- **RS-485 Buses table** replaces the single bus form: one row per segment
+  (port/baud/parity/stop bits/timeout/retries/inter-frame), with ADD BUS and a
+  per-row DEL. Bus ids are *allocated* (`bus1`, `bus2`, …), never typed — a
+  typo'd id would orphan every slave pointing at it.
+- **Bus column on every slave channel row** (a dropdown over the defined
+  buses), carried through load → draft → apply → the applied document.
+- Handler state is now `{slaves, buses}`; `bus` (= `buses[0]`) is still echoed
+  so a pre-multi-bus client, a persisted single-bus draft, and the existing
+  tests all keep working. `normaliseBuses` folds a legacy `{bus}` into the
+  array as `bus1`.
+- **Apply guards** (friendly, before the validator): two buses may not share a
+  serial port ("each RS-485 segment needs its own Nano on its own port"); a bus
+  can't be deleted while sensors sit on it (named, up to 3); a slave may not
+  reference an undefined bus; all channels of one physical unit must be on one
+  bus.
+- **Resend is per bus.** `applyModbusSettings` returns `resendBusIds` —
+  `buses.filter(b => !nanoJobsEqual(current, newDoc, b.bus_id))` — and the
+  function node emits one `{payload:'apply', busId}` message per *changed*
+  segment. This matters because the firmware re-inits its Modbus timeout on
+  every job update: a bus2-only edit must not briefly disrupt bus1's live
+  polling. (Same reasoning as the content-aware `resendNeeded` fix from Slice 3,
+  extended along the bus axis.)
+- **`Send Nano Job` is segment-scoped**: it reads `env BUSDUCT_BUS_ID`
+  (default `bus1`), ignores a resend addressed to another segment, and passes
+  its own id to `buildNanoJobMessage`. Cloning the node for bus2 is now an env
+  var, not a code edit.
+
+### The one deliberately-strict rule: unit addresses unique panel-wide
+Modbus only requires a unit address to be unique *within a bus*, and
+`compileNanoJob`/`unitToSlaveId` are already per-bus. The dashboard is
+nonetheless stricter: **the same unit address may not appear on two buses**,
+rejected by name at apply.
+
+Reason: the surviving legacy decode pipeline (~40 function nodes on
+`modbusMaster_V2`, plus the alert/SMS nodes) stores every reading in
+`sensorData[<unit_address>][…]`, keyed by the address alone with no notion of a
+segment. Two segments both using unit 5 would silently overwrite each other —
+the worst possible failure mode, a plausible wrong number rather than an error.
+Making that pipeline bus-aware is a large, risky change to the live data path
+for no operational gain: 247 addresses across ~110 devices means the constraint
+costs nothing. Recorded here so a future reader doesn't "fix" the rule as
+over-restrictive without also fixing the decode side.
+
+The same reasoning sets the **legacy bridge scope**: `comm` globals and
+`paraRaw` (the legacy read-job builder's input, used by the serial-silence
+recovery path) now cover **bus1 only** — asking bus1's Nano for an address that
+lives on the other segment would just time out — while `SlaveIDList` /
+`parameterName{i}` keep every channel on every bus, because the decode side has
+to handle a response from either Nano. That asymmetry is only safe *because*
+addresses are unique panel-wide.
+
+### Also fixed
+`buildNanoJobMessage(store, {busId})` now treats `busId` as a **preference on a
+single-bus panel**: with exactly one bus there is exactly one Nano, so the sole
+bus compiles even if the applied document names it something other than the
+`bus1` the flow carries by default. Otherwise renaming the only bus would have
+silently stopped the panel polling — a config edit with no error and no data.
+
+### Status
+13 new unit tests (36 in the Modbus Settings suite, 515 repo-wide, all green)
+plus `flows-integrity`. **Not yet live** — the dashboard change needs the usual
+Pi re-test (git pull → restart Node-RED → re-import flow), and the second
+physical pipeline (2nd serial pair, cloned Send Nano Job with
+`BUSDUCT_BUS_ID=bus2`, bus-tagged response tap, per-bus recovery) remains the
+runbook in `docs/slice10-design-proposals.md` §B, pending a second Nano.

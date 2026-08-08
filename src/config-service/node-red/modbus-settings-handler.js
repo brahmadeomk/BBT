@@ -35,8 +35,15 @@ const { DEFAULTS } = require('../validate-modbus-joints');
  * draft bookkeeping on an intentionally-incomplete in-progress table;
  * only 'apply' builds a full cfg/modbus+joints document and pushes it
  * through the real validator + ConfigStore (R1-R15). The client sends
- * its current {slaves, bus} state on every action (lesson from the
+ * its current {slaves, buses} state on every action (lesson from the
  * JointMasterUI data-loss bug).
+ *
+ * TWO-SEGMENT RS-485 (Slice 10 §B): the state carries a `buses` ARRAY, one
+ * entry per RS-485 segment, because the Nano firmware drives exactly one
+ * RS-485 port - a second segment means a second Nano on its own serial port,
+ * with its own baud/timeout and its own compiled job. Each slave row names the
+ * bus it lives on. `bus` (= buses[0]) is still echoed for older clients and
+ * single-bus panels, and a persisted single-bus draft still loads.
  *
  * On a successful apply this also derives the legacy global-context
  * values (SlaveIDList, slaveLength, parameterName{i}/parameterID{i}/
@@ -46,13 +53,14 @@ const { DEFAULTS } = require('../validate-modbus-joints');
  * per-parameter table produced, with paraRaw grouped per unit address
  * (min addr, span) the same way the legacy SetVal grouped it.
  *
- * @param {object} msg - Node-RED msg; msg.payload = {action?, index?, slaves?, bus?}
+ * @param {object} msg - Node-RED msg; msg.payload = {action?, index?, slaves?, buses?, bus?}
  * @param {object} deps
  * @param {import('../store').ConfigStore} deps.store
- * @param {{slaves: Array, bus: object}|null} [deps.draft] - persisted draft (global 'modbus_settings_draft')
+ * @param {{slaves: Array, buses?: Array, bus?: object}|null} [deps.draft] - persisted draft (global 'modbus_settings_draft')
  * @param {Array} [deps.legacySlaveList] - current global SlaveIDList, for parameterID carry-over and label recovery
  * @param {string} [deps.user]
- * @returns {{msg: object|null, draft: {slaves: Array, bus: object}|null, resendNeeded?: boolean, legacy?: object, audit?: object|null}}
+ * @returns {{msg: object|null, draft: {slaves: Array, buses: Array}|null, resendNeeded?: boolean,
+ *   resendBusIds?: string[], legacy?: object, audit?: object|null}}
  */
 function handleModbusSettingsMessage(msg, deps) {
   const { store, draft = null, legacySlaveList = [], user = 'UI' } = deps;
@@ -66,11 +74,43 @@ function handleModbusSettingsMessage(msg, deps) {
   }
 
   const slaves = [...state.slaves];
-  const bus = { ...state.bus };
+  const buses = normaliseBuses(state);
 
   if (action === 'add') {
     slaves.push(EMPTY_ROW());
   }
+
+  if (action === 'add_bus') {
+    if (buses.length >= MAX_BUSES) {
+      return { msg: withPayload(msg, { slaves, buses, bus: buses[0], error: `At most ${MAX_BUSES} RS-485 segments (one Nano each)`, action }), draft: null };
+    }
+    const usedIds = new Set(buses.map((b) => b.bus_id));
+    let n = 1;
+    while (usedIds.has(`bus${n}`)) n++;
+    // /dev/ttyACM0 is the first Nano's port on this panel, so the second Nano
+    // typically enumerates as ACM1 - a starting point the operator can correct.
+    buses.push(DEFAULT_BUS(`bus${n}`, `/dev/ttyACM${buses.length}`));
+  }
+
+  if (action === 'delete_bus' && buses[index]) {
+    if (buses.length === 1) {
+      return { msg: withPayload(msg, { slaves, buses, bus: buses[0], error: 'The panel needs at least one RS-485 bus', action }), draft: null };
+    }
+    const doomed = buses[index].bus_id;
+    const users = slaves.filter((s) => (s.bus_id || 'bus1') === doomed);
+    if (users.length > 0) {
+      return {
+        msg: withPayload(msg, {
+          slaves, buses, bus: buses[0], action,
+          error: `Bus ${doomed} still carries ${users.length} sensor(s) (${users.slice(0, 3).map((s) => s.label || `unit ${s.unit_address}`).join(', ')}${users.length > 3 ? ', ...' : ''}) - move or delete them first`,
+        }),
+        draft: null,
+      };
+    }
+    buses.splice(index, 1);
+  }
+
+  const bus = buses[0]; // legacy alias for clients/messages that still carry one bus
 
   if (action === 'add_channel' && slaves[index]) {
     // convenience: pre-fill a new channel row for the same physical unit
@@ -78,6 +118,7 @@ function handleModbusSettingsMessage(msg, deps) {
     slaves.splice(index + 1, 0, {
       ...EMPTY_ROW(),
       slave_id: src.slave_id,
+      bus_id: src.bus_id || 'bus1',
       unit_address: src.unit_address,
       channel: Number(src.channel) + 1 || '',
       model: src.model,
@@ -95,13 +136,13 @@ function handleModbusSettingsMessage(msg, deps) {
     const row = { ...slaves[index] };
     const problem = rowError(row);
     if (problem) {
-      return { msg: withPayload(msg, { slaves, bus, error: problem, action: 'save' }), draft: null };
+      return { msg: withPayload(msg, { slaves, buses, bus, error: problem, action: 'save' }), draft: null };
     }
     row.editing = false;
     slaves[index] = row;
     return {
-      msg: withPayload(msg, { slaves, bus, success: 'Saved', action: 'save' }),
-      draft: { slaves, bus },
+      msg: withPayload(msg, { slaves, buses, bus, success: 'Saved', action: 'save' }),
+      draft: { slaves, buses },
       audit: {
         timestamp: new Date().toISOString(),
         user: msg.payload?.user || 'UI',
@@ -120,10 +161,12 @@ function handleModbusSettingsMessage(msg, deps) {
     return { msg: null, draft: null }; // safe refresh: don't clobber an in-progress edit
   }
 
-  const mutatingActions = new Set(['add', 'add_channel', 'edit', 'delete']);
+  const mutatingActions = new Set(['add', 'add_channel', 'edit', 'delete', 'add_bus', 'delete_bus']);
   return {
-    msg: withPayload(msg, { slaves, bus }),
-    draft: mutatingActions.has(action) ? { slaves, bus } : null,
+    // `bus` (= buses[0]) is echoed alongside `buses` so a client or a test that
+    // predates multi-bus still finds the field it reads.
+    msg: withPayload(msg, { slaves, buses, bus }),
+    draft: mutatingActions.has(action) ? { slaves, buses } : null,
   };
 }
 
@@ -140,7 +183,25 @@ const EMPTY_ROW = () => ({
   editing: true,
 });
 
-const DEFAULT_BUS = () => ({ port: '/dev/ttyUSB0', baud: 9600, parity: 'N', stop_bits: 1, timeout_ms: 1000, retries: 2, inter_frame_ms: 10 });
+/** One Nano per segment; the panel's Pi has no realistic use for more. */
+const MAX_BUSES = 4;
+
+const DEFAULT_BUS = (bus_id = 'bus1', port = '/dev/ttyUSB0') =>
+  ({ bus_id, port, baud: 9600, parity: 'N', stop_bits: 1, timeout_ms: 1000, retries: 2, inter_frame_ms: 10 });
+const DEFAULT_BUSES = () => [DEFAULT_BUS()];
+
+/**
+ * Two-segment RS-485 (Slice 10 §B): the firmware has ONE RS-485 port, so each
+ * bus is a separate Nano on its own serial port. The state carries a `buses`
+ * ARRAY; `bus` remains as an alias for buses[0] so an older client payload (or
+ * a persisted single-bus draft) still loads.
+ */
+function normaliseBuses(state) {
+  const buses = Array.isArray(state.buses) && state.buses.length
+    ? state.buses
+    : (state.bus ? [{ bus_id: 'bus1', ...state.bus }] : DEFAULT_BUSES());
+  return buses.map((b, i) => ({ ...b, bus_id: b.bus_id || `bus${i + 1}` }));
+}
 
 /** Preserves the incoming msg's other properties (topic, req/res, socketid, _msgid, ...) - only payload changes. */
 function withPayload(msg, payload) {
@@ -152,11 +213,11 @@ function withPayload(msg, payload) {
  * draft; else rows rebuilt from the applied cfg/modbus document.
  */
 function currentState(msg, draft, store, legacySlaveList) {
-  if (Array.isArray(msg.payload?.slaves) && msg.payload?.bus) {
-    return { slaves: msg.payload.slaves, bus: msg.payload.bus };
+  if (Array.isArray(msg.payload?.slaves) && (msg.payload?.buses || msg.payload?.bus)) {
+    return { slaves: msg.payload.slaves, buses: normaliseBuses(msg.payload) };
   }
-  if (draft && Array.isArray(draft.slaves) && draft.bus) {
-    return draft;
+  if (draft && Array.isArray(draft.slaves) && (draft.buses || draft.bus)) {
+    return { slaves: draft.slaves, buses: normaliseBuses(draft) };
   }
   return stateFromApplied(store, legacySlaveList);
 }
@@ -164,7 +225,7 @@ function currentState(msg, draft, store, legacySlaveList) {
 /** Explodes each schema slave into one row per channel. */
 function stateFromApplied(store, legacySlaveList) {
   const { doc } = store.readDomain('modbus_joints');
-  if (!doc) return { slaves: [], bus: DEFAULT_BUS() };
+  if (!doc) return { slaves: [], buses: DEFAULT_BUSES() };
 
   const legacyNameByAddress = new Map((legacySlaveList || []).map((ls) => [Number(ls.slaveID), ls.parameterName]));
   const slaves = [];
@@ -174,6 +235,7 @@ function stateFromApplied(store, legacySlaveList) {
     for (let k = 0; k < channels; k++) {
       slaves.push({
         slave_id: s.slave_id,
+        bus_id: s.bus_id || 'bus1',
         label:
           s.registers.channel_labels?.[k] ??
           (channels === 1
@@ -191,8 +253,8 @@ function stateFromApplied(store, legacySlaveList) {
     }
   }
 
-  const b = doc.modbus.buses[0];
-  const bus = {
+  const buses = doc.modbus.buses.map((b, i) => ({
+    bus_id: b.bus_id || `bus${i + 1}`,
     port: b.port,
     baud: b.baud,
     parity: b.parity ?? 'N',
@@ -200,8 +262,8 @@ function stateFromApplied(store, legacySlaveList) {
     timeout_ms: b.timeout_ms ?? 500,
     retries: b.retries ?? 2,
     inter_frame_ms: b.inter_frame_ms ?? 20,
-  };
-  return { slaves, bus };
+  }));
+  return { slaves, buses };
 }
 
 /** Friendly single-row validation, mirroring the schema's bounds (the real validator still runs at apply). */
@@ -239,6 +301,10 @@ function busError(bus) {
 /**
  * Groups per-channel rows by unit address into schema slave entries.
  * Returns { slaves } or { error } with a friendly message.
+ *
+ * Unit address alone is the grouping key (not bus+address): the apply path
+ * already rejects the same address appearing on two buses, so an address
+ * identifies exactly one physical unit panel-wide.
  */
 function groupRowsIntoSlaves(rows) {
   const byAddress = new Map();
@@ -277,6 +343,11 @@ function groupRowsIntoSlaves(rows) {
       if (Number(r.temp_scale) !== Number(first.temp_scale)) {
         return { error: `Unit ${ua}: scale must match across its channels` };
       }
+      // One physical unit sits on one RS-485 segment - its channels can't
+      // straddle two Nanos.
+      if ((r.bus_id || 'bus1') !== (first.bus_id || 'bus1')) {
+        return { error: `Unit ${ua}: all its channels must be on the same bus ('${first.bus_id || 'bus1'}' vs '${r.bus_id || 'bus1'}')` };
+      }
     }
 
     // base addresses unique and non-overlapping within the unit
@@ -296,6 +367,7 @@ function groupRowsIntoSlaves(rows) {
     const carriedId = inChannelOrder.map((r) => r.slave_id).find((id) => /^sl[0-9]{2,3}$/.test(id)) || '';
     groups.push({
       unit_address: ua,
+      bus_id: first.bus_id || 'bus1',
       slave_id: carriedId,
       rows: inChannelOrder,
       channels: inChannelOrder.length,
@@ -314,13 +386,48 @@ function groupRowsIntoSlaves(rows) {
 
 function applyModbusSettings(msg, state, store, legacySlaveList, user) {
   const rows = state.slaves;
-  const bus = state.bus;
-  const fail = (error) => ({ msg: withPayload(msg, { slaves: rows, bus, error, action: 'apply' }), draft: null });
+  const buses = normaliseBuses(state);
+  const bus = buses[0];
+  const fail = (error) => ({ msg: withPayload(msg, { slaves: rows, buses, bus, error, action: 'apply' }), draft: null });
 
   if (rows.length === 0) return fail('At least one slave is required');
 
-  const busProblem = busError(bus);
-  if (busProblem) return fail(busProblem);
+  // Each bus is its own Nano on its own serial port - validate every one, and
+  // reject duplicate ids/ports that would silently collapse two segments.
+  const seenBusIds = new Set();
+  const seenPorts = new Set();
+  for (const bcfg of buses) {
+    const bp = busError(bcfg);
+    if (bp) return fail(`Bus ${bcfg.bus_id}: ${bp}`);
+    if (seenBusIds.has(bcfg.bus_id)) return fail(`Duplicate bus id '${bcfg.bus_id}'`);
+    seenBusIds.add(bcfg.bus_id);
+    const pt = String(bcfg.port).trim();
+    if (seenPorts.has(pt)) return fail(`Two buses share the serial port '${pt}' - each RS-485 segment needs its own Nano on its own port`);
+    seenPorts.add(pt);
+  }
+
+  // Every slave row must name a bus that exists.
+  for (const r of rows) {
+    const bid = r.bus_id || 'bus1';
+    if (!seenBusIds.has(bid)) return fail(`Sensor '${r.label}' is assigned to bus '${bid}', which is not defined`);
+  }
+
+  // Unit addresses must be unique across ALL buses on this panel, not just
+  // within one. The legacy decode pipeline stores readings in
+  // sensorData[<unit_address>][...] - keyed by address alone - so the same
+  // address on two segments would silently overwrite itself. With 247
+  // addresses available this costs nothing; making ~40 legacy decode nodes
+  // bus-aware would be a large change to the live data path.
+  const addrOwner = new Map();
+  for (const r of rows) {
+    const ua = Number(r.unit_address);
+    const bid = r.bus_id || 'bus1';
+    const prev = addrOwner.get(ua);
+    if (prev && prev.bid !== bid) {
+      return fail(`Unit address ${ua} is used on both ${prev.bid} and ${bid} - addresses must be unique across buses on this panel`);
+    }
+    addrOwner.set(ua, { bid, label: r.label });
+  }
 
   for (const row of rows) {
     const problem = rowError(row);
@@ -362,7 +469,7 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
     const singleChannel = g.channels === 1;
     newSlaves.push({
       slave_id: slaveId,
-      bus_id: 'bus1',
+      bus_id: g.bus_id,
       unit_address: g.unit_address,
       model: g.model,
       // single-channel slaves keep the plain shape the migration produced;
@@ -413,19 +520,17 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
       joints: current.config_domain_versions.joints + 1, // R11: one atomic document, both bump
     },
     modbus: {
-      buses: [
-        {
-          bus_id: 'bus1',
-          type: 'rtu',
-          port: String(bus.port).trim(),
-          baud: Number(bus.baud),
-          parity: bus.parity,
-          stop_bits: Number(bus.stop_bits),
-          timeout_ms: Number(bus.timeout_ms),
-          retries: Number(bus.retries),
-          inter_frame_ms: Number(bus.inter_frame_ms),
-        },
-      ],
+      buses: buses.map((bcfg) => ({
+        bus_id: bcfg.bus_id,
+        type: 'rtu',
+        port: String(bcfg.port).trim(),
+        baud: Number(bcfg.baud),
+        parity: bcfg.parity,
+        stop_bits: Number(bcfg.stop_bits),
+        timeout_ms: Number(bcfg.timeout_ms),
+        retries: Number(bcfg.retries),
+        inter_frame_ms: Number(bcfg.inter_frame_ms),
+      })),
       slaves: newSlaves,
       ...(current.modbus.ambient_sensor ? { ambient_sensor: current.modbus.ambient_sensor } : {}),
     },
@@ -449,20 +554,32 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
 
   const idByAddress = new Map(groups.map((g) => [g.unit_address, g.slave_id]));
   const savedRows = rows.map((r) => ({ ...r, slave_id: idByAddress.get(Number(r.unit_address)), editing: false }));
+
+  // Resend is per-bus: each RS-485 segment is its own Nano with its own job, so
+  // editing a slave on bus2 must not glitch bus1's live polling (the firmware
+  // re-inits its Modbus timeout on every job update). A bus that is new in this
+  // document compiles to an error against `current`, so nanoJobsEqual returns
+  // false and it is (correctly) sent.
+  const resendBusIds = buses.map((b) => b.bus_id).filter((id) => !nanoJobsEqual(current, newDoc, id));
+
   // Non-blocking warnings (e.g. R16 bus loading > 80%) - append to the success
   // toast so the operator sees them without the apply being rejected.
   const warnText = (result.warnings || []).map((w) => `${w.rule}: ${w.message}`).join('; ');
   const successMsg = warnText ? `Modbus configuration applied. ⚠ ${warnText}` : 'Modbus configuration applied';
   return {
-    msg: withPayload(msg, { slaves: savedRows, bus, success: successMsg, warnings: result.warnings || [], action: 'apply' }),
-    draft: { slaves: savedRows, bus },
-    resendNeeded: !nanoJobsEqual(current, newDoc),
+    msg: withPayload(msg, { slaves: savedRows, buses, bus, success: successMsg, warnings: result.warnings || [], action: 'apply' }),
+    draft: { slaves: savedRows, buses },
+    resendNeeded: resendBusIds.length > 0,
+    resendBusIds,
     legacy: deriveLegacyBridge(newDoc, legacySlaveList),
     audit: {
       timestamp: new Date().toISOString(),
       user,
       action: 'APPLY_CONFIG',
-      details: `Modbus settings applied: ${newSlaves.length} unit(s) / ${rows.length} channel(s), ${bus.baud} baud (modbus v${newDoc.config_domain_versions.modbus})`,
+      details:
+        `Modbus settings applied: ${newSlaves.length} unit(s) / ${rows.length} channel(s) on ` +
+        `${buses.length} bus(es) [${buses.map((b) => `${b.bus_id} ${b.port} @${b.baud}`).join(', ')}] ` +
+        `(modbus v${newDoc.config_domain_versions.modbus})`,
     },
   };
 }
@@ -475,6 +592,21 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
  * legacy SetVal computed. parameterID carry-over matches by
  * (unit address, register address) first, then unit address, then the
  * panel's most common existing type.
+ *
+ * TWO-BUS PANELS: the legacy pipeline predates multi-bus and has no concept of
+ * a segment, so it is bridged for the FIRST bus only:
+ *  - `comm` (port/baud/parity/... globals) describes bus1 - the only serial
+ *    port the legacy job builders write to.
+ *  - `paraRaw` (the legacy read-job builder's input, used by the serial-silence
+ *    watchdog recovery path) lists ONLY bus1's slaves. Including bus2's would
+ *    make a recovery job ask bus1's Nano for addresses that live on the other
+ *    segment, and every one of them would time out.
+ *  - `SlaveIDList`/`indexed` keep EVERY channel on every bus: they drive the
+ *    decode side, which stores readings in sensorData[<unit_address>] and must
+ *    be able to decode a response from either Nano. This is exactly why the
+ *    apply path forces unit addresses to be unique panel-wide.
+ * The schema-backed `Send Nano Job` path is per-bus and is the authoritative
+ * one; see docs/slice10-design-proposals.md §B for the second pipeline's wiring.
  */
 function deriveLegacyBridge(newDoc, legacySlaveList) {
   const list = legacySlaveList || [];
@@ -482,6 +614,7 @@ function deriveLegacyBridge(newDoc, legacySlaveList) {
   const idByAddress = new Map(list.map((ls) => [Number(ls.slaveID), ls.id]));
   const defaultTypeId = mostCommon(list.map((ls) => ls.id)) ?? '6';
 
+  const bus = newDoc.modbus.buses[0];
   const slaveIdList = [];
   const paraRaw = [];
   for (const s of newDoc.modbus.slaves) {
@@ -498,10 +631,11 @@ function deriveLegacyBridge(newDoc, legacySlaveList) {
         enabled: true,
       });
     }
-    paraRaw.push([s.unit_address, Math.min(...addrs), Math.max(...addrs) - Math.min(...addrs) + wordCount]);
+    if ((s.bus_id || 'bus1') === bus.bus_id) {
+      paraRaw.push([s.unit_address, Math.min(...addrs), Math.max(...addrs) - Math.min(...addrs) + wordCount]);
+    }
   }
 
-  const bus = newDoc.modbus.buses[0];
   return {
     SlaveIDList: slaveIdList,
     slaveLength: slaveIdList.length,

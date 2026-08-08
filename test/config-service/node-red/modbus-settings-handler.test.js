@@ -448,3 +448,178 @@ describe('handleModbusSettingsMessage - legacy bridge', () => {
     assert.ok(!written.has('paraRaw')); // flow-scoped on another tab - delivered via link, not global
   });
 });
+
+/**
+ * Two-segment RS-485 (Slice 10 §B). The Nano firmware drives exactly one
+ * RS-485 port, so a second segment is a second Nano on its own serial port -
+ * the settings table therefore carries a `buses` ARRAY, each slave row names
+ * its bus, and a resend is decided per bus so editing segment 2 can't glitch
+ * segment 1's live polling.
+ */
+describe('handleModbusSettingsMessage - two RS-485 segments', () => {
+  const BUS2 = { bus_id: 'bus2', port: '/dev/ttyACM1', baud: 9600, parity: 'N', stop_bits: 1, timeout_ms: 1000, retries: 2, inter_frame_ms: 10 };
+
+  test('load echoes buses as an array (and bus as buses[0] for older clients)', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const { buses, bus, slaves } = loadState(store);
+    assert.equal(buses.length, 1);
+    assert.equal(buses[0].bus_id, 'bus1');
+    assert.deepEqual(bus, buses[0]);
+    assert.ok(slaves.every((s) => s.bus_id === 'bus1'), 'every row names its bus');
+  });
+
+  test('a single-bus draft saved before multi-bus still loads', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const legacyDraft = { slaves: loadState(store).slaves, bus: { port: '/dev/ttyUSB9', baud: 19200, parity: 'N', stop_bits: 1, timeout_ms: 1000, retries: 2, inter_frame_ms: 10 } };
+    const result = handleModbusSettingsMessage({ payload: {} }, { store, draft: legacyDraft, legacySlaveList: legacySlaveList() });
+    assert.equal(result.msg.payload.buses.length, 1);
+    assert.equal(result.msg.payload.buses[0].bus_id, 'bus1', 'the unnamed legacy bus becomes bus1');
+    assert.equal(result.msg.payload.buses[0].port, '/dev/ttyUSB9');
+  });
+
+  test('add_bus appends a second segment; delete_bus removes an empty one', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const state = loadState(store);
+    const added = handleModbusSettingsMessage(
+      { payload: { action: 'add_bus', slaves: state.slaves, buses: state.buses } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.deepEqual(added.msg.payload.buses.map((b) => b.bus_id), ['bus1', 'bus2']);
+    assert.equal(added.draft.buses.length, 2, 'persisted so a refresh does not lose it');
+
+    const removed = handleModbusSettingsMessage(
+      { payload: { action: 'delete_bus', index: 1, slaves: state.slaves, buses: added.msg.payload.buses } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.deepEqual(removed.msg.payload.buses.map((b) => b.bus_id), ['bus1']);
+  });
+
+  test('delete_bus refuses while sensors still sit on it, naming them', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const state = loadState(store);
+    const buses = [state.buses[0], { ...BUS2 }];
+    const slaves = state.slaves.map((s, i) => (i === 0 ? { ...s, bus_id: 'bus2' } : s));
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'delete_bus', index: 1, slaves, buses } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.match(result.msg.payload.error, /bus2 still carries 1 sensor\(s\) \(Sensor1\)/);
+    assert.equal(result.draft, null);
+  });
+
+  test('delete_bus refuses to remove the last bus', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const state = loadState(store);
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'delete_bus', index: 0, slaves: [], buses: state.buses } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.match(result.msg.payload.error, /at least one RS-485 bus/);
+  });
+
+  test('applies a two-bus document and compiles one Nano job per segment', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const state = loadState(store);
+    const buses = [state.buses[0], { ...BUS2, baud: 19200 }];
+    // move the ambient unit (101) onto segment 2
+    const slaves = state.slaves.map((s) => (s.unit_address === 101 ? { ...s, bus_id: 'bus2' } : s));
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'apply', slaves, buses } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.equal(result.msg.payload.success, 'Modbus configuration applied');
+
+    const { doc } = store.readDomain('modbus_joints');
+    assert.deepEqual(doc.modbus.buses.map((b) => [b.bus_id, b.port, b.baud]), [['bus1', '/dev/ttyUSB0', 9600], ['bus2', '/dev/ttyACM1', 19200]]);
+    assert.deepEqual(doc.modbus.slaves.map((s) => [s.unit_address, s.bus_id]), [[1, 'bus1'], [2, 'bus1'], [101, 'bus2']]);
+
+    const { compileNanoJob } = require('../../../src/config-service/nano-compiler');
+    const j1 = compileNanoJob(doc, { busId: 'bus1' });
+    const j2 = compileNanoJob(doc, { busId: 'bus2' });
+    assert.deepEqual(j1.job.read, [2, [1, 3, 1], [2, 3, 1]], 'segment 1 polls only its own slaves');
+    assert.deepEqual(j2.job.read, [1, [101, 3, 1]]);
+    assert.equal(j2.job.comm[1], 19200, "each segment carries its own bus's comm");
+  });
+
+  test('resend is decided per bus - a bus2-only edit does not resend bus1', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    // start from a committed two-bus panel
+    const state0 = loadState(store);
+    const buses0 = [state0.buses[0], { ...BUS2 }];
+    const slaves0 = state0.slaves.map((s) => (s.unit_address === 101 ? { ...s, bus_id: 'bus2' } : s));
+    assert.ok(handleModbusSettingsMessage({ payload: { action: 'apply', slaves: slaves0, buses: buses0 } }, { store, legacySlaveList: legacySlaveList() }).msg.payload.success);
+
+    const state = loadState(store);
+    const buses = state.buses.map((b) => (b.bus_id === 'bus2' ? { ...b, timeout_ms: 1500 } : b));
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'apply', slaves: state.slaves, buses } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.equal(result.msg.payload.success, 'Modbus configuration applied');
+    assert.deepEqual(result.resendBusIds, ['bus2'], 'only the changed segment is resent');
+    assert.equal(result.resendNeeded, true);
+  });
+
+  test('rejects two buses sharing one serial port', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const state = loadState(store);
+    const buses = [state.buses[0], { ...BUS2, port: '/dev/ttyUSB0' }];
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'apply', slaves: state.slaves, buses } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.match(result.msg.payload.error, /share the serial port '\/dev\/ttyUSB0'/);
+  });
+
+  test('rejects the same unit address on two different buses', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const state = loadState(store);
+    const buses = [state.buses[0], { ...BUS2 }];
+    const slaves = [...state.slaves, { slave_id: '', label: 'Clash', bus_id: 'bus2', unit_address: 1, channel: 1, base_addr: 3, model: 'M', temp_word_count: 1, temp_scale: 0.1, poll_interval_s: 30, editing: false }];
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'apply', slaves, buses } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.match(result.msg.payload.error, /Unit address 1 is used on both bus1 and bus2/);
+  });
+
+  test('rejects a slave assigned to a bus that is not defined', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const state = loadState(store);
+    const slaves = state.slaves.map((s, i) => (i === 0 ? { ...s, bus_id: 'bus2' } : s));
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'apply', slaves, buses: state.buses } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.match(result.msg.payload.error, /assigned to bus 'bus2', which is not defined/);
+  });
+
+  test('the legacy bridge covers bus1 only - paraRaw excludes the other segment', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const state = loadState(store);
+    const buses = [state.buses[0], { ...BUS2, baud: 19200 }];
+    const slaves = state.slaves.map((s) => (s.unit_address === 101 ? { ...s, bus_id: 'bus2' } : s));
+    const { legacy } = handleModbusSettingsMessage(
+      { payload: { action: 'apply', slaves, buses } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    // the legacy read-job builder writes to bus1's serial port only: asking that
+    // Nano for a unit that lives on the other segment would just time out
+    assert.deepEqual(legacy.paraRaw, [[1, 3, 1], [2, 3, 1]]);
+    assert.equal(legacy.comm.baudRate, 9600, "comm describes bus1, the legacy path's port");
+    // ...but the decode side must still be able to decode either Nano's response
+    assert.equal(legacy.slaveLength, 3);
+    assert.deepEqual(legacy.SlaveIDList.map((ls) => ls.slaveID), [1, 2, 101]);
+  });
+});

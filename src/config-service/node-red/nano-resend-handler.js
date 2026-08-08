@@ -16,7 +16,11 @@ const { compileNanoJob } = require('../nano-compiler');
  *   the comm block is unchanged so the firmware's comm-change guard skips
  *   the bus re-init on a blacklist/probe resend.
  * @param {string} [opts.busId] - which RS-485 segment's Nano to build the job
- *   for (Slice 10 two-segment; omit for the single-bus panel).
+ *   for (Slice 10 two-segment). On a single-bus panel this is treated as a
+ *   preference, not a filter: there is exactly one Nano, so the sole bus is
+ *   compiled even if the applied document names it something other than the
+ *   'bus1' the flow carries by default - a bus rename must not silently stop
+ *   the panel polling.
  * @returns {{job: {read: Array, comm: number[]}}|{error: string}}
  */
 function buildNanoJobMessage(store, { excludeSlaveIds = [], busId } = {}) {
@@ -24,7 +28,9 @@ function buildNanoJobMessage(store, { excludeSlaveIds = [], busId } = {}) {
   if (!doc) {
     return { error: 'no cfg/modbus+joints has been applied yet - nothing to send to the Nano' };
   }
-  return compileNanoJob(doc, { excludeSlaveIds, busId });
+  const buses = doc.modbus?.buses || [];
+  const effective = busId != null && buses.length === 1 ? buses[0].bus_id : busId;
+  return compileNanoJob(doc, { excludeSlaveIds, busId: effective });
 }
 
 module.exports = { buildNanoJobMessage };

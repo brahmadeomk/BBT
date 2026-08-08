@@ -247,13 +247,14 @@ The replacement, on the **Joint Config** dashboard tab (`ui_group`
 "Modbus Settings", nodes `7f3a1c9e2b5d4a01`–`08`):
 
 - **`ModbusSettingsUI`** (`ui_template`, same client-side rules as the
-  joint/zone tables: sends its full `{slaves, bus}` state on *every*
+  joint/zone tables: sends its full `{slaves, buses}` state on *every*
   action — the data-loss-bug lesson) → **`ModbusSettingsBackEndNode`**
   (thin wrapper, 3 outputs) →
   `src/config-service/node-red/modbus-settings-handler.js`.
-- Bus form (single RTU bus — the firmware has one RS-485 port and
-  `compileNanoJob` enforces it) + a slaves table with **one row per
-  channel** (user requirement 2026-07-14: one slave unit can carry
+- **RS-485 Buses table** (one row per segment; each segment is its own
+  Nano on its own serial port — see the Slice 10 multi-bus entry below,
+  2026-08-08. Was a single fixed bus form until then) + a slaves table
+  with **one row per channel** (user requirement 2026-07-14: one slave unit can carry
   several temperature channels, so the unit address may repeat across
   rows; each channel has its own base address). At apply, rows are
   grouped by unit address into one schema slave: `channels` = row
@@ -554,6 +555,27 @@ a second physical Nano — both dormant on the current panel. Built:
   pipeline (2nd serial pair, per-bus Send Nano Job, bus-tagged response
   tap, per-bus recovery) is a **documented runbook** (§B) pending a
   physical second Nano to wire/test.
+- **Commissioning UI for the second bus (2026-08-08)** — the schema
+  allowed two buses but there was no way to *enter* one (user report).
+  The Modbus Settings dashboard now has an **RS-485 Buses table**
+  (ADD BUS / DEL, one row per segment with its own port/baud/parity/
+  timeout/retries/inter-frame) and a **Bus column on every slave channel
+  row**. Apply guards: no two buses on one serial port ("each RS-485
+  segment needs its own Nano on its own port"), no deleting a bus that
+  still carries sensors (named), no slave on an undefined bus, all
+  channels of one unit on one bus. **Unit addresses must be unique across
+  ALL buses** — deliberately stricter than Modbus, because the surviving
+  legacy decode pipeline keys `sensorData[<unit_address>]` by address
+  alone; making ~40 legacy nodes bus-aware would be a large change to the
+  live data path. **Resend is per-bus** (`resendBusIds` → one
+  `{payload:'apply', busId}` per *changed* segment), and `Send Nano Job`
+  reads its own segment from `env BUSDUCT_BUS_ID` (default `bus1`),
+  dropping a resend aimed elsewhere; on a single-bus panel that id is a
+  preference, not a filter, so renaming the sole bus can't stop polling.
+  The **legacy bridge stays bus1-only** (`comm` + `paraRaw` describe bus1,
+  the only port the legacy job builders write to) while `SlaveIDList`/
+  `parameterName{i}` keep every channel on every bus so the decode side
+  can handle either Nano's response.
 
 ## BMS integration (Slice 11 — core built, flow wiring + live pending)
 

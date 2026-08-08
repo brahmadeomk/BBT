@@ -81,11 +81,49 @@ config-apply path; tests for both encodings + the null-at-index rule.
 
 ## B. Two-segment RS-485 (edge architecture change)
 
-**Status (2026-07-25): the cloud-agnostic CORE is built and unit-tested;
-the flow-side wiring of a second physical pipeline is a documented
-runbook (below), pending a physical second Nano to wire and live-test.**
+**Status (2026-08-08): the cloud-agnostic CORE and the COMMISSIONING UI
+are built and unit-tested; the flow-side wiring of a second physical
+pipeline is a documented runbook (below), pending a physical second Nano
+to wire and live-test.**
 A single-bus panel is byte-for-byte unchanged — every new parameter is
 optional and defaults to the single-bus behaviour.
+
+Built in the **Modbus Settings dashboard** (2026-08-08 — the operator can
+now define the second segment; previously the schema allowed two buses
+but there was no way to enter one):
+- An **RS-485 Buses table** (was a single fixed bus form) with ADD BUS /
+  DEL, one row per segment, each with its own port/baud/parity/stop
+  bits/timeout/retries/inter-frame. Bus ids are allocated (`bus1`,
+  `bus2`, …) rather than typed.
+- A **Bus column on every slave channel row**, a dropdown over the
+  defined buses.
+- Apply-time guards: two buses may not share a serial port ("each RS-485
+  segment needs its own Nano on its own port"); a bus can't be deleted
+  while sensors sit on it (named); a slave can't reference an undefined
+  bus; all channels of one unit must be on one bus.
+- **Unit addresses must be unique across ALL buses on the panel**, not
+  merely per-bus as Modbus itself requires. This is a deliberate,
+  narrower-than-the-protocol rule: the surviving legacy decode pipeline
+  (~40 function nodes on `modbusMaster_V2`) stores readings in
+  `sensorData[<unit_address>][…]`, keyed by address alone, so the same
+  address on two segments would silently overwrite itself. With 247
+  addresses available the constraint costs nothing; making the legacy
+  decode bus-aware would be a large change to the live data path.
+- **Resend is decided per bus** (`resendBusIds`): the apply emits one
+  `{payload:'apply', busId}` message per *changed* segment, so a
+  bus2-only edit never glitches bus1's live polling (the firmware
+  re-inits its Modbus timeout on every job update).
+- `Send Nano Job` reads its own segment from `env BUSDUCT_BUS_ID`
+  (default `bus1`) and ignores a resend aimed at another segment. On a
+  single-bus panel the id is a *preference*, not a filter — renaming the
+  sole bus can't stop the panel polling.
+- The **legacy bridge is bus1-only** by design: `comm` globals and
+  `paraRaw` (the legacy read-job builder's input, used by the
+  serial-silence recovery path) describe/list bus1 only, because that's
+  the only serial port the legacy job builders write to. `SlaveIDList`/
+  `parameterName{i}`… keep every channel on every bus, since the decode
+  side must handle a response from either Nano — which is exactly why
+  addresses are forced unique panel-wide.
 
 Built (in `/src`, fully unit-tested):
 - `compileNanoJob(doc, {busId})` compiles one job per bus (filters
@@ -97,8 +135,10 @@ Built (in `/src`, fully unit-tested):
 - `buildNanoJobMessage(store, {busId})` threads `busId` through to the
   compiler for the Send Nano Job node.
 - Blacklist handler: `unitToSlaveId(doc, unitAddress, busId)` resolves a
-  response within its bus (unit addresses are unique per-bus, not
-  globally), and `processReadResult` reads the segment tag from
+  response within its bus (Modbus only guarantees a unit address is
+  unique per-bus — though this panel's commissioning UI additionally
+  forces it unique panel-wide, see above), and `processReadResult` reads
+  the segment tag from
   `ctx.busId ?? payload.bus_id`. One tracker still serves both buses —
   it keys by the globally-unique `slave_id`.
 
@@ -152,23 +192,33 @@ tagging bus2's responses. Do this once a second Nano is physically
 present on `/dev/ttyACM1` (the two-segment config must have a `bus2`
 entry with its own `port`, and its slaves' `bus_id: 'bus2'`):
 
-1. **Config** — in the Modbus Settings dashboard, commission bus2's
-   slaves with `bus_id: 'bus2'`. `compileNanoJob(doc, {busId:'bus2'})`
-   then compiles that segment on its own; bus1 is unaffected.
+1. **Config** — in the Modbus Settings dashboard, press **ADD BUS**, set
+   bus2's port (`/dev/ttyACM1`) and baud, then set each bus2 sensor's
+   **Bus** column to `bus2` and APPLY. `compileNanoJob(doc,
+   {busId:'bus2'})` then compiles that segment on its own; bus1 is
+   unaffected, and the apply resends only the segments that changed.
+   Remember bus2's unit addresses must not repeat any bus1 address (the
+   apply rejects it, and says why).
 2. **Second serial pair** — clone the `modbusMaster_V2` `serial in`/
    `serial out` nodes, pointing the new pair at `/dev/ttyACM1` @ the
    bus2 baud. Keep the same `json`-node framing before the serial out.
-3. **Second Send Nano Job** — clone the `Send Nano Job` function node;
-   have it call `buildNanoJobMessage(store, {busId:'bus2', excludeSlaveIds})`
-   and feed the bus2 `json`/`serial out`. Wire its three triggers
-   (boot inject, post-USB-power-cycle delay, post-apply link) exactly
-   as bus1's, but off the bus2 recovery/serial nodes.
+3. **Second Send Nano Job** — clone the `Send Nano Job` function node
+   and set **`BUSDUCT_BUS_ID=bus2`** in the clone's env tab (the node
+   already reads it, passes it to `buildNanoJobMessage`, and drops a
+   resend addressed to the other segment). Feed it into the bus2
+   `json`/`serial out`, and wire its three triggers (boot inject,
+   post-USB-power-cycle delay, post-apply link) exactly as bus1's, but
+   off the bus2 recovery/serial nodes. The Modbus Settings apply already
+   emits one `{payload:'apply', busId}` per changed segment on the same
+   link, so both clones can share the existing `Resend Nano Job (in)`.
 4. **Bus-tag the bus2 response tap** — on the bus2 `serial in` →
    `json` path, set `msg.bus_id = 'bus2'` in a tiny function node
    before the Device Health "Data Out" tap. `processReadResult` reads
-   `payload.bus_id`, so a bus2 unit-5 response records against the
-   `bus2` slave, not the `bus1` slave with the same address. (bus1's
-   tap needs no tag — `busId` omitted matches the single-bus path.)
+   `payload.bus_id`, so a bus2 response resolves against a `bus2` slave.
+   (bus1's tap needs no tag — `busId` omitted matches the single-bus
+   path.) Note the dashboard forces addresses unique panel-wide, so the
+   tag is belt-and-braces for the tracker rather than the only thing
+   keeping two segments apart.
 5. **Per-bus resend on blacklist** — the exclude set is global by
    `slave_id`; when the Device Health engine decides a resend, recompile
    **only the affected bus** (`busId` of the slave whose state changed)

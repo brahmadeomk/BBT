@@ -52,4 +52,33 @@ describe('buildNanoJobMessage', () => {
     const result = buildNanoJobMessage(store);
     assert.equal(result.job.read[0], 3);
   });
+
+  // The flow's "Send Nano Job" node always passes the segment it is wired to
+  // (BUSDUCT_BUS_ID, default 'bus1'). On a single-bus panel there is exactly
+  // one Nano, so renaming the sole bus in cfg/modbus must not silently stop the
+  // panel polling - the id is a preference there, not a filter.
+  test('a single-bus panel compiles even when its bus is not named bus1', () => {
+    const store = freshStore();
+    const doc = validModbusJointsDoc();
+    doc.modbus.buses[0].bus_id = 'bus2';
+    for (const s of doc.modbus.slaves) s.bus_id = 'bus2';
+    assert.ok(store.applyIfValid('modbus_joints', doc).applied);
+    const result = buildNanoJobMessage(store, { busId: 'bus1' });
+    assert.ok(!result.error, result.error);
+    assert.equal(result.job.read[0], doc.modbus.slaves.length);
+  });
+
+  test('on a multi-bus panel busId selects the segment, and omitting it errors', () => {
+    const store = freshStore();
+    const doc = validModbusJointsDoc();
+    doc.modbus.buses.push({ ...doc.modbus.buses[0], bus_id: 'bus2', port: '/dev/ttyACM1' });
+    doc.modbus.slaves[0].bus_id = 'bus2';
+    assert.ok(store.applyIfValid('modbus_joints', doc).applied);
+
+    assert.match(buildNanoJobMessage(store).error, /specify \{busId\}/);
+    const b2 = buildNanoJobMessage(store, { busId: 'bus2' });
+    assert.equal(b2.job.read[0], 1, 'only the one slave moved to segment 2');
+    const b1 = buildNanoJobMessage(store, { busId: 'bus1' });
+    assert.equal(b1.job.read[0], doc.modbus.slaves.length - 1);
+  });
 });
