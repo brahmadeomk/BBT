@@ -125,7 +125,11 @@ function drainRemoteConfig(gateway, configService, globalContext) {
           },
         },
       },
-      result.resendNeeded ? { payload: 'remote-apply' } : null,
+      // one message per CHANGED segment (see resendBusIds); Send Nano Job drops
+      // a resend addressed to a bus other than the one its pipeline serves
+      result.resendNeeded
+        ? (result.resendBusIds || ['bus1']).map((busId) => ({ payload: 'remote-apply', busId }))
+        : null,
       paraRaw ? { payload: paraRaw } : null,
     ]);
   }

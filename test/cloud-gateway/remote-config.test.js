@@ -151,7 +151,10 @@ describe('remote config channel end-to-end (loopback = simulated cloud push)', (
     assert.equal(b.ctxGet('joint_master_zone_A')[0].joint_id, 'J01'); // draft rebuilt
     assert.equal(b.ctxGet('modbus_settings_draft'), null);
     const lastSend = sends[sends.length - 1];
-    assert.deepEqual(lastSend[1], { payload: 'remote-apply' }); // Nano resend trigger
+    // Nano resend trigger: one message PER CHANGED SEGMENT, each tagged with its
+    // bus, so a Send Nano Job wired to another segment drops it. A single-bus
+    // panel gets exactly one, tagged bus1.
+    assert.deepEqual(lastSend[1], [{ payload: 'remote-apply', busId: 'bus1' }]);
     assert.deepEqual(lastSend[2].payload, [[1, 3, 1], [101, 3, 1]]); // paraRaw sync
   });
 

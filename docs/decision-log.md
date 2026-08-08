@@ -2516,3 +2516,54 @@ both the RS-485 Buses and Slave Channels tables with all their action buttons.
 - The second physical pipeline is still unbuilt in the flow (runbook in
   `docs/slice10-design-proposals.md` §B) and needs a second Nano, so a bus2
   entered today is commissioned but not polled.
+
+## 2026-08-08 — AWS-side impact review of the multi-bus change (one real gap found and fixed)
+
+**User question:** does the multi-bus settings work affect anything on the AWS
+side? Audited rather than answered from memory.
+
+**No schema or cloud change.** `git diff fa9ec47..HEAD -- config/schemas
+src/cloud-gateway src/adapters docs/aws` was empty before this entry. The
+modbus/joints JSON Schema has allowed `buses` (array, maxItems 4) and
+`slaves[].bus_id` since Slice 2 — the dashboard was the only thing that could
+not express a second segment. So:
+
+- **Telemetry payloads unchanged** — the batcher aggregates per joint; a joint
+  carries no bus identity and the compact positional encoding is index-by-joint
+  too.
+- **Alarm payloads unchanged** — instance ids are `PROCESS|<joint>|…` /
+  `SYSTEM|<slave>|…`, neither of which encodes a bus.
+- **Heartbeat unchanged** — it reports applied config *versions*, not content.
+- **Topics, IoT policy, Basic Ingest mapping, provisioning template
+  unchanged**, so no policy version to push and nothing to reconfigure in the
+  console.
+- **Cert rotation channel untouched.**
+- Cloud-agnostic rule intact: no adapter file was involved.
+
+**The one real gap — remote resend was not bus-aware.**
+`processRemoteConfig` computed `resendNeeded: !nanoJobsEqual(before, doc)` with
+no `busId`. On a *multi-bus* document `compileNanoJob` errors with
+`specify {busId}`, `nanoJobsEqual` returns false, and `!false` is true — so
+**every** accepted remote modbus push, including a label-only one, would have
+resent the Nano job on the (single, bus1) pipeline. That discards exactly the
+content-aware behaviour the Slice 3 fix introduced, and a resend is not free:
+the firmware re-inits `Serial1`/the Modbus timeout on every job update, briefly
+disrupting live polling. Single-bus panels were unaffected (a one-bus doc
+compiles fine with no `busId`), which is why nothing showed up in the live
+tests.
+
+Fixed to mirror the local apply: `resendBusIds` = the buses whose compiled job
+actually changed, and the drain emits one `{payload:'remote-apply', busId}` per
+changed segment. Covered by a new test that seeds a two-segment panel remotely,
+changes only bus2's timeout (expects `['bus2']`), then makes a label-only change
+(expects `[]` — the case that was silently broken). The existing end-to-end
+loopback test was updated to the new per-bus message shape.
+
+**Also verified, no change needed:** the remote drain already clears
+`modbus_settings_draft`, so after a cloud push the Modbus Settings dashboard
+reloads from the applied document and shows the new segment rather than a stale
+draft.
+
+`docs/aws/README.md` Part E now documents the multi-bus case for whoever pushes
+config from the console: same envelope and acks, per-segment resend, and the
+panel-wide unit-address uniqueness rule that a cloud push is also held to.

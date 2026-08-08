@@ -134,13 +134,25 @@ function processRemoteConfig(payload, deps) {
   }
 
   const drafts = buildLegacyDrafts(payload.doc);
+  // Per-bus resend, exactly like a local Modbus Settings apply: each RS-485
+  // segment is its own Nano with its own job, and the firmware re-inits its
+  // Modbus timeout on every job update, so a resend is not a free no-op.
+  //
+  // This MUST pass a busId. `nanoJobsEqual(a, b)` with none errors out on a
+  // multi-bus document and reports "not equal", which would make every remote
+  // apply - even a label-only one - resend every segment, throwing away the
+  // content-aware behaviour the local path has.
+  const resendBusIds = (payload.doc.modbus?.buses || [])
+    .map((b) => b.bus_id)
+    .filter((busId) => !before || !nanoJobsEqual(before, payload.doc, busId));
   return {
     ack: ack('applied', { applied_versions: result.appliedVersions }),
     applied: true,
     domain,
     // the wrapper reuses the Modbus Settings bridge so the decode
     // pipeline and dashboards follow the remote change like a local one
-    resendNeeded: before ? !nanoJobsEqual(before, payload.doc) : true,
+    resendNeeded: resendBusIds.length > 0,
+    resendBusIds,
     drafts,
     newDoc: payload.doc,
     audits: [

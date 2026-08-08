@@ -124,6 +124,43 @@ describe('processRemoteConfig - modbus_joints domain (R12 gate)', () => {
     assert.equal(label.resendNeeded, false); // label-only change never disturbs polling
   });
 
+
+  // A cloud push must be as content-aware as a local apply, PER SEGMENT: each
+  // RS-485 bus is its own Nano, and the firmware re-inits its Modbus timeout on
+  // every job update, so resending a segment nothing changed on briefly
+  // disrupts its live polling.
+  test('a remote change resends only the segments whose job actually changed', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+
+    // move the panel to two segments first
+    const twoBus = modbusDoc(2);
+    twoBus.modbus.buses.push({ ...twoBus.modbus.buses[0], bus_id: 'bus2', port: '/dev/ttyACM1' });
+    twoBus.modbus.slaves[twoBus.modbus.slaves.length - 1].bus_id = 'bus2';
+    const seeded = processRemoteConfig({ domain: 'modbus_joints', doc: twoBus }, { store, maintenanceMode: true });
+    assert.equal(seeded.ack.result, 'applied', JSON.stringify(seeded.ack.errors));
+
+    // now change only bus2's timeout
+    const edit = JSON.parse(JSON.stringify(twoBus));
+    edit.config_domain_versions = { modbus: 3, joints: 3 };
+    edit.modbus.buses[1].timeout_ms = 1500;
+    const result = processRemoteConfig({ domain: 'modbus_joints', doc: edit }, { store, maintenanceMode: true });
+    assert.equal(result.ack.result, 'applied', JSON.stringify(result.ack.errors));
+    assert.deepEqual(result.resendBusIds, ['bus2'], 'bus1 keeps polling undisturbed');
+    assert.equal(result.resendNeeded, true);
+
+    // and a label-only change on a MULTI-bus panel still resends nothing.
+    // Without a busId, nanoJobsEqual errors on a multi-bus doc and reports
+    // "not equal", which would resend every segment on every remote apply.
+    const labelOnly = JSON.parse(JSON.stringify(edit));
+    labelOnly.config_domain_versions = { modbus: 4, joints: 4 };
+    labelOnly.modbus.slaves[0].label = 'Renamed remotely';
+    const quiet = processRemoteConfig({ domain: 'modbus_joints', doc: labelOnly }, { store, maintenanceMode: true });
+    assert.equal(quiet.ack.result, 'applied', JSON.stringify(quiet.ack.errors));
+    assert.deepEqual(quiet.resendBusIds, []);
+    assert.equal(quiet.resendNeeded, false);
+  });
+
   test('rejects an invalid modbus doc with real rule ids even in maintenance mode', () => {
     const store = freshStore();
     seedModbusJoints(store);

@@ -458,6 +458,19 @@ converges exactly like a local apply: decode pipeline rewired,
 dashboard tables refreshed, Nano job recompiled and resent only if the
 compiled job actually changed.
 
+**Multi-bus panels:** `modbus.buses` is an array — a panel may run more
+than one RS-485 segment, each being its own Arduino Nano on its own
+serial port. Nothing about the envelope, the topics or the ack format
+changes; the document simply carries more than one bus entry and each
+slave names its `bus_id`. The **resend is decided per segment**: only the
+buses whose compiled job actually changed are resent, so a push that
+touches one segment leaves the other's live polling undisturbed. Note
+the panel additionally requires unit addresses to be unique across *all*
+its buses (stricter than Modbus — see
+`docs/slice10-design-proposals.md` §B for why); a cloud push that repeats
+an address on a second bus is rejected by the same validator path with a
+named error.
+
 Every push — accepted or rejected — is acknowledged with either
 `applied_versions` or `errors: [{rule, message}]` citing the exact
 R/A rule ids, and recorded in the panel's audit trail.
