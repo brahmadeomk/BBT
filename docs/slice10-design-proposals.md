@@ -185,6 +185,45 @@ first, then build behind the existing single-bus behaviour (a
 one-bus config keeps working unchanged). **The `/src` core recommended
 here is now built (see Status above); what remains is the flow wiring.**
 
+### Panel acceptance drill for the commissioning UI (no second Nano needed)
+
+Two halves, because they check different things.
+
+**1. The guards — `node tools/multibus-guard-drill.js` on the Pi.**
+It reads the live `cfg/modbus+joints` **read-only**, rebuilds it in a temp
+directory, and exercises every guard there, so it is safe to run on a panel
+that is monitoring. It prints each rejection against your real slave names,
+which is the point: a guard is only useful if a commissioning engineer can act
+on its wording. It also asserts that a rejected apply does **not** bump the
+config version. Expect `ALL GUARDS PASS`.
+
+**2. The dashboard — click through it, because the script cannot.**
+The script drives the handler directly; it says nothing about whether the UI
+sends the right thing. On the Modbus Settings page:
+
+| Step | Expected |
+|---|---|
+| Press **ADD BUS** | a `bus2` row appears, pre-filled `/dev/ttyACM1` |
+| Set bus2's port to bus1's port, **APPLY CONFIG** | alert: *"Two buses share the serial port …"*, nothing applied |
+| Restore bus2's port, **APPLY CONFIG** | *"Modbus configuration applied"* — bus2 now exists, empty |
+| Reload the page | the bus2 row is still there (it came from the applied config, not the browser) |
+| Edit any sensor, set its **Bus** to `bus2`, SAVE, **APPLY** | rejected: unit address now on two buses — see the warning below before doing this deliberately |
+| Press **DEL** on bus2 | removed (it carries nothing) |
+| Press **DEL** on bus1 while it is the only bus | *"The panel needs at least one RS-485 bus"* |
+
+**⚠ Do not move a live sensor onto bus2 on a production panel.** There is no
+second Nano yet, so a sensor on bus2 is commissioned but **not polled**: its
+joint goes dark and will blacklist, and if you move the *ambient* unit every
+joint loses ΔT. The apply guards happen to block the common form of this (a
+repeated unit address), but a genuinely unused address would go through. Move
+it back and re-apply to recover.
+
+**Committed vs rejected:** only the "APPLY an empty bus2" step changes the
+applied config. Every guard step ends in a rejection, so nothing is written and
+the panel keeps polling throughout. Adding an empty bus is itself harmless —
+its resend message is addressed to `bus2` and the single `Send Nano Job` node
+(env `BUSDUCT_BUS_ID` = `bus1`) drops it.
+
 ### Flow-wiring runbook (per second physical Nano)
 The `/src` core is bus-aware; wiring a real second segment into
 `flows_BBT.json` means duplicating the bus1 pipeline for bus2 and

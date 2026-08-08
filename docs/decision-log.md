@@ -2567,3 +2567,39 @@ draft.
 `docs/aws/README.md` Part E now documents the multi-bus case for whoever pushes
 config from the console: same envelope and acks, per-segment resend, and the
 panel-wide unit-address uniqueness rule that a cloud push is also held to.
+
+## 2026-08-08 — Panel acceptance drill for the multi-bus guards
+
+To test the multi-bus apply guards on the real panel without a second Nano and
+without risking the live configuration, added **`tools/multibus-guard-drill.js`**
+plus a manual UI checklist in `docs/slice10-design-proposals.md` §B.
+
+The script reads the panel's applied `cfg/modbus+joints` **read-only**, rebuilds
+it in a temp directory, and exercises every guard there. Safe to run on a panel
+that is monitoring. Design points worth keeping:
+
+- **It prints each rejection against the panel's real slave names**, not a
+  fixture's. A guard is only worth having if a commissioning engineer can act on
+  its wording; "Bus bus2 still carries 1 sensor(s) (AMBIENT_101)" is checkable
+  in a way that a green tick is not.
+- **A rejected apply must not bump the config version** — asserted, not assumed.
+  A guard that rejects but has already written is worse than no guard.
+- **It adapts to what the panel already has.** The first cut hardcoded `bus2`
+  and reported a false FAIL against a store that was already two-segment (it had
+  created `bus3`). Fixed to capture the id `add_bus` actually allocated and use
+  it throughout. Caught only because the dry run was pointed at a mutated store
+  — worth remembering that a self-test which assumes the starting state is
+  itself a source of false failures.
+
+The UI half stays manual and is written out as a table, because the script
+drives the handler directly and therefore says nothing about whether the
+dashboard sends the right thing — the `scope.act` regression earlier today was
+exactly that class of bug and no handler-level test could have caught it.
+
+**Safety note recorded in the doc:** only the "apply an empty bus2" step commits;
+every guard step ends in rejection, so the panel keeps polling. Moving a live
+sensor onto bus2 is called out as the thing NOT to do on a production panel —
+with no second Nano that sensor is commissioned but unpolled, its joint goes
+dark and blacklists, and moving the *ambient* unit costs every joint its ΔT. The
+guards block the common form (repeated unit address) but not a genuinely unused
+address, so this is a documented human caution rather than an enforced rule.
