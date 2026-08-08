@@ -2448,3 +2448,51 @@ and `white-space:nowrap` on the actions cell.
 dashboard's real width (the scratchpad harness from the previous entry, extended
 to expand `ng-if` into both the EDIT and SAVE row variants). All buttons on both
 tables are fully visible.
+
+## 2026-08-08 — Blank Modbus Settings persisted: the running flow was never re-imported
+
+**User:** *"Still not working"* — with a terminal photo showing
+`git pull` → `Updating 7a9f2aa..be03917`, `2 files changed` including
+`flows/flows_BBT.json`, then `sudo systemctl restart nodered`, then a second
+pull reporting *Already up to date*.
+
+**Diagnosis from the dashboard photo, not from the description:** the page had
+the multi-bus headers and the ADD BUS button, but **no RELOAD button** — and
+RELOAD only exists in `be03917`, the commit they had just pulled. So the running
+flow was an earlier import. `git pull` updates the repo working copy; Node-RED
+runs from its own `~/.node-red/flows_<hostname>.json`, so pulling a flow change
+and restarting does nothing visible until the file is re-imported in the editor.
+The two halves update by different mechanisms and both are needed:
+
+| changed | updates via |
+|---|---|
+| `src/**` | pull + **restart** (functionGlobalContext is `require()`d once at startup) |
+| `flows/flows_BBT.json` | **re-import** in the editor + Deploy |
+
+`docs/pi-deployment.md` said "re-import ... if it changed too" as a trailing
+aside; that was too easy to skip past. Rewritten as a hard rule with the reason,
+the `git show --stat HEAD` check, the table above, and the tell-tale symptom
+(*some* of a change visible but not all — new headers present, new button
+absent) that identifies this exact mistake.
+
+### Two hardening changes so this is never a guessing game again
+
+1. **`tools/modbus-settings-selftest.js`** — runs the exact handler the
+   dashboard calls, against the panel's real applied config, and prints either
+   the rows it would hand the table ("the server side is HEALTHY → this is a
+   delivery problem, re-import the flow") or the specific store failure
+   (unreadable root vs never-applied config). This separates the two
+   indistinguishable causes of a blank table without a second Pi trip.
+2. **`ModbusSettingsBackEndNode` no longer fails silently.** It now guards
+   `global.get('busductConfigService')` being absent (the classic
+   restart-vs-Deploy mistake) and wraps the handler in try/catch, reporting via
+   `node.error` *and* returning an `{error}` payload the widget alerts. An
+   exception used to produce no output message at all — indistinguishable, in
+   the browser, from an empty configuration.
+
+**Note on my own diagnosis:** I had attributed the blank table to the
+`scope.act` null-safety regression plus the once-inject race. Those were real
+bugs and are fixed, but they were not what the user was still looking at — that
+was simply un-imported code. Worth remembering that "still not working" after a
+fix is pushed most often means the fix is not running yet, and the cheapest
+first check is whether the artifact on the device matches the commit.

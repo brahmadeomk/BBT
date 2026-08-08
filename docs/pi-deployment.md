@@ -236,7 +236,42 @@ cd ~/busduct-cloud-edge
 git pull
 npm ci   # only needed if package.json/package-lock.json changed
 sudo systemctl restart nodered
+git show --stat HEAD          # did flows/flows_BBT.json change?
 ```
 
-Then re-import `flows/flows_BBT.json` in the editor if it changed too
-(check `git log --stat -1` after pulling to see which files changed).
+**If `flows/flows_BBT.json` is in that list you MUST re-import it in the
+Node-RED editor.** A `git pull` updates the repo working copy; Node-RED
+runs from its *own* copy (`~/.node-red/flows_<hostname>.json`), so pulling
+alone changes nothing you can see. Menu → Import → select
+`flows/flows_BBT.json` from the cloned repo → import over the existing
+tabs → Deploy → reload the dashboard page in the browser.
+
+The two halves update independently and both are needed:
+
+| What changed | What updates it |
+|---|---|
+| anything under `src/` | `git pull` + **restart** Node-RED (a Deploy does not re-`require()` the library) |
+| `flows/flows_BBT.json` (flow wiring, function node bodies, dashboard `ui_template` markup/CSS) | **re-import** the file in the editor + Deploy |
+
+A symptom of skipping the re-import is a dashboard that shows *some* of a
+change but not all of it — e.g. new column headers appear (they came with an
+earlier import) while a newly added button does not.
+
+### Troubleshooting: a dashboard table is blank
+
+A blank Modbus Settings table has two causes that look identical in the
+browser — the server having no rows to give, or the rows never reaching the
+widget. Don't guess; run the self-test on the Pi:
+
+```bash
+cd ~/busduct-cloud-edge && node tools/modbus-settings-selftest.js
+```
+
+It runs the exact handler the dashboard calls, against the real applied
+config, and prints either the rows it would hand over (→ the problem is
+delivery: re-import the flow, Deploy, reload the page, press **RELOAD** on
+the card) or the specific config-store failure (→ the blank table is honest).
+
+If the handler itself throws, the error now also appears as a red status on
+the `ModbusSettingsBackEndNode` node, in the debug sidebar, and as an alert
+on the dashboard card — it is no longer silent.
