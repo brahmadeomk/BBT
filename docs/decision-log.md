@@ -2383,3 +2383,68 @@ scrolls with columns intact. The group is 23 dashboard units (~1236px), so the
 default HMI has room to spare. Preview harness is throwaway (scratchpad); it is
 worth rebuilding for any future `ui_template` layout change, since nothing in
 the repo's test suite exercises client-side Angular markup.
+
+## 2026-08-08 — Fix: Modbus Settings widget blank + ADD BUS dead; Zone table DELETE clipped
+
+**User report (live on the Pi):** *"Now add bus button not working. Existing
+configuration not visible. Zone configuration action column delete button not
+visible."*
+
+### 1 & 2 — blank table and dead ADD BUS: one regression, one latent fragility
+
+**The regression.** When the multi-bus table landed, the per-button
+`ng-click="send({payload:{action:'add', slaves:msg.payload.slaves, ...}})"`
+inline expressions were refactored into a single `scope.act(action, index)`
+helper (so every action would ship the full `{slaves, buses}` state). That moved
+the property access **from an Angular expression into real JavaScript**, and the
+two are not equivalent:
+
+- Angular expressions are *forgiving*: `msg.payload.slaves` on an undefined
+  `msg` quietly evaluates to `undefined`.
+- Real JS **throws** `TypeError` on the same access, and an exception inside an
+  `ng-click` handler means the click does nothing at all.
+
+So on a widget that had not yet received a message, every button was dead —
+including ADD BUS. It also destroyed the accidental recovery path the old markup
+had: previously a blank table could be repopulated just by clicking any button,
+because the server ignored the undefined state and answered from the applied
+config.
+
+**The fragility it exposed.** This widget's only load trigger is an inject with
+`once: true, onceDelay: 0.5`. Re-deploying while the dashboard is open
+re-creates the `ui_template` with an empty scope; if it registers after that
+one-shot inject has already fired, nothing is ever replayed and the table stays
+blank forever. That was survivable only because of the forgiving-expression
+accident above.
+
+**Fix (both layers):**
+- `scope.act` reads `(scope.msg && scope.msg.payload) || {}` — never throws,
+  and an action from an empty widget still reaches the server, which answers
+  from the draft/applied config.
+- The widget **requests its own load on init** (`send({payload:{}})` after
+  700 ms, skipped if a message already arrived), so it no longer depends on
+  winning a race with a deploy-time inject.
+- An explicit **RELOAD** button plus a "No configuration loaded yet" hint when
+  the bus list is empty — a blank table should say which failure it is rather
+  than looking like an empty config.
+
+**Lesson worth keeping:** refactoring an inline Angular expression into a JS
+function silently changes its null-safety semantics. Any `ui_template` handler
+that touches `scope.msg` must assume `scope.msg` is undefined.
+
+### 3 — Zone Configuration DELETE clipped
+
+`ZoneMasterUI` still carried the original minimal stylesheet: `width:100%`, no
+`table-layout`, no column widths, and no `overflow-x` on the panel. The two
+`width:100%` inputs took the space and the Actions column was squeezed until
+DELETE (a longer word than the DEL used elsewhere) was cut off by the dashboard
+card. `JointMasterUI` had already been given an explicit 220px Actions column
+and `overflow-x:auto`; this table had simply never had the same treatment.
+Fixed the same way: `table-layout:fixed`, explicit 170/220/170 column widths, a
+`min-width` so a narrow screen scrolls the panel instead of crushing columns,
+and `white-space:nowrap` on the actions cell.
+
+**Verified by rendering** both templates together in headless Chromium at the
+dashboard's real width (the scratchpad harness from the previous entry, extended
+to expand `ng-if` into both the EDIT and SAVE row variants). All buttons on both
+tables are fully visible.
