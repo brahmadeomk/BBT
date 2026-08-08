@@ -2675,3 +2675,37 @@ and the sole `Send Nano Job`, env `BUSDUCT_BUS_ID` = `bus1`, drops it), but it
 should be deleted until a second Nano is physically present, on the same
 principle as the port fix: the configuration must describe reality, because
 that is the only thing the duplicate-port guard has to work with.
+
+## 2026-08-08 — UI guard steps pass live; bus DEL affordance changed from hidden to disabled
+
+**User:** bus1's port corrected to `/dev/ttyACM0`, **all UI guard steps passed**.
+Plus an observation: *"Del button is not visible when only one bus is
+configured. When bus 2 is added del button is visible for both rows."*
+
+That behaviour was intentional — the bus DEL button carried
+`ng-if="buses.length > 1"`. **The defect was in my acceptance checklist**, which
+listed "press DEL on bus1 while it is the only bus → expect *The panel needs at
+least one RS-485 bus*" as a step. That step is impossible to perform: the UI
+removes the button precisely so the attempt can't be made. Checklist corrected.
+
+**Changed anyway: hidden → disabled.** The person who knows this system best
+reported the disappearance as a suspected defect, which is the whole argument.
+A control that vanishes teaches nothing and looks broken; a greyed-out button
+with a tooltip (*"The panel needs at least one RS-485 bus"*) explains the rule
+at the moment it's relevant. `ng-if` became `ng-disabled` plus a conditional
+`title`, with a `.mbs-btn[disabled]` style, and `confirmDeleteBus` returns early
+on a single bus so no confirm dialog can appear even if the disabled state were
+somehow bypassed.
+
+**The server-side guard is unchanged and stays.** This is affordance, not
+enforcement — the remote-config path and any scripted client never see the
+button, and `tools/multibus-guard-drill.js` covers the rule ("delete the last
+remaining bus"). Verified by rendering the single-bus state in headless
+Chromium: DEL present and greyed, visibly distinct from the slave row's live
+red DEL.
+
+**Status: the multi-bus commissioning UI is now live-verified end to end** —
+guards via the drill (8/8 on the panel), the dashboard by click-through, and
+bus1's port now matches the one Nano on `/dev/ttyACM0`. What remains for
+two-segment operation is purely physical: a second Nano and the flow wiring in
+§B's runbook.

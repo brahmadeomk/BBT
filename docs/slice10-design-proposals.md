@@ -209,7 +209,13 @@ sends the right thing. On the Modbus Settings page:
 | Reload the page | the bus2 row is still there (it came from the applied config, not the browser) |
 | Edit any sensor, set its **Bus** to `bus2`, SAVE, **APPLY** | rejected: unit address now on two buses — see the warning below before doing this deliberately |
 | Press **DEL** on bus2 | removed (it carries nothing) |
-| Press **DEL** on bus1 while it is the only bus | *"The panel needs at least one RS-485 bus"* |
+| Look at **DEL** on bus1 once it is the only bus | **greyed out / disabled**, tooltip *"The panel needs at least one RS-485 bus"* — the UI does not let you attempt a delete that can only fail |
+
+The last-bus rule cannot be exercised from the dashboard by design, so the
+server-side guard behind it is covered by `tools/multibus-guard-drill.js`
+instead ("delete the last remaining bus"). The guard stays in the handler
+regardless of what the UI offers — the remote-config path and any future
+scripted client reach it too.
 
 **⚠ Do not move a live sensor onto bus2 on a production panel.** There is no
 second Nano yet, so a sensor on bus2 is commissioned but **not polled**: its
