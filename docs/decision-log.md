@@ -2496,3 +2496,23 @@ bugs and are fixed, but they were not what the user was still looking at — tha
 was simply un-imported code. Worth remembering that "still not working" after a
 fix is pushed most often means the fix is not running yet, and the cheapest
 first check is whether the artifact on the device matches the commit.
+
+## 2026-08-08 — Live-verified: multi-bus Modbus Settings dashboard loads on the Pi
+
+User confirms the Modbus Settings page is working after re-importing
+`flows/flows_BBT.json`. This closes the three live reports from today: the
+clipped action buttons, the blank table / dead ADD BUS, and the clipped Zone
+Configuration DELETE. Root causes and fixes are in the three preceding entries.
+
+**What this pass covers:** the table loads the applied configuration and renders
+both the RS-485 Buses and Slave Channels tables with all their action buttons.
+
+**What it does NOT yet cover** — still to live-verify on the panel:
+- Actually commissioning a second segment end to end: ADD BUS → set its port and
+  baud → move a sensor's Bus column to it → APPLY, and confirm the apply guards
+  fire (duplicate serial port, duplicate unit address across buses, deleting a
+  bus that still carries sensors).
+- Per-bus resend: confirm a bus2-only edit does not disturb bus1's live polling.
+- The second physical pipeline is still unbuilt in the flow (runbook in
+  `docs/slice10-design-proposals.md` §B) and needs a second Nano, so a bus2
+  entered today is commissioned but not polled.
