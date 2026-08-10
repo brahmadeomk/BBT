@@ -230,48 +230,66 @@ the panel keeps polling throughout. Adding an empty bus is itself harmless —
 its resend message is addressed to `bus2` and the single `Send Nano Job` node
 (env `BUSDUCT_BUS_ID` = `bus1`) drops it.
 
-### Flow-wiring runbook (per second physical Nano)
-The `/src` core is bus-aware; wiring a real second segment into
-`flows_BBT.json` means duplicating the bus1 pipeline for bus2 and
-tagging bus2's responses. Do this once a second Nano is physically
-present on `/dev/ttyACM1` (the two-segment config must have a `bus2`
-entry with its own `port`, and its slaves' `bus_id: 'bus2'`):
+### Second segment: BUILT in the flow (2026-08-10)
 
-1. **Config** — in the Modbus Settings dashboard, press **ADD BUS**, set
-   bus2's port (`/dev/ttyACM1`) and baud, then set each bus2 sensor's
-   **Bus** column to `bus2` and APPLY. `compileNanoJob(doc,
-   {busId:'bus2'})` then compiles that segment on its own; bus1 is
-   unaffected, and the apply resends only the segments that changed.
-   Remember bus2's unit addresses must not repeat any bus1 address (the
-   apply rejects it, and says why).
-2. **Second serial pair** — clone the `modbusMaster_V2` `serial in`/
-   `serial out` nodes, pointing the new pair at `/dev/ttyACM1` @ the
-   bus2 baud. Keep the same `json`-node framing before the serial out.
-3. **Second Send Nano Job** — clone the `Send Nano Job` function node
-   and set **`BUSDUCT_BUS_ID=bus2`** in the clone's env tab (the node
-   already reads it, passes it to `buildNanoJobMessage`, and drops a
-   resend addressed to the other segment). Feed it into the bus2
-   `json`/`serial out`, and wire its three triggers (boot inject,
-   post-USB-power-cycle delay, post-apply link) exactly as bus1's, but
-   off the bus2 recovery/serial nodes. The Modbus Settings apply already
-   emits one `{payload:'apply', busId}` per changed segment on the same
-   link, so both clones can share the existing `Resend Nano Job (in)`.
-4. **Bus-tag the bus2 response tap** — on the bus2 `serial in` →
-   `json` path, set `msg.bus_id = 'bus2'` in a tiny function node
-   before the Device Health "Data Out" tap. `processReadResult` reads
-   `payload.bus_id`, so a bus2 response resolves against a `bus2` slave.
-   (bus1's tap needs no tag — `busId` omitted matches the single-bus
-   path.) Note the dashboard forces addresses unique panel-wide, so the
-   tag is belt-and-braces for the tracker rather than the only thing
-   keeping two segments apart.
-5. **Per-bus resend on blacklist** — the exclude set is global by
-   `slave_id`; when the Device Health engine decides a resend, recompile
-   **only the affected bus** (`busId` of the slave whose state changed)
-   so the other segment's polling isn't glitched.
-6. **Per-bus recovery controller** — give bus2 its own `uhubctl` port
-   in the RECOVERY CONTROLLER exec node and its own serial-silence
-   watchdog, so a wedged bus2 Nano is power-cycled without touching
-   bus1.
+A second Nano is physically connected on `/dev/ttyACM1`, and the bus2
+pipeline is now wired in `flows_BBT.json` on the `modbusMaster_V2` tab.
+What exists:
+
+- **`serial-port` config** `/dev/ttyACM1` @115200, framing identical to
+  bus1's (`\n` newline, char output, 10 s response timeout).
+- **`bus2 Nano in` → `Tag Bus2`** → the *same shared* decode / UI /
+  Data-Out chain bus1 uses. Sharing is deliberate and safe: the decode
+  pipeline keys `sensorData` by unit address and the commissioning UI
+  forces addresses unique across **all** buses, so one chain can serve
+  both Nanos without duplicating ~40 nodes.
+- **`Tag Bus2`** stamps `msg.bus_id = 'bus2'` — a **top-level msg
+  property, not `msg.payload.bus_id`**. At the serial edge (the only
+  place that knows which wire a frame arrived on) the payload is still a
+  raw string; the `json` node downstream rewrites `payload` but leaves
+  other msg properties alone, so the tag survives to the blacklist tap.
+  The **Blacklist Engine** passes it through as `ctx.busId`.
+- **`Send Nano Job (bus1)` / `(bus2)`**, each naming its segment, each
+  dropping a resend whose `msg.busId` belongs to the other. Both are fed
+  by the shared `Resend Nano Job (in)` link and the boot inject.
+- **A separate 30 s serial-silence watchdog per segment.** bus2 traffic
+  must never keep bus1's watchdog alive, or a dead bus1 would look
+  healthy. bus2's watchdog recovers by resending **its own compiled
+  job**, not the legacy `paraRaw` read-job builder (which is bus1-only
+  by design — see the legacy-bridge note above).
+
+`test/two-segment-flow-wiring.test.js` asserts each of these properties,
+because the flow is hand-imported JSON and a half-wired segment fails
+silently: it just stops polling half the panel.
+
+#### Correction: the bus id is a LITERAL, not an env var
+
+An earlier version of this runbook said to clone `Send Nano Job` and set
+`BUSDUCT_BUS_ID=bus2` "in the clone's env tab". **That is not possible.**
+Function nodes have no per-node environment in Node-RED: `env.get()`
+resolves from the enclosing *group*, then the *tab*, then the process
+environment. Both `Send Nano Job` nodes live on the same tab, so an env
+var could never differ between them — it would have silently given both
+segments the same identity, and bus2's Nano would have been sent bus1's
+job. Each node now declares `const MY_BUS = 'bus1' | 'bus2'` as a
+literal, and the wiring test rejects any reintroduction of the env
+lookup.
+
+#### Still outstanding for two-segment operation
+
+1. **Commission bus2's sensors** — Modbus Settings → the bus2 row already
+   exists; set each bus2 sensor's **Bus** column and APPLY. Until a
+   sensor is moved, bus2's Nano is polled with an empty read list.
+2. **Per-bus resend on blacklist** — the exclude set is global by
+   `slave_id`; the Device Health engine's resend is currently untagged,
+   so it reaches both segments. Harmless (each recompiles its own job)
+   but it briefly re-inits the *other* segment's Modbus timeout. Tag it
+   with the `busId` of the slave whose state changed.
+3. **Per-bus recovery controller** — bus2 has its own watchdog but shares
+   the RECOVERY CONTROLLER's `uhubctl` USB power-cycle, which is wired to
+   one port. Give bus2 its own port so a wedged bus2 Nano is power-cycled
+   without dropping bus1. The port numbers must be read off the actual
+   hardware, so this is a panel-side step.
 
 Verify on the bench with two Nanos before the panel: pull bus2's link
 and confirm only bus2 slaves go OFFLINE/blacklisted while bus1 keeps

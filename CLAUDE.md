@@ -551,10 +551,23 @@ a second physical Nano — both dormant on the current panel. Built:
   `ctx.busId ?? payload.bus_id`) resolve a response within its bus (unit
   addresses are unique per-bus, one tracker keys by global `slave_id`).
   **Single-bus panels are byte-for-byte unchanged** (every new arg
-  optional). The flow still wires only bus1 — adding the second physical
-  pipeline (2nd serial pair, per-bus Send Nano Job, bus-tagged response
-  tap, per-bus recovery) is a **documented runbook** (§B) pending a
-  physical second Nano to wire/test.
+  optional).
+- **Second segment WIRED in the flow (2026-08-10, second Nano connected):**
+  `modbusMaster_V2` now carries a bus2 `serial-port` config
+  (`/dev/ttyACM1` @115200), `bus2 Nano in` → **`Tag Bus2`** (stamps
+  `msg.bus_id` as a TOP-LEVEL property — payload is still a raw string at
+  the serial edge, and the `json` node rewrites only `payload`, so the tag
+  survives to the blacklist tap, which now reads it as `ctx.busId`) → the
+  **same shared** decode/UI/Data-Out chain (safe because addresses are
+  unique panel-wide), a second `Send Nano Job (bus2)` → `json` →
+  `serial out`, and **its own 30 s serial-silence watchdog** (a shared one
+  would let bus2 traffic keep a dead bus1 looking alive) which recovers by
+  resending bus2's own compiled job rather than the bus1-only legacy
+  `paraRaw` builder. `test/two-segment-flow-wiring.test.js` pins all of
+  this — the flow is hand-imported JSON and a half-wired segment fails
+  silently. Still open: commissioning bus2's sensors, tagging the
+  blacklist resend per bus, and a per-bus `uhubctl` port in the RECOVERY
+  CONTROLLER (needs the hardware to read port numbers off).
 - **Commissioning UI for the second bus (2026-08-08)** — the schema
   allowed two buses but there was no way to *enter* one (user report).
   The Modbus Settings dashboard now has an **RS-485 Buses table**
@@ -568,10 +581,13 @@ a second physical Nano — both dormant on the current panel. Built:
   legacy decode pipeline keys `sensorData[<unit_address>]` by address
   alone; making ~40 legacy nodes bus-aware would be a large change to the
   live data path. **Resend is per-bus** (`resendBusIds` → one
-  `{payload:'apply', busId}` per *changed* segment), and `Send Nano Job`
-  reads its own segment from `env BUSDUCT_BUS_ID` (default `bus1`),
-  dropping a resend aimed elsewhere; on a single-bus panel that id is a
+  `{payload:'apply', busId}` per *changed* segment), and each `Send Nano Job`
+  names its segment as a **literal** (`const MY_BUS = 'bus1'|'bus2'`) and
+  drops a resend aimed elsewhere; on a single-bus panel that id is a
   preference, not a filter, so renaming the sole bus can't stop polling.
+  **Not an env var**: function nodes have no per-node environment
+  (`env.get()` resolves from the group, then the tab) and both nodes share
+  one tab, so an env var could never differ between them.
   The **legacy bridge stays bus1-only** (`comm` + `paraRaw` describe bus1,
   the only port the legacy job builders write to) while `SlaveIDList`/
   `parameterName{i}` keep every channel on every bus so the decode side
