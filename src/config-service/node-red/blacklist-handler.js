@@ -47,6 +47,16 @@ function jointsForSlave(doc, slaveId) {
   return (doc?.joints || []).filter((j) => j.slave_id === slaveId).map((j) => j.joint_id);
 }
 
+// Which RS-485 segment a slave sits on. Pre-multi-bus documents carry no
+// bus_id; those panels have exactly one bus, so fall back to its id (and to
+// 'bus1' if the document predates the buses array entirely).
+function busForSlave(doc, slaveId) {
+  const s = (doc?.modbus?.slaves || []).find((x) => x.slave_id === slaveId);
+  if (s?.bus_id) return s.bus_id;
+  const buses = doc?.modbus?.buses || [];
+  return buses.length === 1 ? buses[0].bus_id : 'bus1';
+}
+
 /**
  * Which slave provides a joint's ambient reference, via the R14 3-level
  * override chain: joints[].ambient_sensor -> that joint's zone -> panel default.
@@ -165,6 +175,19 @@ function _finalize(tracker, events, { doc, prevExcludeKey, activeAlarmJointIds, 
   // when that set actually changes (blacklist, probe-promote, probe-fail) -
   // a restore doesn't change it (the slave was already polled while probing).
   const resendNeeded = prevExcludeKey === undefined ? excludeSlaveIds.length > 0 : excludeKey !== prevExcludeKey;
+  // Slice 10 two-segment: each bus is a separate Nano with its own job, and the
+  // firmware re-inits its Modbus timeout on every job update - so a device
+  // failing on bus2 must not glitch bus1's live polling. Resend only the buses
+  // whose read set actually changed, i.e. the buses of the slaves that entered
+  // or left the exclude set. Single-bus panels get ['bus1'] (or the sole bus's
+  // id), which the one Send Nano Job node accepts as before.
+  const prevExcluded = prevExcludeKey ? prevExcludeKey.split(',') : [];
+  const changedSlaveIds = resendNeeded
+    ? [...new Set([...prevExcluded, ...excludeSlaveIds])].filter(
+        (id) => prevExcluded.includes(id) !== excludeSlaveIds.includes(id)
+      )
+    : [];
+  const resendBusIds = [...new Set(changedSlaveIds.map((id) => busForSlave(doc, id)))];
   const alarms = events.map((e) => blacklistAlarmCommand(e, doc)).filter(Boolean);
   // Step 6: on restore, the joints whose ProcessLogic EMA/deltaT baseline
   // must be reset so RoR starts from 0 (no spurious rate after a blackout).
@@ -182,6 +205,7 @@ function _finalize(tracker, events, { doc, prevExcludeKey, activeAlarmJointIds, 
     excludeSlaveIds,
     excludeKey,
     resendNeeded,
+    resendBusIds,
     alarms,
     emaResetJoints,
     jointStates: deriveJointStates(doc, tracker, activeAlarmJointIds, lastValidTs),
@@ -190,7 +214,7 @@ function _finalize(tracker, events, { doc, prevExcludeKey, activeAlarmJointIds, 
 
 /**
  * Record one Nano read result ({t:'r', id:unit_address, st:'ok'|'err'}).
- * @returns {{events, excludeSlaveIds, excludeKey, resendNeeded, alarms, jointStates}}
+ * @returns {{events, excludeSlaveIds, excludeKey, resendNeeded, resendBusIds, alarms, jointStates}}
  */
 function processReadResult(tracker, payload, ctx = {}) {
   const events = [];
@@ -271,6 +295,7 @@ module.exports = {
   getTracker,
   unitToSlaveId,
   jointsForSlave,
+  busForSlave,
   ambientSlaveForJoint,
   jointsUsingAmbientSlave,
   slaveDisplayName,

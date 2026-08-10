@@ -275,22 +275,90 @@ job. Each node now declares `const MY_BUS = 'bus1' | 'bus2'` as a
 literal, and the wiring test rejects any reintroduction of the env
 lookup.
 
-#### Still outstanding for two-segment operation
+#### Alarm generation for the second segment (2026-08-10)
+
+The wiring above carries bus2's *data*. Raising an *alarm* about bus2 needed
+a further layer, because most of what decides an alarm was per-panel state
+that looks correct right up until a whole segment dies.
+
+- **ΔT / RoR alarms needed nothing.** bus2's frames reach ProcessLogic
+  through the shared chain, and ProcessLogic is keyed by unit address — which
+  is unique panel-wide. This is what the shared-chain decision bought.
+- **One COMM watchdog per segment, and they must not cross-feed.** The
+  transport wiring routed bus2's raw frames into bus1's `Data Out`, which
+  feeds *the* COMM watchdog. That watchdog is then satisfied while **either**
+  Nano is talking — so a live bus2 masked a dead bus1 and vice versa, and
+  neither segment's total failure could raise a COMM alarm at all. bus2 now
+  has its own `Data Out 2 (bus2)` → `Data In 2 (bus2)` → **COMM watchdog
+  bus2**, emitting `{commTimeout, busId:'bus2'}`.
+- **The Alarm Manager keys the COMM alarm by segment.** No `busId` (or
+  `bus1`) still yields `SYSTEM|MODULE|COMM_FAILURE` — byte-identical, so
+  bus1's alarm identity, history and ACK state are continuous. Anything else
+  yields `SYSTEM|BUS2|COMM_FAILURE`, raised and cleared independently.
+- **Per-bus blacklist resend** (closes outstanding item 2 below).
+  `_finalize` now returns `resendBusIds` — the buses of the slaves that
+  entered or left the exclude set — and the Device Health engine emits one
+  resend per affected segment.
+- **Per-bus USB recovery** (closes item 3). The RECOVERY CONTROLLER is now
+  thin over `src/config-service/bus-recovery.js` (`planRecovery` — pure,
+  timing-injected), running the same ladder (90 s → cycle → 60 s cooldown →
+  3 attempts → one email) independently per segment, with a 4th output
+  driving bus2's own `exec`. bus1 keeps its hardcoded `-l 1-1` and its
+  `SYSTEM|MODULE|RESET_n` events.
+
+`test/flows-bus2-alarms.test.js` pins these; the transport properties stay in
+`test/two-segment-flow-wiring.test.js`.
+
+#### Two fixes from the first panel drill (2026-08-10)
+
+- **The silence watchdog now retries.** It was a `trigger` node, which fires
+  once and then needs an input message to re-arm — and its input is the very
+  frame stream that has gone quiet. A Nano that missed that single resend
+  (still booting its USB CDC, or re-enumerated) would never be handed a job
+  again and stayed dark. Replaced with a liveness stamp written by `Tag Bus2`
+  plus a 15 s check that resends every 30 s for as long as the segment is
+  silent.
+- **The Diag status column expires.** `global.Status[addr]` is written only
+  when a frame for that device is decoded, and nothing expired it — so a
+  device that stopped being polled at all (blacklisted, or its segment down)
+  kept showing its last good value forever, and a dead segment rendered as an
+  all-green panel. Each write is now stamped; an entry older than 60 s reads
+  **"No Data"** and renders as a fault. 60 s is comfortably longer than any
+  configured poll interval, so a live device never flickers.
+
+#### Operator steps before the drill
 
 1. **Commission bus2's sensors** — Modbus Settings → the bus2 row already
-   exists; set each bus2 sensor's **Bus** column and APPLY. Until a
-   sensor is moved, bus2's Nano is polled with an empty read list.
-2. **Per-bus resend on blacklist** — the exclude set is global by
-   `slave_id`; the Device Health engine's resend is currently untagged,
-   so it reaches both segments. Harmless (each recompiles its own job)
-   but it briefly re-inits the *other* segment's Modbus timeout. Tag it
-   with the `busId` of the slave whose state changed.
-3. **Per-bus recovery controller** — bus2 has its own watchdog but shares
-   the RECOVERY CONTROLLER's `uhubctl` USB power-cycle, which is wired to
-   one port. Give bus2 its own port so a wedged bus2 Nano is power-cycled
-   without dropping bus1. The port numbers must be read off the actual
-   hardware, so this is a panel-side step.
+   exists; set each bus2 sensor's **Bus** column and APPLY. Until a sensor is
+   moved, bus2's Nano is polled with an empty read list.
+2. **`BUSDUCT_UHUBCTL_BUS2`** — the hub location of the second Nano
+   (`sudo uhubctl` lists them, e.g. `1-2`), in `/etc/busduct/nodered.env`.
+   Unset means bus2 alarms normally but is never power-cycled; the controller
+   warns once per episode rather than silently doing nothing. The value is
+   pattern-validated before it reaches the root shell. If you have pinned
+   exact sudo arguments, note bus2's cycle command has a different form than
+   bus1's — see `deploy/sudoers.d/busduct-nodered`.
+3. **Restart** Node-RED, not just Deploy — `planRecovery` is new in
+   `functionGlobalContext`, which is only re-required at startup.
 
-Verify on the bench with two Nanos before the panel: pull bus2's link
-and confirm only bus2 slaves go OFFLINE/blacklisted while bus1 keeps
-polling, then restore and confirm bus2 recovers independently.
+#### Two-segment acceptance drill
+
+| Step | Expected |
+|---|---|
+| Boot | both Nanos get a job; sensors on both segments report |
+| Unplug **bus2's RS-485 link** | only bus2's devices blacklist; bus1's joints keep updating |
+| Leave bus2's **Nano** unplugged 60 s | `SYSTEM\|BUS2\|COMM_FAILURE` raises; `SYSTEM\|MODULE\|COMM_FAILURE` does **not** |
+| A further 90 s, with `BUSDUCT_UHUBCTL_BUS2` set | only bus2's hub port cycles; bus1 never stops polling |
+| Reconnect bus2 | its COMM alarm clears, devices restore, joints leave STALE/OFFLINE |
+| Edit a bus2 sensor and APPLY | only bus2 resends |
+| Blacklist a bus1 device | the resend names bus1 only |
+
+⚠ **Two things that will confuse the drill if you do not expect them.**
+A disconnected transmitter on this hardware can keep answering Modbus with a
+fresh, in-band, status-OK `0.0 °C` for **~20 minutes** before the bus finally
+comm-fails (documented 2026-07-28, and why the ambient resolver has a zero
+sentinel). Nothing blacklists during that window. And USB enumeration order is
+not stable across reboots — two identical Nanos can swap `ttyACM0`/`ttyACM1`,
+which sends each segment the other's read list. Check
+`ls -l /dev/serial/by-id/` before starting; a udev rule pinning each board's
+serial to a stable symlink is the permanent fix.

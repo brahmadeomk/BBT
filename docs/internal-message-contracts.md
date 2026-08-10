@@ -152,6 +152,41 @@ active/cleared pair.
 }
 ```
 
+## Segment tag — `msg.bus_id` (Slice 10 two-segment)
+
+On a two-segment panel each RS-485 bus is its own Nano on its own serial
+port. Frames from the **second** segment are tagged by `Tag Bus2` at the
+serial edge — the only place that knows which wire a frame arrived on:
+
+```jsonc
+msg.bus_id = "bus2"     // top-level msg property, NOT msg.payload.bus_id
+```
+
+It has to be top-level: at that point `payload` is still the raw serial
+string, and the `json` node downstream rewrites `payload` while leaving other
+msg properties alone, so the tag survives to the blacklist tap.
+
+Who reads it:
+
+- **Blacklist Engine** passes it to `processReadResult` as `ctx.busId`, so a
+  response resolves against a slave on the segment it actually came from.
+- Nothing else needs it. **ProcessLogic ignores it**, because joints are keyed
+  by unit address and the commissioning UI forces addresses unique across all
+  buses — which is exactly why one decode chain and one ProcessLogic serve
+  both segments.
+
+bus1 frames are **not** tagged: an absent `bus_id` means "the single-bus
+path", which is how every one-segment panel keeps working unchanged.
+
+Two related fields travel the other way, on messages heading *toward* a Nano:
+
+- `msg.busId` (camelCase, on resend messages) — which segment a resend is
+  addressed to. Each `Send Nano Job` drops a message naming another segment;
+  a resend with no `busId` is meant for every segment.
+- `msg.payload.busId` — on COMM watchdog messages into the Alarm Manager,
+  which derives the alarm key from it (`SYSTEM|BUS2|COMM_FAILURE`; absent or
+  `bus1` keeps the original `SYSTEM|MODULE|COMM_FAILURE`).
+
 ## What Slice 4 did *not* touch
 
 - No changes to either function node's logic - verified byte-identical

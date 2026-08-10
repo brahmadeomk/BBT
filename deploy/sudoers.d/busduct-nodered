@@ -15,4 +15,9 @@
 #
 # Tighten further (optional) by pinning the exact arguments, e.g.:
 #   pi ALL=(root) NOPASSWD: /usr/sbin/uhubctl -l 1-1 -a off, /usr/sbin/uhubctl -l 1-1 -a on
+#
+# On a two-segment panel the second Nano is cycled with a different form —
+# include it too, or bus2 recovery will fail with a password prompt:
+#   pi ALL=(root) NOPASSWD: /usr/sbin/uhubctl -a cycle --delay 3 -l 1-2
+# (substitute the hub location you put in BUSDUCT_UHUBCTL_BUS2).
 pi ALL=(root) NOPASSWD: /usr/sbin/uhubctl

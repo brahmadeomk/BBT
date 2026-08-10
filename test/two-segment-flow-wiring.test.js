@@ -85,20 +85,32 @@ describe('two-segment RS-485 flow wiring', () => {
 
   test('each segment has its own serial-silence watchdog', () => {
     // Sharing one watchdog would let bus2 traffic keep bus1 looking alive.
+    //
+    // bus1's is a `trigger` node hanging off its serial in. bus2's is NOT, and
+    // deliberately so: a trigger fires once and then needs an input message to
+    // re-arm — and its input is the very frame stream that has gone quiet, so a
+    // Nano that missed that single resend would never be handed a job again.
+    // bus2 uses a liveness stamp plus a repeating check, which keeps retrying.
     const bus1In = nodes.find((n) => n.type === 'serial in' && n.serial === 'b4162a7f8dcb9f60');
-    const tag = nodes.find((n) => n.type === 'function' && n.name === 'Tag Bus2');
-    const triggersOf = (n) => (n.wires || []).flat().map((id) => byId.get(id)).filter((t) => t && t.type === 'trigger');
-
-    const t1 = triggersOf(bus1In);
-    const t2 = triggersOf(tag);
+    const t1 = (bus1In.wires || []).flat().map((id) => byId.get(id)).filter((t) => t && t.type === 'trigger');
     assert.equal(t1.length, 1, 'bus1 has exactly one watchdog');
-    assert.equal(t2.length, 1, 'bus2 has exactly one watchdog');
-    assert.notEqual(t1[0].id, t2[0].id, 'the segments must not share a watchdog');
+
+    const tag = nodes.find((n) => n.type === 'function' && n.name === 'Tag Bus2');
+    const bus2Wd = nodes.find((n) => n.name === 'Bus2 Silence Watchdog');
+    assert.ok(bus2Wd, 'bus2 has its own watchdog');
+    assert.notEqual(t1[0].id, bus2Wd.id, 'the segments must not share a watchdog');
+
+    // driven by a repeating tick against a stamp the tag writes, not by the
+    // frame stream itself
+    assert.match(tag.func, /flow\.set\('bus2_last_frame_ms'/);
+    assert.match(bus2Wd.func, /flow\.get\('bus2_last_frame_ms'\)/);
+    const tick = nodes.find((n) => n.type === 'inject' && (n.wires[0] || []).includes(bus2Wd.id));
+    assert.ok(tick && Number(tick.repeat) > 0, 'a repeating inject drives it');
 
     // bus2's watchdog recovers via its own compiled job, not the legacy
     // paraRaw read-job builder (which is bus1-only by design).
     const bus2Job = sendJobs.find((n) => n.func.includes("MY_BUS = 'bus2'"));
-    assert.ok((t2[0].wires || []).flat().includes(bus2Job.id),
+    assert.ok((bus2Wd.wires || []).flat().includes(bus2Job.id),
       "bus2's watchdog must resend bus2's own job");
   });
 });

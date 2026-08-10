@@ -13,6 +13,7 @@ const { processRemoteConfig, buildLegacyDrafts } = require('./remote-config-hand
 const { deriveLegacyBridge } = require('./modbus-settings-handler');
 const blacklist = require('./blacklist-handler');
 const { resolveAmbient } = require('../ambient-resolver');
+const { planRecovery } = require('../bus-recovery');
 
 const DEFAULT_ROOT = '/var/busduct/cfg';
 
@@ -27,4 +28,4 @@ function createStore(root = DEFAULT_ROOT) {
   return new ConfigStore({ root, validators: { modbus_joints: validateModbusJoints, alarms: validateAlarms, integration: validateIntegration } });
 }
 
-module.exports = { createStore, handleConfigManagerMessage, handleJointMasterMessage, handleModbusSettingsMessage, writeLegacyModbusGlobals, deriveLegacyBridge, appendLegacyAudit, processRemoteConfig, buildLegacyDrafts, buildNanoJobMessage, blacklist, resolveAmbient };
+module.exports = { createStore, handleConfigManagerMessage, handleJointMasterMessage, handleModbusSettingsMessage, writeLegacyModbusGlobals, deriveLegacyBridge, appendLegacyAudit, processRemoteConfig, buildLegacyDrafts, buildNanoJobMessage, blacklist, resolveAmbient, planRecovery };

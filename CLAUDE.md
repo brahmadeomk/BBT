@@ -488,8 +488,9 @@ decision log): disconnecting the ambient yields `ambient:null`/
 `deltaT:null` with **no false ΔT alarm**, reconnecting **clears** the ΔT
 alarms promptly (no 20-minute EMA decay), and the blacklist alarm names
 the commissioned device with its real ambient impact. Positional
-telemetry stays OFF (no cloud consumer yet) and two-segment RS-485 needs
-a second physical Nano — both dormant on the current panel. Built:
+telemetry stays OFF (no cloud consumer yet); **two-segment RS-485 is now
+wired end to end**, alarms included, against a real second Nano
+(2026-08-10 — the acceptance drill is still pending). Built:
 - **Ambient outlier rejection + fallback** (`src/config-service/ambient-resolver.js`,
   exposed as `busductConfigService.resolveAmbient`): a reading is usable
   only if **in-band (-20..80 C) AND fresh (age ≤ `maxAgeSec`, default 60 s)
@@ -565,9 +566,35 @@ a second physical Nano — both dormant on the current panel. Built:
   resending bus2's own compiled job rather than the bus1-only legacy
   `paraRaw` builder. `test/two-segment-flow-wiring.test.js` pins all of
   this — the flow is hand-imported JSON and a half-wired segment fails
-  silently. Still open: commissioning bus2's sensors, tagging the
-  blacklist resend per bus, and a per-bus `uhubctl` port in the RECOVERY
-  CONTROLLER (needs the hardware to read port numbers off).
+  silently.
+- **Alarm generation for bus2 (2026-08-10)** — the wiring above carries
+  bus2's *data*; raising an *alarm* about bus2 needed a further layer.
+  ΔT/RoR needed nothing (ProcessLogic is keyed by unit address, unique
+  panel-wide). The rest could not be shared: bus2 got **its own COMM
+  watchdog** and stopped feeding bus1's — the transport wiring had routed
+  bus2 into bus1's `Data Out`, so either Nano being alive satisfied the
+  single watchdog and *neither* segment's total failure could alarm. The
+  **Alarm Manager** now derives the COMM key from `msg.payload.busId`
+  (`SYSTEM|BUS2|COMM_FAILURE`; absent or `bus1` keeps the original key
+  byte-identical). **Per-bus blacklist resend** via `resendBusIds` from
+  `_finalize`, so a bus2 failure can't glitch bus1 (the firmware re-inits
+  its Modbus timeout on every job update). **Per-bus USB recovery**: the
+  RECOVERY CONTROLLER is thin over `src/config-service/bus-recovery.js`
+  (`planRecovery` — pure, timing-injected, independent ladders per
+  segment); bus2's hub port comes from **`BUSDUCT_UHUBCTL_BUS2`** in
+  `/etc/busduct/nodered.env` (site wiring, not code) and is
+  pattern-validated before it reaches the root shell — unset means bus2
+  alarms normally but is never cycled. Guarded by
+  `test/flows-bus2-alarms.test.js`.
+- **Two fixes from the first panel drill (2026-08-10)** — (1) the bus2
+  silence watchdog was a `trigger`, which fires ONCE and then needs an
+  input to re-arm, and its input is the frame stream that has gone quiet;
+  a Nano that missed that single resend stayed dark forever. Now a
+  liveness stamp + 15 s check that keeps retrying. (2) the Diag **Status**
+  column froze: `global.Status[addr]` is written only when a frame is
+  decoded and nothing expired it, so a device that stopped being polled
+  kept reading "Connected" and a dead segment rendered all-green. Writes
+  are stamped; entries older than 60 s read **"No Data"**.
 - **Commissioning UI for the second bus (2026-08-08)** — the schema
   allowed two buses but there was no way to *enter* one (user report).
   The Modbus Settings dashboard now has an **RS-485 Buses table**

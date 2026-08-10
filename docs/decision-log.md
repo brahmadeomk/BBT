@@ -2783,3 +2783,80 @@ script.)
 **Not yet live-verified.** Needs re-import + Deploy, then the bench check from
 §B: pull bus2's link and confirm only bus2 slaves go OFFLINE/blacklisted while
 bus1 keeps polling, then restore and confirm bus2 recovers on its own.
+
+## 2026-08-10 — Alarm generation for bus2, and two findings from the first drill
+
+**User:** *"We have connected second nano for bus2 and tested as per flow
+wiring run through and getting data. Can do complete wiring alarm generation
+for bus2"* — the transport landed in the previous entry; this closes the
+alarm half, including its outstanding items 2 and 3.
+
+Data arriving is not the same as a monitored segment. Most of what decides an
+alarm was per-panel state that looks correct right up until a whole segment
+dies.
+
+**ΔT/RoR needed nothing**, and that is the payoff from the shared-chain
+decision: ProcessLogic is keyed by unit address, unique panel-wide, so bus2's
+joints were already getting KPIs and process alarms the moment its frames
+reached the shared `Data Out`.
+
+**The COMM watchdog was actively broken by sharing.** `Tag Bus2` fed bus2's
+raw frames into bus1's `Data Out`, which is what feeds *the* COMM watchdog.
+That watchdog is satisfied while **either** Nano is talking — so a live bus2
+masked a dead bus1 and vice versa, and after the transport commit *neither*
+segment's total failure could raise a COMM alarm at all. The previous entry's
+own test asserted "separate watchdogs" for the serial-silence trigger and was
+right to; the COMM watchdog is a second, different shared watchdog that the
+same reasoning applies to. bus2 now has its own, emitting
+`{commTimeout, busId:'bus2'}`, and the Alarm Manager derives the key from it.
+bus1's key stays byte-identical (`SYSTEM|MODULE|COMM_FAILURE`) so its history
+and ACK state are continuous.
+
+**Per-bus blacklist resend and per-bus USB recovery** were items 2 and 3 on
+the previous entry's outstanding list, and are now done. Making recovery
+per-bus turned one state machine into a loop over segments with independent
+retry ladders — real logic, so it moved to `src/config-service/bus-recovery.js`
+(`planRecovery`, pure and timing-injected) and the function node became
+wiring. bus2's hub port comes from `BUSDUCT_UHUBCTL_BUS2` rather than being
+guessed: it is site wiring. It reaches a root shell by string concatenation
+(that is how Node-RED's `addpay` works), so it is pattern-validated first — a
+typo in an env file must not become a command.
+
+### Two findings from the first panel drill
+
+**"When bus was disconnected its sensor status in debug was showing
+connected."** `global.Status[addr]` is written *only* when a frame for that
+device is decoded, and nothing expired it. A device that stops being polled at
+all — blacklisted, or its whole segment down — keeps showing its last good
+value forever, so a dead segment renders as an all-green panel. Writes are now
+stamped and entries older than 60 s read **"No Data"**, styled as a fault. 60 s
+is comfortably longer than any configured poll interval, so a live device never
+flickers.
+
+Worth stating what this does *not* explain: this panel's transmitters can keep
+answering Modbus with a fresh, in-band, status-OK `0.0 °C` for **~20 minutes**
+after being disconnected (found 2026-07-28, and the reason the ambient resolver
+has a zero sentinel). If that is what happened, the status was *correct* and
+nothing would blacklist for 20 minutes either. The Data column tells them
+apart: near-zero values mean the Nano really was reporting OK.
+
+**"After connecting bus connection could not resume."** The silence watchdog
+was a `trigger` node. A trigger fires once and then needs an input message to
+re-arm — and its input is the very frame stream that has gone quiet. bus2 got
+exactly one resend attempt; if the Nano missed it (still booting its USB CDC,
+or re-enumerated) it was never handed a job again. Replaced with a liveness
+stamp plus a periodic check that retries every 30 s for as long as the segment
+is silent. Not confirmed as the cause — the other strong candidate is USB
+re-enumeration handing the Nano a different `ttyACM*`, which needs `dmesg` to
+settle — but it is a defect on its own terms.
+
+### On the duplicate implementation
+
+This branch originally carried its own complete bus2 transport pipeline, built
+before the previous entry's commit existed on the default branch. Merging both
+would have put two `serial in` nodes on `/dev/ttyACM1` fighting for the port.
+Rebased onto the default branch and the duplicate transport dropped: the
+shipping wiring is the one already deployed and drilled on the panel, and this
+change is now purely the alarm layer on top of it. The two test files split the
+same way — `two-segment-flow-wiring.test.js` owns transport,
+`flows-bus2-alarms.test.js` owns alarms. 545 tests pass.

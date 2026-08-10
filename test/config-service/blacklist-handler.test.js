@@ -273,3 +273,66 @@ describe('blacklist-handler — bus-tagged slave resolution (Slice 10)', () => {
     assert.deepEqual(r.excludeSlaveIds, ['sl09'], 'blacklisted the bus2 slave, not bus1');
   });
 });
+
+describe('blacklist-handler — per-bus resend (Slice 10 two-segment)', () => {
+  // Two segments, each with its own Nano. Addresses are unique panel-wide (the
+  // commissioning UI enforces it), but the resend must still be per-bus.
+  const twoBus = {
+    modbus: {
+      buses: [{ bus_id: 'bus1' }, { bus_id: 'bus2' }],
+      slaves: [
+        { slave_id: 'sl01', unit_address: 5, bus_id: 'bus1' },
+        { slave_id: 'sl09', unit_address: 60, bus_id: 'bus2' },
+      ],
+    },
+    joints: [
+      { joint_id: 'J10', slave_id: 'sl01' },
+      { joint_id: 'J50', slave_id: 'sl09' },
+    ],
+  };
+
+  test('a bus2 device failing resends ONLY bus2', () => {
+    const tracker = bh.newTracker(trackerOpts);
+    let r;
+    for (let i = 0; i < 3; i++) {
+      r = bh.processReadResult(tracker, { t: 'r', id: 60, st: 'err' }, { doc: twoBus, nowMs: T0 + i, prevExcludeKey: '' });
+    }
+    assert.equal(r.resendNeeded, true);
+    assert.deepEqual(r.resendBusIds, ['bus2'], 'bus1 must keep polling undisturbed');
+  });
+
+  test('a probe promotion resends only the probing slave\'s bus', () => {
+    const tracker = bh.newTracker(trackerOpts);
+    for (let i = 0; i < 3; i++) {
+      bh.processReadResult(tracker, { t: 'r', id: 60, st: 'err' }, { doc: twoBus, nowMs: T0 + i, prevExcludeKey: '' });
+    }
+    const promote = bh.processTick(tracker, { doc: twoBus, nowMs: T0 + 30 * 1000 + 5, prevExcludeKey: 'sl09' });
+    assert.equal(promote.resendNeeded, true);
+    assert.deepEqual(promote.resendBusIds, ['bus2']);
+  });
+
+  test('devices failing on both segments resend both', () => {
+    const tracker = bh.newTracker(trackerOpts);
+    let r;
+    for (let i = 0; i < 3; i++) {
+      bh.processReadResult(tracker, { t: 'r', id: 5, st: 'err' }, { doc: twoBus, nowMs: T0 + i, prevExcludeKey: '' });
+      r = bh.processReadResult(tracker, { t: 'r', id: 60, st: 'err' }, { doc: twoBus, nowMs: T0 + i, prevExcludeKey: '' });
+    }
+    assert.deepEqual(r.resendBusIds.sort(), ['bus1', 'bus2']);
+  });
+
+  test('no state change -> no bus is resent', () => {
+    const tracker = bh.newTracker(trackerOpts);
+    const r = bh.processReadResult(tracker, { t: 'r', id: 5, st: 'ok' }, { doc: twoBus, nowMs: T0, prevExcludeKey: '' });
+    assert.equal(r.resendNeeded, false);
+    assert.deepEqual(r.resendBusIds, []);
+  });
+
+  test('a single-bus panel still names its one bus, so the lone Send node accepts it', () => {
+    const tracker = bh.newTracker(trackerOpts);
+    let r;
+    for (let i = 0; i < 3; i++) r = bh.processReadResult(tracker, { t: 'r', id: 5, st: 'err' }, { doc, nowMs: T0 + i });
+    // `doc` (top of file) predates multi-bus: no bus_id, no buses array
+    assert.deepEqual(r.resendBusIds, ['bus1']);
+  });
+});
