@@ -2860,3 +2860,36 @@ shipping wiring is the one already deployed and drilled on the panel, and this
 change is now purely the alarm layer on top of it. The two test files split the
 same way — `two-segment-flow-wiring.test.js` owns transport,
 `flows-bus2-alarms.test.js` owns alarms. 545 tests pass.
+
+## 2026-08-10 — Alarm layer deployed to the panel; no regression
+
+**User:** *"It worked on pi. Checked alarms and dashboard no abnormalities found."*
+
+This is the regression baseline, and it is worth separating from the drill.
+The alarm layer edits three things that are shared with bus1 and would fail
+loudly if they were wrong: the **Alarm Manager** (COMM key derivation), the
+**RECOVERY CONTROLLER** (rewritten thin over `planRecovery`), and the legacy
+**decode sink** feeding `global.Status`. A mistake in any of them shows up
+within a minute as spurious alarms, a dead recovery ladder, or a Diag table
+reading "No Data" for healthy devices. None appeared, which is the evidence
+that:
+
+- bus1's COMM alarm key is genuinely unchanged (no new/duplicate SYSTEM alarm).
+- The 60 s status-staleness threshold is comfortably longer than this panel's
+  real poll interval — a live device does not flicker to "No Data".
+- `planRecovery` loaded from `functionGlobalContext` (a missing library would
+  have posted `node.error` on the first 5 s tick).
+
+**Getting there took a git detour worth recording.** The Pi was checked out on
+the *default* branch but its content was the old base plus two commits pulled
+from this branch before it was rebased — so `git pull` reported divergent
+branches and refused. It had never received the transport commit, so the
+duplicate-pipeline hazard never reached the panel. Resolved by
+`reset --hard origin/<default>` then `checkout -B` onto the PR branch, and
+`git config pull.ff only` so a deploy checkout fails loudly instead of
+silently creating merge commits. The force-push that caused it was mine.
+
+**Still outstanding: the fault-injection drill.** Nothing here exercises a
+failure — the per-segment COMM alarm, per-bus blacklist resend and per-bus USB
+recovery are all still unproven on real hardware. Steps in
+`docs/slice10-design-proposals.md` §B.

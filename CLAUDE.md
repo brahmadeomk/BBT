@@ -490,7 +490,8 @@ alarms promptly (no 20-minute EMA decay), and the blacklist alarm names
 the commissioned device with its real ambient impact. Positional
 telemetry stays OFF (no cloud consumer yet); **two-segment RS-485 is now
 wired end to end**, alarms included, against a real second Nano
-(2026-08-10 — the acceptance drill is still pending). Built:
+(2026-08-10 — deployed to the panel with no regression; the
+fault-injection acceptance drill is still pending). Built:
 - **Ambient outlier rejection + fallback** (`src/config-service/ambient-resolver.js`,
   exposed as `busductConfigService.resolveAmbient`): a reading is usable
   only if **in-band (-20..80 C) AND fresh (age ≤ `maxAgeSec`, default 60 s)
