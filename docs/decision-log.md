@@ -3086,3 +3086,37 @@ config nodes at `/dev/busduct-bus*` before the rule is installed leaves the
 panel dark — a Node-RED serial node just retries a missing device forever, with
 no fallback. So this is a two-step deploy: install the rule, confirm both
 symlinks exist, and only then switch the flow over.
+
+## 2026-08-12 — udev rule live; the flow now opens the stable symlinks
+
+Installed on the panel and verified:
+
+```
+/dev/busduct-bus1 -> ttyACM0     (Nano 47B60EAA…, hub 1-1 port 2)
+/dev/busduct-bus2 -> ttyACM1     (Nano 3430A7EC…, hub 1-1 port 1)
+```
+
+Both symlinks resolve to the segments they should, so step 2 is done: the
+flow's two `serial-port` config nodes now open `/dev/busduct-bus1` and
+`/dev/busduct-bus2` instead of `/dev/ttyACM0`/`ttyACM1`. Node ids are
+unchanged, so every wire and both wiring test suites are untouched.
+
+`test/flows-bus2-alarms.test.js` gains a guard against reverting to `ttyACM*`.
+That would reintroduce two failures at once, and the second is the subtle one:
+the probe-order hazard (the names can swap across a reboot and hand each
+segment the other's read list), **and** the drift between polling identity and
+recovery target. The symlinks and `BUSDUCT_UHUBCTL_*` are keyed to the same hub
+port, so as long as both are used, a COMM failure cannot cycle the wrong Nano.
+Go back to `ttyACM*` and that guarantee is gone silently — the panel keeps
+working right up until a recovery fires on the wrong segment.
+
+**Deployment ordering matters and is now load-bearing.** The udev rule must be
+installed before this flow is imported, or Node-RED retries a missing device
+forever with no fallback and the panel goes dark. Recorded in the rules file's
+own header and in the deployment doc.
+
+### State of the two-segment work
+Everything in the drill is now verified on the panel except the USB-recovery
+leg, which needs `BUSDUCT_UHUBCTL_BUS1=1-1:2` / `BUSDUCT_UHUBCTL_BUS2=1-1:1`
+in `/etc/busduct/nodered.env` and a Node-RED restart. Note those values are
+crossed relative to the intuitive guess.

@@ -100,6 +100,23 @@ describe('flows_BBT.json — bus2 alarm generation', () => {
     assert.ok(reachable(watchdog.id).has(one('Send Nano Job (bus2)').id), 'watchdog -> bus2 resend');
   });
 
+  test('each segment opens a stable per-port symlink, not a ttyACM name', () => {
+    // ttyACM0/ttyACM1 are assigned in probe order and can swap across a reboot,
+    // which would hand each segment the other's read list. Worse, the udev
+    // symlinks are keyed on the same hub port that BUSDUCT_UHUBCTL_* cycles, so
+    // reverting to ttyACM* also lets the polling identity drift out of step
+    // with the recovery target — a COMM failure would then cycle the wrong Nano.
+    const inUse = nodes
+      .filter((n) => n.type === 'serial in' || n.type === 'serial out')
+      .map((n) => byId.get(n.serial))
+      .filter(Boolean);
+    assert.ok(inUse.length >= 4, 'both segments have an in/out pair');
+    for (const cfg of inUse) {
+      assert.match(cfg.serialport, /^\/dev\/busduct-bus[12]$/, `${cfg.serialport} must be a stable symlink`);
+    }
+    assert.equal(new Set(inUse.map((c) => c.serialport)).size, 2, 'and the two segments differ');
+  });
+
   test('the Diag status column expires instead of freezing on its last value', () => {
     // global.Status is written only when a frame arrives, so a device that
     // stopped being polled would keep reading "Connected" indefinitely — which
