@@ -3005,3 +3005,40 @@ the choice is between a wide cycle (both segments blip, both recover) and no
 cycle at all. `sudo uhubctl` lists the hub locations, their ports, and which
 support power switching — that output decides it. Until then the wide form is
 the default and the warning makes its cost visible.
+
+## 2026-08-12 — Per-port USB power switching IS supported; both Nanos on one hub
+
+`sudo uhubctl` on the panel:
+
+```
+Current status for hub 1-1 [2109:3431 USB2.0 Hub, USB 2.10, 4 ports, ppps]
+  Port 1: 0103 power enable connect [2341:8057 Arduino NANO 33 IoT 3430A7EC50304D48502E3120FF181119]
+  Port 2: 0103 power enable connect [2341:8057 Arduino NANO 33 IoT 47B60EAA50304D48502E3120FF0E2E32]
+  Port 3: 0100 power
+  Port 4: 0100 power
+```
+
+This answers the question left open in the previous entry. **`ppps` = per-port
+power switching**, so this panel *can* cut power to one port without touching
+the others — per-segment USB recovery is physically possible here, and the
+`LOCATION:PORT` scoping added in the previous entry is exactly what it needs.
+The two Nanos sit on **ports 1 and 2 of hub `1-1`**, which is also why the
+unscoped `uhubctl -l 1-1` restarted both: it was switching all four ports.
+
+Note the Nanos are on an **external VIA Labs 2109:3431 hub**, itself on port 1
+of the Pi's internal hub `1`. That is what provides per-port switching — the
+Pi's own root ports (hub `2`, the USB 3 controller) show all four ports
+permanently powered, which is the ganged behaviour that would have made this
+impossible. The external hub is load-bearing for recovery, not just for port
+count.
+
+**Consequence for identity: tie the segment to the hub PORT, not the device
+name.** Both `/dev/ttyACM*` enumeration order and the `uhubctl -p` target are
+per-port facts, and they must not drift apart — if `bus1` is the Nano on port 1
+for polling but port 2 for recovery, a COMM failure power-cycles the wrong
+segment. A `udev` rule keyed on `KERNELS=="1-1.1"` / `"1-1.2"` giving stable
+`/dev/busduct-bus1` / `bus2` symlinks makes both facts derive from the same
+physical port, and survives replacing a dead Nano (plug the new one into the
+same port, change nothing). Pending the current port↔ttyACM mapping before
+assigning, so the drill's existing bus↔sensor commissioning is not silently
+swapped.
