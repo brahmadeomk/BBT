@@ -2964,3 +2964,44 @@ no spurious "No Data" being reported.
   alarms correctly but is never power-cycled.
 - **Per-bus resend on a bus2-only config edit** — visible only in the debug
   sidebar (`bus2 job out` fires, bus1's stays quiet), not in alarm history.
+
+## 2026-08-12 — Per-bus resend verified; `uhubctl` scoping is the real constraint
+
+**Two results from the panel.**
+
+**Per-bus resend on a config edit — VERIFIED.** After a bus2-only change, only
+the bus2 debug fired, carrying
+`{"read":[3,[3,3,1],[4,3,1],[5,3,1]],"comm":[10000,9600,1000]}` — three packets
+for slaves 3, 4 and 5, which is exactly bus2's slave set, at base address 3,
+with bus2's own comm triple. No bus1 slave appears and bus1's job path stayed
+silent. That is `compileNanoJob(doc, {busId:'bus2'})` filtering correctly
+against the real applied config, and it closes the last outstanding wiring
+item from the drill.
+
+**`uhubctl` restarts the entire USB hub** (user, at the panel). This is not a
+regression from this change — it is what the command has always done.
+`uhubctl -l 1-1` with **no `-p`** switches every port on that hub, and bus1's
+exec node has never passed `-p`. With one Nano that was correct. With two
+Nanos on one hub it means recovering either segment power-cycles the other,
+which defeats the point of making recovery per-bus.
+
+**What changed here.** The hub target is now a spec, `LOCATION` or
+`LOCATION:PORT` (`1-1`, `1-1:3`, `1-1.4:2,3`), parsed and validated into
+`uhubctl` arguments (`-l 1-1 -p 3`) by `planRecovery`. `bus1`'s location is now
+declared to the controller as well — not to build its command, which stays
+hardcoded in its proven exec node, but so the planner can *notice* the
+collision.
+
+**On a shared hub it warns and still cycles**, deliberately. Refusing would
+leave the dead segment dead, which is worse; the other segment reboots and its
+silence watchdog hands its job back. So the operator gets
+*"bus2 recovery will also power-cycle bus1 — they share hub 1-1"* once per
+episode, with the fix (`:PORT`) named in the message.
+
+**Open question for the panel, not decidable here.** Whether this Pi can
+switch ports individually at all. Many models gang every USB port onto one
+switch, in which case per-segment power recovery is physically impossible and
+the choice is between a wide cycle (both segments blip, both recover) and no
+cycle at all. `sudo uhubctl` lists the hub locations, their ports, and which
+support power switching — that output decides it. Until then the wide form is
+the default and the warning makes its cost visible.

@@ -18,6 +18,8 @@
 #
 # On a two-segment panel the second Nano is cycled with a different form —
 # include it too, or bus2 recovery will fail with a password prompt:
-#   pi ALL=(root) NOPASSWD: /usr/sbin/uhubctl -a cycle --delay 3 -l 1-2
-# (substitute the hub location you put in BUSDUCT_UHUBCTL_BUS2).
+#   pi ALL=(root) NOPASSWD: /usr/sbin/uhubctl -a cycle --delay 3 -l 1-1 -p 3
+# (substitute the hub location/port you put in BUSDUCT_UHUBCTL_BUS2). Note the
+# `-p` scoping: without it uhubctl switches every port on the hub, which on a
+# two-Nano panel power-cycles both segments at once.
 pi ALL=(root) NOPASSWD: /usr/sbin/uhubctl

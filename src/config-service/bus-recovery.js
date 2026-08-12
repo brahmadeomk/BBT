@@ -32,10 +32,47 @@ const FIRST_RESET_DELAY_MS = 90_000;
 const COOLDOWN_MS = 60_000;
 const MAX_RETRIES = 3;
 
-// A uhubctl location: "1-1", "3-2", "1-1.4". The value reaches a root shell by
-// string concatenation in the exec node, so anything else is refused rather
-// than run — a typo in the environment file must not become a command.
+// A hub spec is `LOCATION` or `LOCATION:PORT(S)` — e.g. "1-1" (the whole hub)
+// or "1-1:2" / "1-1:2,4" (only those ports on it).
+//
+// The port half matters on a two-segment panel. `uhubctl -l 1-1` with no `-p`
+// switches EVERY port on that hub, so with both Nanos on one hub, recovering
+// one segment power-cycles the other — confirmed on the panel 2026-08-12.
+// Scoping to a port is what makes recovery per-segment; not every Pi model can
+// switch ports individually, so the wide form stays supported (with a warning)
+// rather than being rejected.
+//
+// Both halves reach a root shell by string concatenation in the exec node, so
+// anything not matching is refused rather than run — a typo in the environment
+// file must not become a command.
 const PORT_RE = /^[0-9]+(-[0-9]+)*(\.[0-9]+)*$/;
+const HUB_PORT_RE = /^[0-9]+(,[0-9]+)*$/;
+
+/** "1-1:2" -> { location: "1-1", port: "2" }; invalid -> null. */
+function parseHubSpec(spec) {
+  if (typeof spec !== 'string' || !spec) return null;
+  const [location, port, ...rest] = spec.split(':');
+  if (rest.length) return null;
+  if (!PORT_RE.test(location)) return null;
+  if (port !== undefined && !HUB_PORT_RE.test(port)) return null;
+  return { location, port: port ?? null };
+}
+
+/** The `uhubctl` target arguments for a parsed spec. */
+function hubArgs({ location, port }) {
+  return port ? `-l ${location} -p ${port}` : `-l ${location}`;
+}
+
+/**
+ * Would cycling `a` also cut power to `b`? True when they name the same hub and
+ * at least one is unscoped (whole-hub), or their port sets overlap.
+ */
+function hubsCollide(a, b) {
+  if (!a || !b || a.location !== b.location) return false;
+  if (!a.port || !b.port) return true;
+  const bp = new Set(b.port.split(','));
+  return a.port.split(',').some((p) => bp.has(p));
+}
 
 function blankState() {
   return { firstSeen: 0, lastReset: 0, retries: 0, emailSent: false, warned: false };
@@ -46,7 +83,9 @@ function blankState() {
  * @param {Array<{instanceId: string}>} args.alarms - currently active alarms
  * @param {object} args.states - persisted per-bus state (from node context)
  * @param {number} args.nowMs
- * @param {object} [args.ports] - { [busId]: uhubctl location }, for buses that need one
+ * @param {object} [args.ports] - { [busId]: hub spec `LOCATION` or `LOCATION:PORT` }.
+ *   Needed for buses with `needsPort`; also read for buses without one, purely
+ *   to detect that two segments share a hub.
  * @param {Array} [args.buses] - override the bus table (tests)
  * @returns {{states: object, resets: Array<{busId: string, port: string|null}>,
  *   alarmEvents: Array<object>, emails: Array<object>, warnings: string[], errors: string[]}}
@@ -100,8 +139,8 @@ function planRecovery({ alarms = [], states = {}, nowMs, ports = {}, buses = BUS
 
     let port = null;
     if (bus.needsPort) {
-      port = ports[bus.busId] || null;
-      if (!port) {
+      const spec = ports[bus.busId] || null;
+      if (!spec) {
         // Nothing to power-cycle. Say so once per episode rather than every
         // tick; the COMM alarm itself is already in front of the operator.
         if (!state.warned) {
@@ -111,11 +150,29 @@ function planRecovery({ alarms = [], states = {}, nowMs, ports = {}, buses = BUS
         next[bus.busId] = state;
         continue;
       }
-      if (!PORT_RE.test(port)) {
-        errors.push(`${bus.busId} hub port "${port}" is not a uhubctl location - refusing to run it`);
+      const hub = parseHubSpec(spec);
+      if (!hub) {
+        errors.push(`${bus.busId} hub spec "${spec}" is not LOCATION or LOCATION:PORT - refusing to run it`);
         next[bus.busId] = state;
         continue;
       }
+      // Cycling a hub that also powers another segment recovers this one at the
+      // cost of dropping a healthy one. Still worth doing - the other segment
+      // reboots and its silence watchdog hands it its job back - but the
+      // operator should know, and scoping with :PORT is the fix.
+      for (const other of buses) {
+        if (other.busId === bus.busId) continue;
+        if (hubsCollide(hub, parseHubSpec(ports[other.busId] || ''))) {
+          if (!state.warned) {
+            state.warned = true;
+            warnings.push(
+              `${bus.busId} recovery will also power-cycle ${other.busId} - they share hub ${hub.location}. ` +
+              `Scope each to its own port (e.g. ${hub.location}:2) if this Pi can switch ports individually.`
+            );
+          }
+        }
+      }
+      port = hubArgs(hub);
     }
 
     state.retries += 1;
@@ -139,6 +196,10 @@ function planRecovery({ alarms = [], states = {}, nowMs, ports = {}, buses = BUS
 module.exports = {
   BUSES,
   PORT_RE,
+  HUB_PORT_RE,
+  parseHubSpec,
+  hubArgs,
+  hubsCollide,
   FIRST_RESET_DELAY_MS,
   COOLDOWN_MS,
   MAX_RETRIES,

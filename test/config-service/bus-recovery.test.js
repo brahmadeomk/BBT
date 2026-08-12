@@ -74,7 +74,7 @@ describe('bus-recovery — escalation ladder', () => {
 describe('bus-recovery — the segments are independent', () => {
   test('a dead bus2 is cycled without touching bus1', () => {
     const r = toFirstReset([BUS2_COMM]);
-    assert.deepEqual(r.resets, [{ busId: 'bus2', port: '1-2' }]);
+    assert.deepEqual(r.resets, [{ busId: 'bus2', port: '-l 1-2' }]);
     assert.equal(r.alarmEvents[0].instanceId, 'SYSTEM|BUS2|RESET_1');
   });
 
@@ -82,7 +82,7 @@ describe('bus-recovery — the segments are independent', () => {
     const r = toFirstReset([BUS1_COMM, BUS2_COMM]);
     assert.deepEqual(r.resets, [
       { busId: 'bus1', port: null },
-      { busId: 'bus2', port: '1-2' },
+      { busId: 'bus2', port: '-l 1-2' },
     ]);
     assert.equal(r.alarmEvents.length, 2);
   });
@@ -95,7 +95,7 @@ describe('bus-recovery — the segments are independent', () => {
     const r = planRecovery({
       alarms: [BUS1_COMM, BUS2_COMM], states, nowMs: T0 + FIRST_RESET_DELAY_MS + 1, ports: PORTS,
     });
-    assert.deepEqual(r.resets, [{ busId: 'bus2', port: '1-2' }]);
+    assert.deepEqual(r.resets, [{ busId: 'bus2', port: '-l 1-2' }]);
   });
 });
 
@@ -121,6 +121,66 @@ describe('bus-recovery — bus2 hub port', () => {
 
   test('a hub-chained location like 1-1.4 is accepted', () => {
     const r = toFirstReset([BUS2_COMM], { bus2: '1-1.4' });
-    assert.deepEqual(r.resets, [{ busId: 'bus2', port: '1-1.4' }]);
+    assert.deepEqual(r.resets, [{ busId: 'bus2', port: '-l 1-1.4' }]);
+  });
+});
+
+describe('bus-recovery — hub specs and shared-hub blast radius', () => {
+  const { parseHubSpec, hubArgs, hubsCollide } = require('../../src/config-service/bus-recovery');
+
+  test('a bare location means the whole hub', () => {
+    assert.deepEqual(parseHubSpec('1-1'), { location: '1-1', port: null });
+    assert.equal(hubArgs(parseHubSpec('1-1')), '-l 1-1');
+  });
+
+  test('LOCATION:PORT scopes to one port', () => {
+    assert.deepEqual(parseHubSpec('1-1:2'), { location: '1-1', port: '2' });
+    assert.equal(hubArgs(parseHubSpec('1-1:2')), '-l 1-1 -p 2');
+    assert.equal(hubArgs(parseHubSpec('1-1.4:2,3')), '-l 1-1.4 -p 2,3');
+  });
+
+  test('anything that is not a location/port pair is rejected', () => {
+    for (const bad of ['1-1; rm -rf /', '1-1:2:3', '1-1:x', 'hub1', '', null]) {
+      assert.equal(parseHubSpec(bad), null, `must reject ${JSON.stringify(bad)}`);
+    }
+  });
+
+  test('two unscoped segments on one hub collide', () => {
+    // `uhubctl -l 1-1` with no -p switches every port on that hub, so this
+    // would power-cycle both Nanos.
+    assert.equal(hubsCollide(parseHubSpec('1-1'), parseHubSpec('1-1')), true);
+    assert.equal(hubsCollide(parseHubSpec('1-1'), parseHubSpec('1-1:2')), true, 'unscoped side still hits everything');
+  });
+
+  test('distinct ports on one hub do not collide', () => {
+    assert.equal(hubsCollide(parseHubSpec('1-1:2'), parseHubSpec('1-1:3')), false);
+    assert.equal(hubsCollide(parseHubSpec('1-1:2,3'), parseHubSpec('1-1:3')), true, 'overlapping sets do');
+  });
+
+  test('different hubs never collide', () => {
+    assert.equal(hubsCollide(parseHubSpec('1-1'), parseHubSpec('2-1')), false);
+  });
+
+  test('a shared hub warns but still recovers', () => {
+    // Refusing would be worse: the dead segment would stay dead. The other
+    // segment reboots and its silence watchdog hands its job back.
+    const shared = { bus1: '1-1', bus2: '1-1' };
+    const seen = planRecovery({ alarms: [BUS2_COMM], states: {}, nowMs: T0, ports: shared });
+    const r = planRecovery({
+      alarms: [BUS2_COMM], states: seen.states, nowMs: T0 + FIRST_RESET_DELAY_MS + 1, ports: shared,
+    });
+    assert.deepEqual(r.resets, [{ busId: 'bus2', port: '-l 1-1' }], 'still cycles');
+    assert.equal(r.warnings.length, 1);
+    assert.match(r.warnings[0], /will also power-cycle bus1/);
+  });
+
+  test('scoped to its own port, no warning', () => {
+    const scoped = { bus1: '1-1:2', bus2: '1-1:3' };
+    const seen = planRecovery({ alarms: [BUS2_COMM], states: {}, nowMs: T0, ports: scoped });
+    const r = planRecovery({
+      alarms: [BUS2_COMM], states: seen.states, nowMs: T0 + FIRST_RESET_DELAY_MS + 1, ports: scoped,
+    });
+    assert.deepEqual(r.resets, [{ busId: 'bus2', port: '-l 1-1 -p 3' }]);
+    assert.deepEqual(r.warnings, []);
   });
 });
