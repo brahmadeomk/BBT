@@ -490,11 +490,10 @@ alarms promptly (no 20-minute EMA decay), and the blacklist alarm names
 the commissioned device with its real ambient impact. Positional
 telemetry stays OFF (no cloud consumer yet); **two-segment RS-485 is now
 wired end to end**, alarms included, against a real second Nano
-(2026-08-10 — deployed with no regression; **alarm generation
-live-verified 2026-08-11**: per-segment COMM alarms raise/clear
-independently, bus2 devices blacklist in isolation, and a bus2 joint
-produces the full ΔT/RoR ladder. USB recovery per bus still unproven).
-Built:
+(**fully live-verified 2026-08-12** — per-segment COMM alarms, isolated
+blacklisting, the ΔT/RoR ladder on both segments, per-bus resend, and
+per-bus USB recovery cycling only its own hub port while the other
+segment kept polling). Built:
 - **Ambient outlier rejection + fallback** (`src/config-service/ambient-resolver.js`,
   exposed as `busductConfigService.resolveAmbient`): a reading is usable
   only if **in-band (-20..80 C) AND fresh (age ≤ `maxAgeSec`, default 60 s)

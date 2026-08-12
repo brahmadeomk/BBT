@@ -3120,3 +3120,50 @@ Everything in the drill is now verified on the panel except the USB-recovery
 leg, which needs `BUSDUCT_UHUBCTL_BUS1=1-1:2` / `BUSDUCT_UHUBCTL_BUS2=1-1:1`
 in `/etc/busduct/nodered.env` and a Node-RED restart. Note those values are
 crossed relative to the intuitive guess.
+
+## 2026-08-12 — Per-bus USB recovery verified; the two-segment drill is COMPLETE
+
+The last outstanding leg, run on the panel with
+`BUSDUCT_UHUBCTL_BUS1=1-1:2` / `BUSDUCT_UHUBCTL_BUS2=1-1:1` set. bus2's Nano
+was pulled:
+
+```
+14:13:52  bus2 data stops
+14:14:52  SYSTEM|BUS2|COMM_FAILURE raised            <- 60s watchdog
+14:15:14  "bus2 silent (82s), resending its job"     <- retry
+14:15:44  "bus2 silent (112s)"                          every
+14:16:14  "bus2 silent (142s)"                          30s
+14:16:24  USB reset attempt 1 on bus2                <- 92s after COMM (>= 90s)
+14:16:44  "bus2 silent (172s)"
+14:17:24  USB reset attempt 2 on bus2                <- exactly 60s later
+14:17:44  bus2 COMM alarm CLEARED                    <- segment recovered
+```
+
+Every constant in `planRecovery` shows up in the timestamps: the 90 s hold
+before the first cycle (92 s elapsed), the 60 s cooldown (exactly 60 s between
+attempts), and the per-segment `RESET_n` events reading *"USB reset attempt N
+**on bus2**"*.
+
+**The decisive detail is what did NOT happen.** Active Alarms showed exactly
+one alarm throughout, and the history carries no bus1 COMM alarm and no bus1
+reset events. bus1 polled continuously while bus2's Nano was power-cycled
+twice. That is the proof that:
+
+- **`-p` port scoping works** — only hub port 1 was switched, not all four. The
+  earlier whole-hub behaviour would have dropped bus1 at 14:16:24.
+- **The crossed mapping was right.** Had `bus2` been pointed at port 2, this
+  drill would have power-cycled *bus1's* Nano — bus1 would have raised its own
+  COMM alarm and bus2 would never have recovered. The absence of that is the
+  strongest confirmation available that `bus2 = 1-1:1` is correct.
+
+**The retrying watchdog earned its keep, visibly.** The resend at 14:16:44 came
+20 s after USB reset attempt 1, i.e. while the Nano was still booting its USB
+CDC — exactly the window in which the old one-shot `trigger` would have burned
+its single attempt and stranded the segment forever. Because it keeps retrying,
+the missed resend cost nothing and the next attempt landed.
+
+### Slice 10 two-segment RS-485: done
+Transport, alarm generation, blacklisting, per-bus resend, per-segment COMM
+alarms and per-bus USB recovery are all live-verified on the panel, plus the
+process-alarm ladder on both segments (heat test, 2026-08-11) and stable
+per-port device naming. Nothing in §B's drill is outstanding.
