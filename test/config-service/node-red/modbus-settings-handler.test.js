@@ -489,6 +489,10 @@ describe('handleModbusSettingsMessage - two RS-485 segments', () => {
     );
     assert.deepEqual(added.msg.payload.buses.map((b) => b.bus_id), ['bus1', 'bus2']);
     assert.equal(added.draft.buses.length, 2, 'persisted so a refresh does not lose it');
+    // Pre-fill the stable per-port symlink rather than a ttyACM name: ttyACM
+    // numbers are probe-order and can swap across a reboot, and the udev rule
+    // keys each segment to the same hub port that BUSDUCT_UHUBCTL_* cycles.
+    assert.equal(added.msg.payload.buses[1].port, '/dev/busduct-bus2');
 
     const removed = handleModbusSettingsMessage(
       { payload: { action: 'delete_bus', index: 1, slaves: state.slaves, buses: added.msg.payload.buses } },

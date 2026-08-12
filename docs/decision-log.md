@@ -3167,3 +3167,26 @@ Transport, alarm generation, blacklisting, per-bus resend, per-segment COMM
 alarms and per-bus USB recovery are all live-verified on the panel, plus the
 process-alarm ladder on both segments (heat test, 2026-08-11) and stable
 per-port device naming. Nothing in §B's drill is outstanding.
+
+## 2026-08-12 — ADD BUS pre-fills the stable symlink, not a ttyACM name
+
+Follow-through from the udev change. The Modbus Settings **ADD BUS** button
+pre-filled `/dev/ttyACM${buses.length}`, which now contradicts the shipping
+convention: a third segment would be suggested `/dev/ttyACM2` while the two
+existing ones read `/dev/busduct-bus1`/`bus2`. It now pre-fills
+`/dev/busduct-bus${n}`, matching the bus id it just allocated.
+
+It is only a starting point in an editable field, but the default is what gets
+accepted unthinkingly, and accepting a ttyACM name reintroduces both problems
+the udev rule solved — probe-order swapping, and the drift between polling
+identity and the `BUSDUCT_UHUBCTL_*` recovery target. Pinned by a test, since
+this is now a convention rather than an arbitrary default.
+
+Also corrected two stale port references in `CLAUDE.md` (the Nano resend path
+and the bus2 wiring bullet) and the `ADD BUS` row of §B's UI acceptance table.
+
+**The panel's own applied config is a separate, operator-side change** — bus
+ports live in the ConfigStore on the Pi, not in this repo. Changing them is
+safe and non-disruptive: `port` is not part of the compiled Nano job (`comm` is
+`[inter_frame_us, baud, timeout_ms]`), so `nanoJobsEqual` sees no difference
+and **no resend is issued** — neither segment's polling is interrupted.

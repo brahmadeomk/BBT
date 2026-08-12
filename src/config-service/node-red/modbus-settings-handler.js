@@ -87,9 +87,13 @@ function handleModbusSettingsMessage(msg, deps) {
     const usedIds = new Set(buses.map((b) => b.bus_id));
     let n = 1;
     while (usedIds.has(`bus${n}`)) n++;
-    // /dev/ttyACM0 is the first Nano's port on this panel, so the second Nano
-    // typically enumerates as ACM1 - a starting point the operator can correct.
-    buses.push(DEFAULT_BUS(`bus${n}`, `/dev/ttyACM${buses.length}`));
+    // Pre-fill the stable per-port symlink, not a ttyACM name. ttyACM numbers
+    // are assigned in probe order and can swap across a reboot, handing each
+    // segment the other's read list; the udev rule in deploy/udev keys each
+    // segment to its USB hub port instead - the same port BUSDUCT_UHUBCTL_*
+    // power-cycles, so polling identity and recovery target cannot drift apart.
+    // A starting point the operator can correct either way.
+    buses.push(DEFAULT_BUS(`bus${n}`, `/dev/busduct-bus${n}`));
   }
 
   if (action === 'delete_bus' && buses[index]) {

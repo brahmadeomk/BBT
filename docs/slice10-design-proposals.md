@@ -203,7 +203,7 @@ sends the right thing. On the Modbus Settings page:
 
 | Step | Expected |
 |---|---|
-| Press **ADD BUS** | a `bus2` row appears, pre-filled `/dev/ttyACM1` |
+| Press **ADD BUS** | a `bus2` row appears, pre-filled `/dev/busduct-bus2` |
 | Set bus2's port to bus1's port, **APPLY CONFIG** | alert: *"Two buses share the serial port …"*, nothing applied |
 | Restore bus2's port, **APPLY CONFIG** | *"Modbus configuration applied"* — bus2 now exists, empty |
 | Reload the page | the bus2 row is still there (it came from the applied config, not the browser) |

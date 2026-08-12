@@ -165,7 +165,8 @@ it must not need the alarms schema.
 `compileNanoJob` (`src/config-service/nano-compiler.js`) turns the
 applied `cfg/modbus+joints` doc into `{read, comm}`. The actual serial
 write to the Nano lives on the **`modbusMaster_V2`** tab (`serial out`
-node, `/dev/ttyACM0` @ 115200 baud — matches `Serial.begin(115200)` in
+node, `/dev/busduct-bus1` @ 115200 baud — a udev symlink to the bus1 Nano
+(`deploy/udev`), matching `Serial.begin(115200)` in
 `firmware/Nano_IOT.ino`). That tab is legacy per the workplan, but it's
 the live path to the real hardware, so the new resend logic was added
 *alongside* it rather than rewriting its internals:
@@ -558,7 +559,7 @@ segment kept polling). Built:
   optional).
 - **Second segment WIRED in the flow (2026-08-10, second Nano connected):**
   `modbusMaster_V2` now carries a bus2 `serial-port` config
-  (`/dev/ttyACM1` @115200), `bus2 Nano in` → **`Tag Bus2`** (stamps
+  (`/dev/busduct-bus2` @115200), `bus2 Nano in` → **`Tag Bus2`** (stamps
   `msg.bus_id` as a TOP-LEVEL property — payload is still a raw string at
   the serial edge, and the `json` node rewrites only `payload`, so the tag
   survives to the blacklist tap, which now reads it as `ctx.busId`) → the
