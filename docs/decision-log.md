@@ -3042,3 +3042,47 @@ physical port, and survives replacing a dead Nano (plug the new one into the
 same port, change nothing). Pending the current port↔ttyACM mapping before
 assigning, so the drill's existing bus↔sensor commissioning is not silently
 swapped.
+
+## 2026-08-12 — The hub-port ↔ segment mapping is CROSSED
+
+`ls -l /dev/serial/by-id/` against the `uhubctl` listing from the previous
+entry resolves the mapping, and it is not the intuitive one:
+
+| hub 1-1 port | Nano serial | device | segment |
+|---|---|---|---|
+| **1** | `3430A7EC…181119` | `ttyACM1` | **bus2** |
+| **2** | `47B60EAA…0E2E32` | `ttyACM0` | **bus1** |
+
+Worth stating plainly because the obvious guess is wrong: **port 1 is bus2**.
+Had `BUSDUCT_UHUBCTL_BUS1=1-1:1` been set by assumption, every bus1 COMM
+recovery would have power-cycled bus2's Nano — taking down a healthy segment
+while leaving the failed one dead, and the symptom (the *other* bus dropping
+whenever one fails) would have looked like a wiring fault rather than a config
+error. This is exactly why the values were not guessed.
+
+Correct values: `BUSDUCT_UHUBCTL_BUS1=1-1:2`, `BUSDUCT_UHUBCTL_BUS2=1-1:1`.
+
+The `ls` timestamps make the enumeration hazard concrete too: `ttyACM1` was
+created at 14:44 and `ttyACM0` at 14:47 — the higher-numbered device appeared
+*first*. The names are probe-order artifacts, not port facts, so they can swap
+across a reboot and hand each segment the other's read list.
+
+**`deploy/udev/99-busduct-nano.rules` fixes both problems at once**, keying on
+the hub port rather than the board serial:
+
+```
+KERNEL=="ttyACM*", KERNELS=="1-1.2", SYMLINK+="busduct-bus1"
+KERNEL=="ttyACM*", KERNELS=="1-1.1", SYMLINK+="busduct-bus2"
+```
+
+Port-based rather than serial-based is the deliberate choice. Two facts about
+a segment must never disagree — which device Node-RED opens to poll it, and
+which port recovery cycles — and keying both to the same socket makes that true
+by construction. A serial-based rule would let them drift the moment a board is
+moved between ports. It also makes replacing a dead Nano a pure hardware swap.
+
+**Not yet applied to the flow, deliberately.** Pointing the `serial-port`
+config nodes at `/dev/busduct-bus*` before the rule is installed leaves the
+panel dark — a Node-RED serial node just retries a missing device forever, with
+no fallback. So this is a two-step deploy: install the rule, confirm both
+symlinks exist, and only then switch the flow over.

@@ -1,0 +1,39 @@
+# Stable device names for the RS-485 segment Nanos (Slice 10 two-segment).
+#
+# WHY PORT-BASED, NOT SERIAL-BASED
+# --------------------------------
+# Two facts about a segment must never disagree: which device Node-RED opens
+# to poll it, and which USB port the RECOVERY CONTROLLER power-cycles when its
+# COMM watchdog fires. If they drift apart, a failure on one segment cycles the
+# other's Nano - taking down a healthy segment and leaving the dead one dead.
+#
+# Keying on the hub PORT makes both derive from the same physical fact:
+# /dev/busduct-bus1 and `uhubctl -l 1-1 -p 2` are then the same socket by
+# construction. Keying on the board's serial number would not: move a board to
+# another port and the symlink follows it while the uhubctl target does not.
+#
+# It also survives replacing a dead Nano - plug the new board into the same
+# port and change nothing. And it fixes the enumeration-order hazard: ttyACM0
+# and ttyACM1 are assigned in probe order, so they can swap across a reboot and
+# hand each segment the other's read list.
+#
+# MAPPING ON THIS PANEL (verified 2026-08-12 via `sudo uhubctl` and
+# `ls -l /dev/serial/by-id/`) - note it is CROSSED, do not assume port 1 = bus1:
+#
+#   hub 1-1 port 1  ->  Nano 3430A7EC50304D48502E3120FF181119  ->  was ttyACM1  ->  bus2
+#   hub 1-1 port 2  ->  Nano 47B60EAA50304D48502E3120FF0E2E32  ->  was ttyACM0  ->  bus1
+#
+# The Nanos hang off an external VIA Labs 2109:3431 hub (itself on the Pi's
+# internal hub port 1-1). That hub reports `ppps` - per-port power switching -
+# which is what makes per-segment recovery possible at all; the Pi's own root
+# ports are ganged. Replacing it with a hub lacking ppps silently degrades
+# recovery to whole-hub. Re-verify these paths if the hub is ever moved.
+#
+# INSTALL - the flow must NOT be pointed at these names until they exist:
+#   sudo cp deploy/udev/99-busduct-nano.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#   ls -l /dev/busduct-bus*        # both symlinks must appear
+# Only then change the flow's serial-port config nodes over.
+
+KERNEL=="ttyACM*", KERNELS=="1-1.2", SYMLINK+="busduct-bus1"
+KERNEL=="ttyACM*", KERNELS=="1-1.1", SYMLINK+="busduct-bus2"
