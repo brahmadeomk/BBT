@@ -2933,6 +2933,24 @@ change was for: a joint on the second segment is monitored exactly like one on
 the first, and it needed no bus-aware logic in ProcessLogic because joints are
 keyed by unit address.
 
+**Confirmed with the user: the sensors were being heated deliberately** to
+exercise the process alarms. That upgrades what this evidence proves. The
+ΔT and RoR ladders were *provoked*, not drifted into, and both ran their full
+range in order and then cleared:
+
+- **RoR (A2)** on J04 (bus2) and J01 (bus1): WATCH ≥15 → WARNING ≥30 →
+  CRITICAL ≥60, each raised at the right threshold and each cleared.
+- **ΔT (A1)** on J02 (bus1): WATCH ≥15 → WARNING ≥25 → CRITICAL ≥35, cleared.
+
+Two things follow. First, **both segments produced process alarms in the same
+test** — J01/J02 on bus1 and J04 on bus2 — so the shared ProcessLogic really
+is segment-agnostic in practice, not just in principle. Second, this is the
+first deliberate end-to-end exercise of the **RoR ladder** since the
+`dtSec < 2` guard was removed on 2026-07-22. That fix made A2 alarms possible
+for the first time (they could never fire before it); this drill is the
+evidence that the whole ladder — raise at each level, then clear through the
+hysteresis/persistence path — actually works on real hardware.
+
 **A note on the poll interval and the new status staleness.** The Modbus
 Settings table shows `Poll s = 30` per slave, which looks alarmingly close to
 the 60 s staleness threshold added for the Diag Status column. It is not:
