@@ -2893,3 +2893,56 @@ silently creating merge commits. The force-push that caused it was mine.
 failure — the per-segment COMM alarm, per-bus blacklist resend and per-bus USB
 recovery are all still unproven on real hardware. Steps in
 `docs/slice10-design-proposals.md` §B.
+
+## 2026-08-11 — Two-segment alarm generation LIVE-VERIFIED on the panel
+
+Panel config at the time of the drill: bus1 (`/dev/ttyACM0`) carries Sensor1
+(addr 1), Sensor2 (addr 2) and AmbientT (addr 101); bus2 (`/dev/ttyACM1`)
+carries Sensor3 (3), Sensor4 (4) and Sensor5 (5). Joints J01/J02 sit on bus1,
+**J03/J04 on bus2**, all referencing ambient 101 — which is on the *other*
+segment, so the drill also exercises a cross-segment ambient reference.
+Sensor5 carries no joint. Both buses 9600 8N2, 1000 ms timeout, 10 ms
+inter-frame.
+
+**The headline result — per-segment COMM alarms are real.** Cleared Alarm
+History carries both of these as distinct entries:
+
+- *"No data received from **the bus2** communication module for 60 seconds"*
+  (raised 14:44:25, cleared 14:44:59; and again 12:26:19 → 12:33:53, that one
+  with an operator ACK at 12:28:41)
+- *"No data received from communication module for 60 seconds"* — bus1's
+  original text, byte-identical
+
+Two segments alarming and clearing independently, with bus1's wording and key
+unchanged, is exactly what this change existed to produce. Before it, one
+watchdog served both Nanos and neither segment's total failure could raise
+anything.
+
+**bus2 devices blacklist with the right impact text, and the segments are
+isolated.** Slaves 3, 4 and 5 — all bus2 — blacklisted after 3 consecutive
+read failures and later restored. The descriptions distinguish the two ways a
+device hurts: *"joint(s) J03 not measurable"* and *"joint(s) J04 not
+measurable"* against *"Slave 5 (Sensor5) … no joints affected"*. Slaves 1, 2
+and 101 (bus1) did not blacklist during those events.
+
+**ΔT and RoR alarms fire for a bus2 joint.** J04 is slave 4 on bus2, and it
+produced the full RoR ladder — WATCH `RoR 71.30 ≥ 15`, WARNING `78.77 ≥ 30`,
+CRITICAL `86.54 ≥ 60` — all raised and cleared. J03 (also bus2) raised a
+PROCESS `Sensor communication failure`. This is the requirement the whole
+change was for: a joint on the second segment is monitored exactly like one on
+the first, and it needed no bus-aware logic in ProcessLogic because joints are
+keyed by unit address.
+
+**A note on the poll interval and the new status staleness.** The Modbus
+Settings table shows `Poll s = 30` per slave, which looks alarmingly close to
+the 60 s staleness threshold added for the Diag Status column. It is not:
+`poll_interval_s` feeds R10's capacity math, while the Nano's actual cadence
+comes from `comm[0]` = `inter_frame_ms × 1000` (10 ms here), so a live device
+refreshes sub-second and has ~3 orders of magnitude of margin. Consistent with
+no spurious "No Data" being reported.
+
+### Still not covered by this drill
+- **Per-bus USB recovery** — needs `BUSDUCT_UHUBCTL_BUS2` set; unset, bus2
+  alarms correctly but is never power-cycled.
+- **Per-bus resend on a bus2-only config edit** — visible only in the debug
+  sidebar (`bus2 job out` fires, bus1's stays quiet), not in alarm history.
