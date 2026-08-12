@@ -113,6 +113,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | Existing Node-RED flow | `flows/flows_BBT.json` | present |
 | Arduino Nano firmware | `firmware/Nano_IOT.ino` | present |
 | Edge device user manual (operator/technician HMI guide) | `docs/edge-user-manual.md` | present |
+| Nano 33 IoT field-replacement runbook | `docs/nano-replacement.md` | present |
 
 The **Edge Cloud Readiness Workplan** (now present) is the higher-level
 phase/acceptance document. Its §6 Exit Checklist is Slice 8's acceptance

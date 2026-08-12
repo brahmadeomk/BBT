@@ -3190,3 +3190,35 @@ ports live in the ConfigStore on the Pi, not in this repo. Changing them is
 safe and non-disruptive: `port` is not part of the compiled Nano job (`comm` is
 `[inter_frame_us, baud, timeout_ms]`), so `nanoJobsEqual` sees no difference
 and **no resend is issued** — neither segment's polling is interrupted.
+
+## 2026-08-12 — Nano field replacement is a hardware-only operation
+
+**User:** *"If I put different iot33 nano hardware will it work or I need to do
+more settings after implemented above changes"*
+
+Worth answering in the repo because it is the payoff from the port-based udev
+decision, and because the answer has one sharp edge.
+
+**No configuration changes.** Verified by grep: the two board serial numbers
+appear in `deploy/udev/99-busduct-nano.rules` **only as comments**; the rules
+themselves match on `KERNEL=="ttyACM*"` plus `KERNELS=="1-1.N"` — the hub port.
+So the symlink follows the port, the `BUSDUCT_UHUBCTL_*` target is already the
+same port, and the flow and `cfg/modbus` both reference the symlink. Nothing
+downstream knows or cares which board is fitted.
+
+The Nano also carries no per-board state: it is a Modbus master that receives
+its whole job from the Pi on every update, so a blank board needs no address,
+no baud, no slave list. The silence watchdog hands it the job within 30 s.
+
+**The sharp edge is the hub port.** Fit it to a different port and both facts
+break together — that segment is not polled, *and* a COMM failure would
+power-cycle the other segment's Nano. This is the same coupling that made
+port-based keying the right choice, seen from the other side.
+
+**What is actually required is flashing**, and that had no runbook. Written up
+as `docs/nano-replacement.md`, including the two things that bite: Node-RED
+holds the serial port open and must be stopped before an upload, and
+`arduino-cli` requires the sketch folder to be named for the sketch, which
+`firmware/` is not — so the `.ino` has to be copied to a `Nano_IOT/` directory
+first. Also records the three library dependencies (ArduinoJson, ModbusMaster,
+Adafruit SleepyDog) and what a forgotten flash looks like from the HMI.
