@@ -46,13 +46,28 @@ you are safe across upgrades.
 
 ## Block layout (fixed bases)
 
-| Block | Base | Present when |
-|---|---|---|
-| Tier 1 — panel summary | `0` | always |
-| Control (ACK) | `16` | always |
-| Severity bitmap (optional) | `32` | `severity_bitmap.enabled` |
-| Tier 2 — per zone | `100` | `exposure_tier ≥ 2` |
-| Tier 3 — per joint | `500` | `exposure_tier = 3` |
+| Block | Base | Present when | Capacity |
+|---|---|---|---|
+| Tier 1 — panel summary | `0` | always | fixed, 16 registers |
+| Control (ACK) | `16` | always | fixed, 4 registers |
+| Severity bitmap (optional) | `32` | `severity_bitmap.enabled` | **128 joints** (16 registers, 32..47) |
+| Tier 2 — per zone | `100` | `exposure_tier ≥ 2` | **50 zones** (stride 8, before Tier 3's base) |
+| Tier 3 — per joint | `500` | `exposure_tier = 3` | bounded only by the Modbus address space (100 joints reaches 1298) |
+
+**At the 100-joint + 10-ambient provisioning target** a Tier-3 panel with
+the severity bitmap enabled reports `extent` **1298** — the last joint's
+block starts at 1292. Poll up to the panel's own `extent` rather than
+assuming a number: it grows as joints are added, and
+`node tools/bms-read.js` prints it.
+
+Poll in blocks of ≤125 registers (the Modbus per-request maximum); a
+full Tier-3 panel is therefore ~11 read requests, or **one** request if
+the gateway only needs Tier 1.
+
+The capacities above are enforced, not advisory: `validateIntegration`
+rule **I5** rejects a `cfg/integration` whose generated map would
+overflow (too many zones for the Tier-2 region, or past the Modbus
+address space), so a panel cannot be commissioned into a broken map.
 
 ---
 

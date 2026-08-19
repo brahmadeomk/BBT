@@ -144,7 +144,7 @@ function createGatewayFromEdgeConfig() {
   const positional = cfg.publish?.telemetry?.encoding === 'positional';
   const gateway = createGateway({ outboxDir: cfg.buffer.path, identity: cfg.identity, topics: cfg.topics, transport, positional });
   gateway.mode = 'aws';
-  return { gateway, mode: 'aws', reason: `connected as ${cfg.identity.thing_name} to ${cfg.mqtt.endpoint}` };
+  return { gateway, mode: 'aws', cfg, reason: `connected as ${cfg.identity.thing_name} to ${cfg.mqtt.endpoint}` };
 }
 
 let singleton = null;
@@ -159,11 +159,15 @@ function getGateway(opts) {
   if (!singleton) {
     if (opts) {
       singleton = createGateway(opts);
-      singletonInfo = { mode: singleton.mode, reason: 'explicit options' };
+      singletonInfo = { mode: singleton.mode, reason: 'explicit options', identity: (opts && opts.identity) || null };
     } else {
-      const { gateway, mode, reason } = createGatewayFromEdgeConfig();
+      const { gateway, mode, reason, cfg } = createGatewayFromEdgeConfig();
       singleton = gateway;
-      singletonInfo = { mode, reason };
+      // identity is surfaced here (not re-read from the edge config elsewhere)
+      // because this is the composition root - the one place allowed to require
+      // from src/adapters/aws. The alarm mailer wants panel_id for its subject
+      // line and must not reach into the adapter itself.
+      singletonInfo = { mode, reason, identity: (cfg && cfg.identity) || null };
     }
   }
   return singleton;

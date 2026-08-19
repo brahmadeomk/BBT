@@ -1,7 +1,14 @@
 # Device Blacklisting & Recovery — Specification
 
-Status: **design agreed, not yet implemented** (see Slice 9 in the
-workplan addendum). Written 2026-07-24 from the design chat.
+Status: **BUILT and live-verified on the panel (2026-07-28)** — Slice 9 is
+done. Written 2026-07-24 from the design chat; kept as the specification the
+implementation is measured against. Two behaviours were added after live
+testing and are recorded in the decision log rather than rewritten in here:
+the blacklist alarm names the **commissioned** device and its real impact
+(`Slave 101 (AMBIENT_101) — ambient reference for J01, J02`) rather than an
+internal `slave_id`, and restoring a device resets the EMA/persistence state
+of every joint that depends on it, including joints that merely reference it
+as their **ambient**.
 
 ---
 

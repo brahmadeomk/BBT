@@ -144,12 +144,43 @@ default 1.x install.
 
 ## Operational notes
 
-- **Flash wear** (a Readiness-Workplan risk): InfluxDB batches writes,
-  and the flow uses the *batch* node, so write amplification is modest
-  (~10–20 points/s for this panel). For long-lived deployments prefer
-  an external USB SSD for `/var/lib/influxdb`, or keep the SD card
-  class-10/endurance-grade. The 7-day raw window bounds on-disk size to
-  a few hundred MB.
+- **Write rate scales linearly with device count** — size this per panel,
+  do not carry a figure over from a bench panel. The raw ingest rate is
+
+  ```
+  points/sec  =  number of devices  /  effective scan interval (s)
+  raw points  =  points/sec x 604800        (the 7-day raw window)
+  ```
+
+  so a 3-device bench panel and a 110-device production panel differ by
+  well over an order of magnitude:
+
+  | Devices | Scan interval | points/s | Points held in the 7-day raw tier |
+  |---:|---:|---:|---:|
+  | 3 | 0.5 s | ~6 | ~3.6 M |
+  | 110 | 30 s | ~3.7 | ~2.2 M |
+  | 110 | 10 s | ~11 | ~6.7 M |
+  | 110 | 5 s | ~22 | ~13 M |
+
+  Note the scan interval matters more than the device count: a large panel
+  polled slowly writes *less* than a small panel polled fast. R10/R16 bound
+  what a segment can actually achieve, and splitting across two segments
+  (slice10 §B) roughly halves the interval — which doubles the write rate.
+
+- **Flash wear** (a Readiness-Workplan risk): InfluxDB batches writes and
+  the flow uses the *batch* node, so write amplification is modest. For
+  long-lived deployments prefer an external USB SSD for
+  `/var/lib/influxdb`, or keep the SD card class-10/endurance-grade.
+  **Measure the real on-disk size on the panel** rather than estimating it
+  — compression depends heavily on how much the values actually move:
+
+  ```bash
+  sudo du -sh /var/lib/influxdb/data/busduct/*
+  influx -database busduct -execute 'SHOW SERIES CARDINALITY'
+  ```
+
+  Check this once the panel has run a full 7 days at its real device count,
+  before the rollup tiers have anything to fall back on.
 - The historian is independent of the cloud gateway: telemetry to AWS
   is aggregated 10-min batches, while the historian keeps every sample
   locally. They read the same tap but serve different masters.

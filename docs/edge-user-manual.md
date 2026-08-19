@@ -196,12 +196,18 @@ Settings), **then** map joints to them (Joint Config).
 On **Slave Config → Modbus Settings** (also reachable from Joint
 Config):
 
-- **Bus form** — the single RS-485 bus parameters: baud, parity, stop
-  bits, polling and timeout. The firmware has one RS-485 port, so there
-  is exactly one bus.
+- **RS-485 Buses table — one row per segment.** Each segment has its own
+  port, baud, parity, stop bits, timeout, retries and inter-frame gap.
+  **A segment is a physical Arduino Nano**: the firmware drives exactly
+  one RS-485 port, so a second bus means a second Nano on its own serial
+  port. Use **ADD BUS** to add one, **DEL** to remove an empty one (DEL
+  is greyed out on the last remaining bus — a panel always needs one).
+  A large panel is normally split into two segments so each carries about
+  half the devices; see §6.5.
 - **Slaves table — one row per channel.** A physical sensor unit that
   reports several temperature channels appears as **several rows sharing
   the same unit address**, each with its **own base address** and name.
+  The **Bus** column says which segment the unit is wired to.
 
 Per-row fields:
 
@@ -210,6 +216,7 @@ Per-row fields:
 | **Unit address** | The Modbus address of the physical unit. Repeats across a unit's channel rows. |
 | **Channel** | 1..N within the unit. No gaps, no repeats. |
 | **Base address / name** | Each channel's own register address and display label. Addresses within a unit must be unique and non-overlapping. |
+| **Bus** | Which RS-485 segment the unit is wired to. Unit-level: all of a unit's channel rows must name the same bus. |
 | **Model / words / scale / poll interval** | Unit-level fields. They **must match across all rows of the same unit** (see §6.3). |
 
 Use the **+CH** button on a row to pre-fill the next channel row for the
@@ -226,7 +233,7 @@ every channel on it is read at that cadence.
 
 ### 6.3 Applying — what's checked
 
-**Apply** runs full validation (rules R1–R15) plus friendly pre-checks:
+**Apply** runs full validation (rules R1–R16) plus friendly pre-checks:
 
 - channel numbers within a unit are 1..N with no gaps/repeats;
 - base addresses within a unit are unique and non-overlapping;
@@ -234,10 +241,30 @@ every channel on it is read at that cadence.
   joint or used as an ambient reference — the error names what's using
   it. Remove the mapping first.
 
+Multi-segment panels are checked as well:
+
+- two buses **may not share a serial port** — each segment needs its own
+  Nano on its own port;
+- a **unit address must be unique across every bus on the panel**. This is
+  stricter than Modbus itself, which only requires uniqueness within a
+  bus. It is deliberate: the panel identifies a reading by its address
+  alone, so the same address on two segments would silently overwrite
+  itself — a plausible wrong temperature rather than an error. With 247
+  addresses available the restriction costs nothing;
+- a bus **cannot be deleted while sensors are still on it** — the error
+  names them;
+- all channels of one unit must be on the same bus.
+
 A **label-only** change (renaming a sensor) applies without disturbing
 live polling. A real change (baud, unit address, a channel's address)
 triggers a **Nano job resend** — the firmware briefly re-initialises the
-serial link to pick it up. This is normal.
+serial link to pick it up. This is normal. On a two-segment panel **only
+the segment you actually changed is resent**, so editing a sensor on bus2
+leaves bus1's polling untouched.
+
+**R16 (bus loading)** may return a *warning* rather than an error — the
+apply succeeds and the toast tells you the segment is heavily loaded.
+That is the cue to split the panel across two segments (§6.5).
 
 ### 6.4 Joint Config — mapping joints
 
@@ -264,7 +291,33 @@ Press **Add Joint** for a new row, edit inline, then **Apply Config**.
 If a joint references a sensor unit that hasn't been commissioned yet,
 Apply rejects it — commission the unit in Modbus Settings first.
 
-### 6.5 Maintenance mode (for wiring changes)
+### 6.5 Splitting a large panel across two RS-485 segments
+
+One RS-485 segment can only poll so many devices before the scan cycle
+gets long: every device on a segment shares the same wire, and a device
+that stops answering costs the whole segment its timeout on every cycle.
+Around 100 joint sensors plus their ambient probes, R16 starts warning on
+apply.
+
+The remedy is a **second segment**: a second Nano on its own USB port,
+with roughly half the devices on each. Both segments are polled in
+parallel, so the scan cycle roughly halves — and a fault on one segment
+(a shorted transceiver, a broken wire) leaves the other polling normally.
+
+To commission one:
+
+1. Fit the second Nano and note which port it appears on (§ your
+   commissioning notes; the deployment guide covers making the port
+   assignment stable across reboots).
+2. **ADD BUS** in Modbus Settings, set its port and baud, **APPLY**.
+3. Set the **Bus** column of each sensor that is wired to the new segment,
+   then **APPLY**. Remember the unit address must not repeat an address
+   already used on the other segment.
+
+Until a sensor is moved onto it, a new segment simply polls nothing —
+adding the bus alone changes nothing about the running panel.
+
+### 6.6 Maintenance mode (for wiring changes)
 
 Wiring/commissioning changes pushed **from the cloud** are gated to
 **maintenance mode** (safety rule R12) so a remote edit can't disturb a
@@ -324,6 +377,34 @@ drain in order when connectivity returns — nothing is lost and ordering
 is preserved.
 
 ---
+
+## 8b. Wi-Fi network (technicians)
+
+**Settings → Wi-Fi Network** connects the panel to the site's wireless network
+from the touchscreen — no laptop, no SSH.
+
+1. Press **SCAN**. Nearby networks are listed strongest first, with a signal
+   bar; the one the panel is already using is preselected.
+2. Pick the network, tap the **Password** field (the on-screen keyboard
+   appears) and type the passphrase. **SHOW** reveals what you typed, for
+   checking a long passphrase before committing.
+3. Press **CONNECT**. The status line reports success, or why it failed.
+
+Notes:
+
+- **This screen is served by the panel itself, so changing the network never
+  disconnects the touchscreen.** Anyone viewing the dashboard *remotely* over
+  Wi-Fi will lose it until they reconnect to the new network.
+- **A wrong password cannot strand the panel.** If the join fails, the panel
+  automatically returns to the network it was on and tells you so.
+- Open networks need no password — the field disables itself when you select
+  one.
+- The passphrase is stored by the operating system in a file only the
+  administrator account can read. It is never written to the panel's audit
+  trail, never sent to the cloud, and never shown in any log.
+
+If the screen reports that the Wi-Fi helper is not installed or not permitted,
+the panel is missing its one-time setup — see `docs/security-hardening.md` §2b.
 
 ## 9. Audit trail
 

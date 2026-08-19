@@ -66,6 +66,51 @@ Then **remove any pre-existing broad `NOPASSWD: ALL`** entry for the
 Node-RED user. The flow already calls `sudo uhubctl` with no password (no
 `sudo -S`, no piped password), so nothing in the flow changes.
 
+## 2b. Wi-Fi screen: a wrapper, not `sudo nmcli`
+
+The Settings tab's **Wi-Fi Network** screen lets a technician pick the site
+network and enter its password on the panel's touchscreen. That needs root, so
+it is granted through a narrow helper:
+
+```bash
+sudo install -o root -g root -m 0755 deploy/bin/busduct-wifi /usr/local/sbin/busduct-wifi
+# the sudoers file in deploy/ already grants this one binary; reinstall it:
+sudo cp deploy/sudoers.d/busduct-nodered /etc/sudoers.d/busduct-nodered
+sudo chmod 440 /etc/sudoers.d/busduct-nodered
+sudo visudo -cf /etc/sudoers.d/busduct-nodered     # must print "parsed OK"
+```
+
+Three deliberate choices, each worth keeping:
+
+- **A wrapper, not `NOPASSWD: /usr/bin/nmcli`.** Granting nmcli wholesale is
+  effectively granting root: it can edit any connection profile and run
+  dispatcher scripts on connection events. The wrapper exposes exactly
+  `scan`, `status` and `connect <ssid>` and nothing else.
+
+- **The passphrase never enters an argument vector.** `/proc/<pid>/cmdline` is
+  world-readable, so the obvious `nmcli device wifi connect X password Y` leaks
+  the site's Wi-Fi password to every local user for the life of the process.
+  The helper reads it from **stdin** and writes it straight into a `0600`
+  root-owned NetworkManager keyfile. The Node-RED library writes it to the
+  child's stdin; a unit test asserts it is absent from argv, and that test is
+  the thing to keep if this code is ever refactored.
+
+- **The passphrase reaches nothing else.** Not the config store, not the audit
+  trail, not a Node-RED global or the context store (which serialises to disk),
+  not a debug node, not the cloud heartbeat. The backend function node has no
+  logging of `msg.payload` for exactly this reason.
+
+A failed join is reverted by the helper itself: the new profile is deleted and
+the previous wireless connection brought back up, so a mistyped password cannot
+strand the panel. The screen says so.
+
+**Remaining exposure, stated plainly:** the Wi-Fi screen sits behind the same
+low-strength dashboard PIN gates as the rest of the config screens (see the note
+in §1 — they are not the security boundary). Anyone who can reach the dashboard
+can change the panel's network. On a panel whose HMI is the local touchscreen
+that is acceptable; if the dashboard is exposed beyond the panel, the editor
+`adminAuth` and network-level controls in §3 are what actually protect it.
+
 ## 3. Secure the Node-RED editor (`adminAuth` + TLS)
 
 The editor (`http://<pi>:1880`) can edit flows and run arbitrary code —
@@ -111,6 +156,7 @@ it with `httpNodeMiddleware`/dashboard auth if the LAN is untrusted.
 
 - [ ] `git grep -E 'system123|alarm123|AdminPro|AdminLite|Password@21'` → no matches.
 - [ ] Dashboard gates deny access when their env var is unset; allow with the correct PIN once set.
-- [ ] `/etc/sudoers.d/busduct-nodered` parses; `uhubctl` runs without a password; no `NOPASSWD: ALL` remains.
+- [ ] `/etc/sudoers.d/busduct-nodered` parses; `uhubctl` and `busduct-wifi` run without a password; no `NOPASSWD: ALL` remains.
+- [ ] `/usr/local/sbin/busduct-wifi` is installed root-owned `0755`; the Wi-Fi screen scans and joins; the passphrase appears in no log.
 - [ ] Editor at `:1880` prompts for login (or is loopback-bound/firewalled).
 - [ ] `flows_*_cred.json`, `settings.js`, `*.key`/`*.pem`, `/etc/busduct/nodered.env` are all untracked.
