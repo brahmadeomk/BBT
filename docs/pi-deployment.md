@@ -139,9 +139,9 @@ sudo /usr/local/sbin/busduct-wifi scan | head        # should list networks
 ```
 
 Needs NetworkManager (`nmcli`), the default on Raspberry Pi OS Bookworm and
-later. Without the helper installed the Settings → Wi-Fi Network screen still
-loads and says what is missing rather than failing silently. Rationale for the
-wrapper: `docs/security-hardening.md` §2b.
+later. Without the helper installed, the **Slave Config → Wi-Fi Network** screen
+still loads and says what is missing rather than failing silently. Rationale for
+the wrapper: `docs/security-hardening.md` §2b.
 
 ## 6. Re-import the latest flow
 

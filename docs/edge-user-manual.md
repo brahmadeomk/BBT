@@ -380,7 +380,7 @@ is preserved.
 
 ## 8b. Wi-Fi network (technicians)
 
-**Settings → Wi-Fi Network** connects the panel to the site's wireless network
+**Slave Config → Wi-Fi Network** connects the panel to the site's wireless network
 from the touchscreen — no laptop, no SSH.
 
 1. Press **SCAN**. Nearby networks are listed strongest first, with a signal

@@ -68,7 +68,7 @@ Node-RED user. The flow already calls `sudo uhubctl` with no password (no
 
 ## 2b. Wi-Fi screen: a wrapper, not `sudo nmcli`
 
-The Settings tab's **Wi-Fi Network** screen lets a technician pick the site
+The Slave Config tab's **Wi-Fi Network** screen lets a technician pick the site
 network and enter its password on the panel's touchscreen. That needs root, so
 it is granted through a narrow helper:
 

@@ -3455,3 +3455,29 @@ branch before starting a session's work**, not after. The old y551k2 head is
 tagged `pre-rebuild-y551k2` (`f2eec04`) if anything needs recovering.
 
 581 tests pass on the rebuilt branch.
+
+## 2026-08-19 — Wi-Fi screen moved to the Slave Config tab
+
+**User:** put the Wi-Fi setting on the communication settings page. **There is
+no such page** — the "Communication Settings" tab and the "Comm Parameters"
+screen were both deleted in the 2026-07-14 legacy commissioning cleanup. Its PIN
+gate (`AdminLite` / `BUSDUCT_PW_COMMS`) still exists in the env file and now
+guards nothing, which is worth tidying separately.
+
+Compounding the confusion, **two different groups are named "Modbus Settings"**:
+the one on *Slave Config* holds only the leftover Read/Transfer dropdown and
+SLAVE Active display, while the real commissioning table (RS-485 buses + slave
+channels) is the group of the same name on *Joint Config*. Offered the user the
+choice; they picked **Slave Config**, next to the leftover comms controls.
+
+Moved the `ui_group` (tab + order) rather than rebuilding anything — the
+template, backend node and boot inject are untouched, so this is purely where it
+renders.
+
+**One real consequence of the move:** the group went from 12 units wide to 23 to
+match the group above it, and the form is `flex`, so the password field
+stretched to about 1000 px. Wider is *worse* for a finger, not better — a
+password box the width of the screen is harder to aim at and looks broken.
+Capped `.nw-row`, `.nw-hint` and `.nw-status` at 760 px so the controls stay a
+comfortable size while the group still fills the page. Verified by rendering at
+the real 1236 px group width, not by assuming.
