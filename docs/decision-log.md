@@ -3222,3 +3222,236 @@ holds the serial port open and must be stopped before an upload, and
 `firmware/` is not — so the `.ino` has to be copied to a `Nano_IOT/` directory
 first. Also records the three library dependencies (ArduinoJson, ModbusMaster,
 Adafruit SleepyDog) and what a forgotten flash looks like from the HMI.
+## 2026-08-10 — Alarm email: real subject lines, and every queued mail actually sent
+
+**User question:** does the alarm mail carry the device id and device description
+in its subject? **Answer: no** — and checking turned up a second, worse bug in
+the same three lines.
+
+### What the subject was
+The Alarm Manager was already building a per-alarm subject
+(`🚨 Active Alarm: PROCESS|J01|DELTA_T|CRITICAL`) at ten `emails.push` sites.
+The `Email` function node then threw it away:
+
+```js
+msg.topic = global.get("project_config").project_name + " Alerts";   // the real subject
+msg.payload = data[0].body;
+```
+
+So every alarm mail this panel has ever sent — raise, clear, comm failure,
+blacklist, Pi power — arrived as **"BusbarTherm Alerts"**. Device identity
+existed only in the body, and mail clients threaded the panel's entire alarm
+history into one conversation.
+
+### The second bug: `data[0]`
+`buildOutputs` emits `{ payload: emails }` where `emails` is an **array**. The
+mailer read only `emails[0]`, so when more than one email was queued in a tick
+the rest were **silently discarded** — no error, no log. This is not a rare
+path: one joint over both its ΔT and RoR thresholds queues several mails from a
+single message, and it is exactly the moment mail matters.
+
+### Built
+- **`src/alarms/email-subject.js`** (pure, unit-tested) — `buildAlarmSubject` /
+  `toMailMessage`. Subject reads *panel → severity → device → what happened*:
+  `BusductTherMo S0001 | P0001 | CRITICAL | J01 - ΔT 30.40 ≥ 25`. Deliberate choices:
+  a cleared alarm says **CLEARED**, not its old severity (a "CRITICAL" clear
+  notification reads as a fresh alarm); the machine `instanceId` is parsed for
+  device/level but never shown; description is collapsed to one line and the
+  subject capped.
+- **Site and panel identity in the subject** (user's choice — several sites,
+  each with several panels, report into one mailbox during the pilot; site
+  precedes panel because a reader narrows by location first, and the format is
+  the user's: `<project> <site> | <panel> | <LEVEL> | <device> - <what>`). A
+  missing id is dropped rather than left as an empty ` |  | ` segment, so an
+  unprovisioned panel still reads cleanly. Sourced from
+  `getGatewayInfo().identity`, which
+  now carries the edge config's identity block. Taken from the gateway
+  deliberately: that is the composition root, the one place allowed to require
+  from `src/adapters/aws`, so the mailer never reaches into the adapter and the
+  cloud-agnostic rule stays intact. Null on an unprovisioned panel → the subject
+  simply omits it.
+- **Ten `meta: {...}` stamps** on the Alarm Manager's `emails.push` sites —
+  purely additive, no branch or existing field touched.
+- **The Email node now sends one message per queued email.** If the library is
+  missing it still delivers every mail, with the old constant subject, and calls
+  `node.error` — an alarm mail must never be lost because functionGlobalContext
+  was not reloaded.
+- Exposed on the **existing** `busductConfigService` global, so no settings.js
+  change on deployed panels.
+
+### Tests
+`test/alarms/email-subject.test.js` (9) plus
+`test/alarms/alarm-email-endtoend.test.js` (4), which loads the **real** Alarm
+Manager source out of `flows_BBT.json`, runs a joint over both thresholds
+through it, and asserts what a mailbox would receive. Both halves passed their
+own review for years while this bug sat between them — only running them
+together shows it. 535 tests pass.
+
+### Consequence the user must decide on: mail volume
+The Alarm Manager raises a **separate alarm instance per threshold level** — a
+`forEach` over CRITICAL/WARNING/WATCH with no break — so ΔT 30 against
+thresholds 10/20/25 raises three alarms, and a joint over both ΔT and RoR
+raises six. That is pre-existing, visible today as multiple rows in Active
+Alarms. But it was **masked in email** by the `data[0]` bug: the panel sent one
+mail regardless. Fixing the drop means that joint now sends six mails instead of
+one.
+
+Not silently changed either way: dropping mail is not an acceptable way to rate
+limit. Flagged for the user, with the obvious follow-up being to mail only the
+**highest active level per (joint, alarm_type)** and let the lower instances
+live in the HMI table. That changes notification semantics, so it is their call.
+
+## 2026-08-10 — Documentation audit against the scale-up targets
+
+Swept every doc for claims that were true of a 3-device bench panel but false
+at the 100 joint + 10 ambient target, two RS-485 segments, and a multi-panel
+fleet. Six were stale; all fixed.
+
+| Doc | Was | Now |
+|---|---|---|
+| `edge-user-manual.md` §6.1 | *"The firmware has one RS-485 port, so there is exactly one bus"* | RS-485 Buses table, Bus column, ADD/DEL behaviour; new **§6.5 "Splitting a large panel across two RS-485 segments"**; §6.3 gains the multi-bus apply guards and the R16 warning; maintenance mode renumbered §6.6 |
+| `historian.md` | *"~10–20 points/s for this panel … a few hundred MB"* — a bench-panel figure | a **formula** plus a device-count × scan-interval table, and instructions to measure real on-disk size rather than estimate it |
+| `bms-register-map.md` | block bases only, no capacities | per-block capacity column, the measured Tier-3 `extent` at 100 joints, poll-block guidance, and the note that I5 enforces these |
+| `blacklist-recovery-spec.md` | *"design agreed, not yet implemented"* | BUILT and live-verified 2026-07-28 |
+
+### The finding worth more than the doc edits: USB port assignment is not stable
+
+`/dev/ttyACM0` and `/dev/ttyACM1` are handed out in **USB enumeration order**,
+not by which Nano is which. A reboot, a re-plug, or the RECOVERY CONTROLLER's
+own `uhubctl` power-cycle can swap them. Nothing errors: each Nano simply
+receives the *other* segment's read list, every address times out, and both
+segments look dead — indistinguishable from two failed buses.
+
+This did not exist as a risk while the panel had one Nano, and it is not
+mentioned anywhere in the repo. `pi-deployment.md` §5b now gives the udev rule
+that pins each Nano to a stable `/dev/busduct-bus1|2` symlink by serial number,
+and says to use those names in **both** the Modbus Settings bus rows and the
+flow's `serial-port` config nodes. The failure it prevents is a panel that
+polls correctly until its first reboot.
+
+### Checked and found already correct
+- `busduct_edge_config.yaml` — telemetry is `batch_aggregate`, one message per
+  panel per interval, so it does not scale with joint count; the 200 MB outbox
+  and 5 msg/s drain are independent of device count.
+- `aws/README.md` — Part E already covers multi-bus remote config (added
+  2026-08-08).
+- `security-hardening.md` — no scale dimension.
+- The two workplans — deliberately plan documents, not status documents;
+  per-slice status lives in `CLAUDE.md`. Left alone.
+
+Capacity figures in `bms-register-map.md` were **verified against the code**,
+not asserted: 51 zones is rejected and 50 accepted, the bitmap covers 128
+joints, and a 100-joint Tier-3 panel reports `extent` 1298 (my first draft said
+1299 — off by one, corrected to the measured value).
+
+## 2026-08-10 — Wi-Fi selection from the touchscreen (Settings → Wi-Fi Network)
+
+**User question:** can the site Wi-Fi be selected and its password entered from
+the existing settings screen? Yes — and the panel having a **built-in 10"
+touchscreen** removed the objection that would otherwise have blocked it.
+
+### Why the touchscreen changes the risk
+My first answer flagged lockout as the blocker: change Wi-Fi from a dashboard
+you are viewing *over that Wi-Fi* and a typo strands the panel, recoverable only
+by physical access. But the kiosk browser loads the dashboard from
+**localhost** — so switching networks cannot disconnect the local HMI. The
+technician standing at the panel keeps control throughout. The risk survives
+only for a *remote* viewer, who is not the person commissioning. Rollback
+dropped from must-have to belt-and-braces (it is implemented anyway).
+
+Confirmed with the user that an **OS on-screen keyboard is already installed**,
+so a plain password field behaves like the existing PIN gates. Had there been
+none, that — not the networking — would have been the real blocker: a WPA
+passphrase is up to 63 mixed-case characters, against `system123` typed rarely.
+(There is no virtual keyboard anywhere in the flow; I checked.)
+
+### The security shape, which is the substance of this change
+Slice 8a deliberately narrowed sudo to `uhubctl` alone. This widens it, so the
+shape matters:
+
+- **A wrapper (`deploy/bin/busduct-wifi`), not `NOPASSWD: /usr/bin/nmcli`.**
+  Granting nmcli wholesale is effectively granting root — it can edit any
+  connection profile and run dispatcher scripts on connection events. The
+  wrapper exposes `scan`, `status`, `connect <ssid>` and nothing else.
+- **The passphrase never enters an argument vector.** `/proc/<pid>/cmdline` is
+  world-readable, so the obvious `nmcli device wifi connect X password Y` leaks
+  the site's Wi-Fi password to every local user for the life of the process.
+  The helper reads it from **stdin** and writes it into a `0600` root-owned
+  NetworkManager keyfile. `src/network/wifi.js` writes it to the child's stdin;
+  a test asserts it is absent from argv and is the one to keep through any
+  refactor.
+- **It reaches nothing else.** Not the config store, not the audit trail, not a
+  global or the context store (which serialises to disk), not a debug node, not
+  the cloud. The backend node deliberately logs no `msg.payload`.
+- **A failed join self-reverts** inside the helper: the new profile is deleted
+  and the previous wireless connection brought back up, so a mistyped password
+  cannot strand a panel even in the remote-viewer case.
+
+### Worth keeping from the implementation
+`nmcli -t` escapes a literal `:` inside a field as `\:`. Splitting the terse
+output naively on `:` makes an SSID like `Plant:B` shift every later column — it
+would have reported that network's signal as `"B"` and mis-parsed everything
+after it. `splitTerse` honours the escaping; there is a test for exactly that
+SSID.
+
+### Remaining exposure, stated rather than papered over
+The screen sits behind the same low-strength dashboard PIN gates as the other
+config screens, which §1 of the security doc already says are not the security
+boundary. Anyone who can reach the dashboard can change the panel's network. On
+a panel whose HMI is the local touchscreen that is acceptable; where the
+dashboard is reachable beyond the panel, the editor `adminAuth` and
+network-level controls are what actually protect it. Recorded in
+`docs/security-hardening.md` §2b rather than left implicit.
+
+13 new unit tests, 556 total. **Not yet live** — needs the helper installed
+(§2b), a restart, and a flow re-import.
+
+## 2026-08-19 — Rebuilt two days of work onto `claude/new-session-g3ddvm`
+
+**What happened:** `claude/code-handoff-strategy-y551k2` and
+`claude/new-session-g3ddvm` **diverged** at `7d5f070` ("Wire the second RS-485
+segment into modbusMaster_V2", 10 Aug). g3ddvm continued 10–12 Aug with 11
+commits and was deployed and drilled on the panel; y551k2 continued 18–19 Aug
+with 6 commits, built on the pre-fork base with no visibility of the other
+branch. The Pi tracks g3ddvm, so g3ddvm is the trunk and this work was rebuilt
+on top of it.
+
+### Two problems had been solved twice, and theirs is better
+
+| Problem | g3ddvm | y551k2 (dropped) |
+|---|---|---|
+| Per-bus blacklist resend | `_finalize` derives the changed slaves from the **symmetric difference of the previous and current exclude sets** — precise, and independent of whether `events` is populated. `busForSlave` falls back to the *sole bus's id*, not a hardcoded `'bus1'`. | derived from `events`; used `[]` to mean "untagged/all" |
+| Per-segment USB recovery | `src/config-service/bus-recovery.js` (`planRecovery`, pure + timing-injected), separate COMM keys and escalation ladders per bus, a real `deploy/udev/99-busduct-nano.rules`, hub-spec parsing with collision detection | logic inside the RECOVERY CONTROLLER function node + a `busduct_usb_ports` global |
+
+Both of mine were dropped wholesale. Two points from theirs worth carrying
+forward as project knowledge:
+
+- **udev keyed on the hub PORT, not the board's serial number.** Both facts a
+  segment depends on — which device Node-RED opens, and which port the recovery
+  cycles — then derive from the same physical socket by construction. A
+  serial-keyed rule lets them drift: move a board and the symlink follows it
+  while the `uhubctl` target does not. It also survives replacing a dead Nano.
+  My §5b had proposed the serial-keyed version; it was the worse answer.
+- **They found a real bug in my 7d5f070 bus2 wiring**: bus2's frames were routed
+  into bus1's `Data Out`, which feeds *the* COMM watchdog — so the watchdog was
+  satisfied while **either** Nano was talking. A live bus2 masked a dead bus1
+  and vice versa, and neither segment's total failure could raise a COMM alarm.
+  Fixed there with a separate `Data Out 2 (bus2)` chain and its own watchdog.
+
+### What was re-applied
+Only what was genuinely unique: the alarm-email subject work, the Wi-Fi screen,
+and the parts of the scale-up doc sweep g3ddvm had not already covered better
+(`bms-register-map`, `historian`, `blacklist-recovery-spec`, `edge-user-manual`).
+The flow changes were re-applied **programmatically against g3ddvm's flow** —
+the same scripted patches, not a merge: a textual merge of a 537 KB single-line
+JSON file is worthless, and a test merge conflicted in 7 files including the
+flow, `blacklist-handler.js` and its test.
+
+### The process failure worth not repeating
+Nothing surfaced the other branch until it was asked about directly — `git
+fetch` only listed it once prompted. Two days of work went onto a stale base,
+and two features were built twice. **Fetch and compare against every remote
+branch before starting a session's work**, not after. The old y551k2 head is
+tagged `pre-rebuild-y551k2` (`f2eec04`) if anything needs recovering.
+
+581 tests pass on the rebuilt branch.
