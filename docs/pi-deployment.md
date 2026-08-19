@@ -107,6 +107,42 @@ sudo systemctl restart nodered
 (or `node-red-stop && node-red-start` if that's how it's installed -
 check with `systemctl status nodered` first to see which applies.)
 
+## 5b. Two RS-485 segments
+
+Setup for a second Nano lives with the things it configures, not here:
+
+- **Stable device names + hub-port mapping**:
+  `deploy/udev/99-busduct-nano.rules` — install instructions and this panel's
+  verified port mapping are in that file's header.
+- **Per-segment USB recovery**: `BUSDUCT_UHUBCTL_BUS2` in
+  `/etc/busduct/nodered.env`, plus the matching scoped sudoers line — see
+  `deploy/sudoers.d/busduct-nodered`.
+- **Replacing a dead Nano**: `docs/nano-replacement.md`.
+
+## 5c. Wi-Fi screen helper (optional, for panels that join Wi-Fi on site)
+
+The paths below are relative to the repo, so start by going there and
+pulling — `install` reports *"cannot stat 'deploy/bin/busduct-wifi'"* if you
+run it from your home directory or before the file has been pulled.
+
+```bash
+cd ~/busduct-cloud-edge
+git pull
+
+sudo install -o root -g root -m 0755 deploy/bin/busduct-wifi /usr/local/sbin/busduct-wifi
+sudo cp deploy/sudoers.d/busduct-nodered /etc/sudoers.d/busduct-nodered
+sudo chmod 440 /etc/sudoers.d/busduct-nodered
+sudo visudo -cf /etc/sudoers.d/busduct-nodered      # must print "parsed OK"
+
+# confirm it works before touching the dashboard:
+sudo /usr/local/sbin/busduct-wifi scan | head        # should list networks
+```
+
+Needs NetworkManager (`nmcli`), the default on Raspberry Pi OS Bookworm and
+later. Without the helper installed the Settings → Wi-Fi Network screen still
+loads and says what is missing rather than failing silently. Rationale for the
+wrapper: `docs/security-hardening.md` §2b.
+
 ## 6. Re-import the latest flow
 
 The function node bodies in `flows/flows_BBT.json` have changed since

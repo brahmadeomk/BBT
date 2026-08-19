@@ -1,0 +1,106 @@
+#!/bin/sh
+# Narrow, root-run helper for the panel's Wi-Fi screen.
+#
+# WHY A WRAPPER and not `NOPASSWD: /usr/bin/nmcli`: nmcli can run arbitrary
+# scripts on connection events (`connection.permissions`, dispatcher scripts)
+# and can edit any connection profile, so granting it wholesale is effectively
+# granting root. This exposes exactly three verbs and nothing else.
+#
+# WHY THE PASSPHRASE COMES IN ON STDIN: /proc/<pid>/cmdline is world-readable,
+# so `nmcli device wifi connect X password Y` leaks the PSK to any local user
+# for as long as the process lives. This never puts the secret in an argument
+# vector - it is read from stdin and written straight into a 0600 NetworkManager
+# keyfile owned by root.
+#
+# Install: see docs/security-hardening.md §2b.
+set -eu
+
+PROFILE=busduct-wifi
+KEYFILE="/etc/NetworkManager/system-connections/${PROFILE}.nmconnection"
+
+die() { echo "$1" >&2; exit "${2:-2}"; }
+
+case "${1:-}" in
+
+  scan)
+    # IN-USE:SSID:SIGNAL:SECURITY, one network per line
+    exec nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY device wifi list --rescan yes
+    ;;
+
+  status)
+    exec nmcli -t -f NAME,DEVICE,TYPE,STATE connection show --active
+    ;;
+
+  connect)
+    SSID="${2:-}"
+    [ -n "$SSID" ] || die "connect needs an SSID"
+    # Printable ASCII only, and no '/' - the SSID is interpolated into a
+    # keyfile, so a newline or a path separator must never reach it.
+    case "$SSID" in
+      *[!\ -~]*) die "SSID must be printable ASCII" ;;
+      */*)       die "SSID must not contain '/'" ;;
+    esac
+
+    IFS= read -r PSK || PSK=""      # <- the secret, from stdin, never argv
+
+    if [ -n "$PSK" ]; then
+      len=${#PSK}
+      [ "$len" -ge 8 ] && [ "$len" -le 63 ] || die "WPA passphrase must be 8-63 characters"
+      case "$PSK" in *[!\ -~]*) die "passphrase must be printable ASCII" ;; esac
+    fi
+
+    # Remember what to fall back to before touching anything.
+    PREV=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null \
+           | awk -F: '$2 ~ /wireless/ && $1 != "'"$PROFILE"'" { print $1; exit }')
+
+    umask 077
+    if [ -n "$PSK" ]; then
+      SEC="[wifi-security]
+key-mgmt=wpa-psk
+psk=$PSK
+"
+    else
+      SEC=""      # open network
+    fi
+
+    cat > "$KEYFILE" <<EOF
+[connection]
+id=$PROFILE
+type=wifi
+
+[wifi]
+mode=infrastructure
+ssid=$SSID
+
+$SEC[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+EOF
+    chmod 600 "$KEYFILE"
+    chown root:root "$KEYFILE"
+    nmcli connection reload
+
+    if nmcli connection up "$PROFILE" >/dev/null 2>&1; then
+      echo "connected:$SSID"
+      exit 0
+    fi
+
+    # Failed to join - do not leave the panel stranded on a profile that does
+    # not work. Drop it and put the previous network back if there was one.
+    rm -f "$KEYFILE"
+    nmcli connection reload
+    if [ -n "$PREV" ]; then
+      nmcli connection up "$PREV" >/dev/null 2>&1 || true
+      echo "failed:$SSID:reverted to $PREV" >&2
+    else
+      echo "failed:$SSID:no previous wireless connection to revert to" >&2
+    fi
+    exit 1
+    ;;
+
+  *)
+    die "usage: busduct-wifi scan|status|connect <ssid>   (passphrase on stdin)"
+    ;;
+esac

@@ -23,3 +23,11 @@
 # `-p` scoping: without it uhubctl switches every port on the hub, which on a
 # two-Nano panel power-cycles both segments at once.
 pi ALL=(root) NOPASSWD: /usr/sbin/uhubctl
+
+# The Wi-Fi screen's helper (Settings -> Wi-Fi Network). A small WRAPPER, not
+# nmcli itself: `NOPASSWD: /usr/bin/nmcli` would be equivalent to full root,
+# since nmcli can edit any connection profile and run dispatcher scripts on
+# connection events. The wrapper exposes scan/status/connect and takes the
+# passphrase on stdin, so it never lands in a world-readable /proc/<pid>/cmdline.
+# Install: docs/security-hardening.md §2b.
+pi ALL=(root) NOPASSWD: /usr/local/sbin/busduct-wifi
