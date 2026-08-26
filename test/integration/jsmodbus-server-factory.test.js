@@ -159,4 +159,34 @@ maybe('jsmodbus server factory — real socket round trip', () => {
       slave.stop();
     }
   });
+
+  // The BACnet integration depends on this: the MGate 5217 presents each Modbus
+  // DEVICE as its own BACnet device (6-digit instance = port | devSequence |
+  // base). To give the BMS one BACnet device per zone instead of one flat device
+  // with ~1200 objects, the gateway is configured with several Modbus devices at
+  // the SAME ip:port, differing only by unit id - each carrying that zone's
+  // commands. That works only because our server answers regardless of unit id,
+  // which is normal for Modbus TCP (the unit id is a serial-gateway artefact).
+  //
+  // Pinned here because it is now load-bearing: swapping the server library for
+  // one that filters on unit id would silently break the BACnet grouping while
+  // every one of our own tools kept working.
+  test('serves any unit id - the BACnet per-zone grouping relies on it', async () => {
+    const { jsmodbusServerFactory } = require('../../src/integration/node-red/jsmodbus-server-factory');
+    const map = buildRegisterMap(validIntegrationDoc({ exposure_tier: 1 }), jointsDocTwoZones());
+    const port = await freePort();
+    const slave = new ModbusTcpSlave({ map, serverFactory: jsmodbusServerFactory, host: '127.0.0.1', port, unitId: 1 });
+    slave.start();
+    const hb = map.tier1.points.find((p) => p.key === 'heartbeat').addr;
+    slave.setImage({ [hb]: 42 });
+
+    for (const unitId of [1, 2, 9, 32, 247]) {
+      const { socket, client } = await connect(port, unitId);
+      try {
+        const res = await client.readHoldingRegisters(hb, 1);
+        assert.equal(res.response.body.values[0], 42, `unit id ${unitId} must be served`);
+      } finally { socket.end(); }
+    }
+    slave.stop();
+  });
 });

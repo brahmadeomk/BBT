@@ -22,7 +22,9 @@ registers only** (p19) — so one command produces one BACnet object; the CSV's
 **`cmdIndex` runs 1 to 1200** (p57), which settles it: **a "point" is a Modbus
 command**, so the budget in §1 is exactly right. Every command carries **Data
 scaling (multiplication)** and **Data addition** (p20), and Moxa advise keeping
-**COV subscriptions under 300** (p21).
+**COV subscriptions under 300** (p21). The **virtual node** scheme — each Modbus
+device becoming its own BACnet device via a 6-digit instance (p57) — is what §5b
+uses to avoid handing the BMS one flat list of a thousand objects.
 
 ---
 
@@ -246,6 +248,71 @@ achievable cycle is set by the queue, not by `Poll interval`. Two practical
 consequences: measure the real update rate on the I/O Data Mapping page before
 promising the customer a refresh rate, and treat this as a second reason to
 split across two gateways — halving the command count halves the scan.
+
+## 5b. Virtual devices — strongly recommended, and free
+
+By default the whole panel arrives at the BMS as **one BACnet device carrying
+600–1200 flat objects**. An operator hunting for one joint scrolls a list of a
+thousand. The MGate's *virtual node* feature fixes that, and it costs nothing to
+use.
+
+**How the gateway builds a device instance** (p57): the BACnet device instance is
+**six digits**, `1 | 02 | 404` —
+
+| Digits | Meaning |
+|---|---|
+| 1st | serial port — **always `1` in Modbus TCP mode**, not configurable |
+| 2nd–3rd | **`devSequence`** (1–32 for Modbus TCP), set per Modbus device in the CSV |
+| last 3 | the gateway's own base instance, from BACnet/IP Server Settings |
+
+So **each Modbus *device* becomes its own BACnet device**. Our panel is one
+Modbus device today, which is why everything lands in one flat list.
+
+**Verified: our server answers on any unit id.** Modbus TCP treats the unit id as
+a serial-gateway artefact, and our server does not filter on it — tested across
+unit ids 1, 2, 5, 8, 32 and 247, all served identically. So the panel can be
+presented as **up to 32 Modbus devices at the same IP:1502, differing only by
+unit id**, with **no change to the panel's code or configuration**. It is purely
+a gateway-side grouping.
+
+### Recommended grouping
+
+| `devSequence` | Unit id | Virtual BACnet device | Contents | Points (200 joints, 8 zones) |
+|---:|---:|---|---|---:|
+| 1 | 1 | `Panel Summary` | Tier 1 (0–11) + ACK (16) | 13 |
+| 2 | 2 | `Zone 1` | zone block + its joints' Tier 3 | ~157 |
+| 3 | 3 | `Zone 2` | " | ~157 |
+| … | … | … | " | … |
+| 9 | 9 | `Zone 8` | " | ~157 |
+
+With a gateway base instance of `404`, the BMS discovers `101404` (Panel
+Summary), `102404` (Zone 1), `103404` (Zone 2) … — navigable, and each device's
+object list is short enough to read.
+
+**Why this is worth doing beyond cosmetics:**
+
+- A zone that goes dark is visible as *a whole BACnet device* failing, not as
+  scattered objects going stale.
+- The ACK object sits alone on `Panel Summary`, which makes it obvious that it
+  is panel-wide and not per-zone.
+- It composes with the two-gateway split (§4): gateway A takes the summary plus
+  the first zones, gateway B the rest. Give the two gateways **different base
+  instances** (e.g. `404` and `405`) so no instance number collides.
+
+**Caveats worth knowing before committing:**
+
+- **The point budget does not change.** Virtual devices regroup the same
+  commands; `cmdIndex` still caps at 1200 per gateway.
+- **`devSequence` caps at 32** for Modbus TCP, so at most 32 virtual devices per
+  gateway — ample for one device per zone, not enough for one per joint.
+- **It relies on our server ignoring the unit id.** That is normal Modbus TCP
+  behaviour and is now pinned by a test
+  (`test/integration/jsmodbus-server-factory.test.js`), but it is worth knowing
+  the dependency exists: a future change to a server library that *does* filter
+  on unit id would break the BMS grouping while every one of our own tools kept
+  working.
+
+---
 
 ## 6. Verification, in the order that isolates faults
 

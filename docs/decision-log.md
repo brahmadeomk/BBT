@@ -3556,3 +3556,45 @@ That is a second, independent reason to split across two gateways.
 Still open, and only measurable on hardware: the actual scan time at ~700
 commands, and whether the customer's BMS supports the BACnet `Description`
 property (if not, the joint↔object index table is the only naming reference).
+
+## 2026-08-19 — BACnet virtual devices: one device per zone instead of one flat list
+
+**User asked whether the virtual device feature had been tried. It had not** — I
+mentioned it once in the first draft, dismissed it in a sentence ("we are one
+Modbus device, so this is not needed"), and the rewrite from the manual dropped
+it entirely. That dismissal was wrong, and worth recording as a lesson: I treated
+"we are one Modbus device" as a fixed fact about the panel when it is actually a
+*choice* about how the gateway is configured.
+
+### How it works (manual p57)
+The BACnet device instance is **six digits**: `1 | 02 | 404` — serial port
+(**always 1 in Modbus TCP mode**), then `devSequence` (1–32 for TCP, set per
+Modbus device in the CSV), then the gateway's own 3-digit base instance. So
+**each Modbus device becomes its own BACnet device**.
+
+### Verified: our server answers on ANY unit id
+Modbus TCP treats the unit id as a serial-gateway artefact, and our jsmodbus
+server does not filter on it — tested across unit ids 1, 2, 5, 8, 32, 247, all
+served identically. Therefore the panel can be presented as **up to 32 Modbus
+devices at the same IP:1502, differing only by unit id**, with **no change to our
+code or config**. It is purely gateway-side grouping.
+
+That turns one BACnet device with 600–1200 flat objects into e.g. `Panel
+Summary` + one device per zone (`101404`, `102404`, …). Beyond readability: a
+zone going dark shows as a whole BACnet device failing rather than scattered
+objects going stale, and the ACK object sitting alone on `Panel Summary` makes it
+self-evidently panel-wide.
+
+### The dependency this creates, and why it is now pinned
+The grouping works *because* our server ignores the unit id. That is normal
+Modbus TCP behaviour, but it is now load-bearing for a customer-facing
+integration, so `test/integration/jsmodbus-server-factory.test.js` asserts it
+across several unit ids. Swapping to a server library that filters on unit id
+would otherwise break the BMS grouping silently — every one of our own tools
+(`bms-read.js`, the dashboard card) would keep working, because they all use
+unit id 1.
+
+Constraints recorded in §5b: the point budget is unchanged (virtual devices
+regroup the same commands, `cmdIndex` still caps at 1200), `devSequence` caps at
+32 so one device per *joint* is not possible, and two gateways need **different
+base instances** so instance numbers cannot collide.
