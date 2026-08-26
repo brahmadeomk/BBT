@@ -3521,11 +3521,38 @@ only — **except the heartbeat, which goes on both**, since Modbus has no liven
 of its own and each BACnet device needs to prove it independently. Joint index
 *i* sits at `500 + i×8`, so the boundary is exact and movable.
 
-### Open questions for Moxa / the manual
-Whether the 1200-point limit counts polled registers or created BACnet objects
-(the budget uses the conservative reading — if reserved gaps count, the split
-moves); whether the gateway can apply the ×10 scaling itself; and whether it can
-express BACnet `Reliability` for our −32768 no-data sentinel, or whether that
-stays a documented convention the BMS must honour. The sentinel is the failure
-mode most likely to be misread later — a joint reading −3276.8 °C instead of
-"no data" — so §6 makes testing it a pre-handover step.
+### Manual received the same day — three open questions answered, one correction
+
+The user supplied **MGate 5217 Series User Manual v1.4**, so §5 is now written
+from the OEM document with page references rather than described generically.
+
+**The correction that mattered:** the first draft said to poll in blocks of ≤125
+registers. Wrong. `Read quantity` accepts **only 1 or 2** (p19) — one Modbus
+command reads one register and produces one BACnet object. At Tier 3 that means
+**hundreds of commands per gateway**, which is why the CSV import (Chapter 7) is
+the only sane path and why the web UI is not. Anyone following the original §5
+would have discovered this after hand-entering the first few rows.
+
+Answered:
+- **What counts toward 600/1200?** Objects/commands, definitively: the CSV's
+  `cmdIndex` runs **1 to 1200** (p57). The conservative budget in §1 was right.
+  It also means the gateway split must be decided *before* the sheet is
+  generated — the CSV cannot express more points than the model licenses.
+- **Can the gateway scale?** Yes — `Data scaling (multiplication)`, −1000…1000
+  (p20). Set `0.1` on the ×10 points, so the BMS reads 61.5 directly.
+- **BACnet `Reliability` for the sentinel?** No per-command field exists, so it
+  stays a documented convention. And scaling interacts with it: with ×0.1
+  applied the sentinel arrives as **−3276.8**, not −32768. That is the number to
+  give the BMS, and §6 keeps testing it as a pre-handover step.
+
+Two further findings worth carrying into commissioning: Moxa advise **COV
+subscriptions under 300** (p21), so at 600–1200 points the BMS must not
+COV-subscribe everything — subscribe the summary and alarm levels, poll the
+per-joint temperatures. And the manual is explicit that requests are sent **in
+turns**, so the real scan interval depends on queue depth (p26): with ~700
+commands the achievable update rate is set by the queue, not by `Poll interval`.
+That is a second, independent reason to split across two gateways.
+
+Still open, and only measurable on hardware: the actual scan time at ~700
+commands, and whether the customer's BMS supports the BACnet `Description`
+property (if not, the joint↔object index table is the only naming reference).

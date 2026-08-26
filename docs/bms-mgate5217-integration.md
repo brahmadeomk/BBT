@@ -14,13 +14,15 @@ different confidence:
 | Part | Confidence |
 |---|---|
 | §1–§4 — our register map, point budget, split boundaries, data types, concurrent-client behaviour | **Verified against this repo's code and by running it.** Numbers here were computed and tested, not recalled. |
-| §5 — MGate configuration | **Cross-check every field name against the Moxa manual.** The tooling environment blocks `moxa.com`, so the OEM manual could not be read directly. The *values* to enter are ours and correct; the *menu paths* are described generically on purpose. |
+| §5 — MGate configuration | **From the MGate 5217 Series User Manual v1.4** (supplied by the user), with the parameter names, ranges and defaults quoted from it. Page references are given so each step can be checked. |
 
-Product facts used below come from Moxa's public product pages (see Sources):
-2 serial ports + 2 Ethernet ports, Modbus RTU/ASCII/TCP **client/master** to
-BACnet/IP **server**, 600- and 1200-point models, "virtual node" support to
-present each Modbus device as its own BACnet device, and Modbus command entry
-via an Excel sheet. Anything more specific must come from the manual.
+Manual facts that shaped this document (v1.4): the gateway connects **up to 32
+Modbus TCP servers** (p5); each Modbus command has a **Read quantity of 1 or 2
+registers only** (p19) — so one command produces one BACnet object; the CSV's
+**`cmdIndex` runs 1 to 1200** (p57), which settles it: **a "point" is a Modbus
+command**, so the budget in §1 is exactly right. Every command carries **Data
+scaling (multiplication)** and **Data addition** (p20), and Moxa advise keeping
+**COV subscriptions under 300** (p21).
 
 ---
 
@@ -106,16 +108,20 @@ configuration** — the BMS has to be told about them. Full map:
 | Property | Value | Consequence for the BACnet side |
 |---|---|---|
 | Function code | **FC 3** (read holding registers) | Read-only points map naturally to **AV** (or AI if the gateway/BMS prefers); the ACK register needs a **writable** object |
-| Data type | **signed 16-bit** two's complement | The gateway must be told *signed*. Left unsigned, −1 reads as 65535 and every no-data point reads as 32768 |
-| Scaling | temperature / ΔT / RoR are **×10** | `615` = 61.5 °C. Either scale on the gateway (if it supports a multiplier — confirm in the manual) **or** state ×10 explicitly in the point list so the BMS divides. Do not leave it implicit |
+| Data type | **signed 16-bit** two's complement | Set the command's **`Data Format` = `int16`** (p19). Left on `uint16`, −1 reads as 65535 and every no-data point reads as 32768 |
+| Scaling | temperature / ΔT / RoR are **×10** | `615` = 61.5 °C. **Set `Data scaling (multiplication)` = `0.1` on those commands** (p20; range −1000…1000). The BMS then reads 61.5 directly and nobody has to remember a convention |
 | Counts, levels, states, indices, heartbeat | **unscaled** | Never apply the ÷10 to these |
-| No-data sentinel | **−32768** on a measurement point | Device blacklisted / joint dark. **The BMS must treat this as "no data", not as −3276.8 °C.** If the gateway can express BACnet `Reliability` or out-of-service, use it; otherwise it must be a documented rule in the point list |
-| Levels | 0 none, 1 WATCH, 2 WARNING, 3 CRITICAL | Good candidate for a **Multi-state Value** if the gateway supports it; otherwise AV |
+| No-data sentinel | **−32768** on a measurement point | Device blacklisted / joint dark. The gateway has no way to express BACnet `Reliability` per command, so **this stays a documented convention the BMS must honour**. Note the interaction with scaling: with ×0.1 applied the sentinel arrives as **−3276.8**, so tell the BMS that value, not −32768. Do not leave it implicit — a joint reading −3276.8 °C is the failure most likely to be misread later |
+| Levels | 0 none, 1 WATCH, 2 WARNING, 3 CRITICAL | Map as **Multi-state input** (p20) with no scaling, or **Integer value**. Never apply the ×0.1 |
 | Joint state | 0 LIVE, 1 STALE, 2 OFFLINE | Same |
 | `heartbeat` (reg 0) | increments every refresh, wraps 0..32767 | **Map this on every gateway.** A frozen value means the Pi or the flow has stopped — Modbus itself has no liveness, so this is the only way the BMS can tell a dead panel from a calm one |
 
-**Naming.** Map BACnet object names to the panel's joint ids (`J001`…), not to
-register numbers. The joint↔index table for a commissioned panel comes from:
+**Naming.** Each command has a **`Description` field, 0–40 characters** (p20),
+which becomes the BACnet object's Description property — put the joint id and
+point there (`J001 deltaT`). Note the manual's warning: editing the description
+later **overwrites** the mapped object's description (p21). The BMS must support
+the Description property to see it, so also keep the object-instance ↔ joint
+table below as the authoritative reference. The joint↔index table for a commissioned panel comes from:
 
 ```bash
 node -e "const {buildRegisterMap}=require('./src/integration/register-map'); \
@@ -157,44 +163,89 @@ Three rules for the split:
 
 ---
 
-## 5. Gateway configuration — the values to enter
+## 5. Gateway configuration (MGate 5217 manual v1.4)
 
-> **Cross-check the field names against the MGate 5217 manual.** The steps below
-> are ordered correctly and the values are right; the exact menu labels are
-> deliberately not invented here.
+> **One Modbus command = one register = one BACnet object = one point.**
+> `Read quantity` accepts only **1 or 2** (p19), so you cannot poll a
+> 125-register block into one command. At Tier 3 that means **hundreds of
+> commands** — which is why step 5 uses the CSV import rather than the web UI.
 
-1. **Power and network.** 12–48 VDC / 24 VAC. Reach the web console on the
-   default IP (from the manual / quick install guide). Set a static IP on the
-   panel's network.
-2. **Firmware.** Update to current before configuring — doing it afterwards can
-   clear the configuration.
-3. **Set the Modbus role to TCP *client* (master).** The gateway initiates; our
-   Pi is the server. This is the single most common mis-set field on this job.
-4. **Add the Pi as a Modbus TCP server**: its IP, **port 1502**, **unit/slave id
-   1** (both from `cfg/integration.modbus_tcp`).
-5. **Define the read commands** — FC 3, in blocks of **≤125 registers** (the
-   Modbus per-request maximum). For gateway A of the worked example that is
-   ranges `0–11`, `16`, `100–163`, then `500–1299` in seven 125-register blocks.
-   Moxa's product page describes bulk command entry via an Excel sheet; use it
-   rather than hand-entering hundreds of rows.
-   - Poll interval: **1–5 s is ample.** Our image is refreshed on a 5 s tick, so
-     polling faster only adds load without adding freshness.
-6. **Set the data type to signed 16-bit**, and apply the ×10 scaling here if the
-   gateway supports a multiplier (§3).
-7. **Map to BACnet objects.** Read-only points → AV (or AI); the ACK register →
-   a writable object; levels/state → Multi-state Value if available.
-8. **BACnet device identity.** Set the device instance number, device name, and
-   BACnet/IP port (normally 47808/0xBAC0). If the BMS is on another subnet,
-   configure BBMD/Foreign Device registration — ask the BMS integrator which.
-9. **Virtual nodes.** Moxa's "virtual node" feature presents each Modbus device
-   as a separate BACnet device. We are **one** Modbus device (one unit id), so
-   this is not needed for a single panel; it becomes relevant only if one gateway
-   ever polls several panels.
-10. **Save, export the configuration, and store the export with the panel's
-    commissioning file.** Two gateways with hand-entered point maps are exactly
-    the thing you do not want to rebuild from memory after a failure.
+1. **Power and network.** 12–48 VDC / 24 VAC. Reach the web console, set a
+   static IP on the panel's network. Update firmware **before** configuring —
+   note the CSV format changed at firmware v1.3 (p54), so match the two.
+2. **Protocol Conversion** (p16): choose the pairing that makes the MGate a
+   **Modbus TCP Client** on one side and a **BACnet/IP Server** on the other.
+   The manual's own order is: set Protocol Conversion, configure the
+   client/master side first, then the server/slave side, then review **I/O Data
+   Mapping**.
+3. **Modbus TCP Client settings** (p17):
+   - `Initial delay` **0** (default) — the Pi is up long before the gateway.
+   - `Max. retry` **3** (default).
+   - `Response timeout` **1000 ms** (default) is comfortable; our server answers
+     from an in-memory buffer.
+   - Add the panel with **Add**: `Slave ID` **1**, a `Device Name`, and the Pi's
+     **IP**. Port **1502**. (Up to 32 Modbus TCP servers per gateway, p5 — so one
+     gateway could serve several panels if point budget allows.)
+   - `Poll interval` default **1000 ms** (range 100–1,200,000, p26). See the
+     scan-time warning below before lowering it.
+4. **Per-command settings** (p19) — for every register:
+   - `Data Format` **`int16`** (signed; see §3).
+   - `Function` **3 – Read holding registers**.
+   - `Read starting address` = the register from `docs/bms-register-map.md`.
+   - `Read quantity` **1**.
+5. **BACnet object per command** (p20):
+   - `Convert to BACnet object`: **Analog value** for temperature/ΔT/RoR;
+     **Multi-state input** or **Integer value** for levels, states, counts and
+     the heartbeat.
+   - `Description`: the joint id and point, e.g. `J001 deltaT` (≤40 chars).
+   - `Units`: °C for temperatures; leave unset for counts and levels.
+   - **`Data scaling (multiplication)` = `0.1`** on the ×10 points **only**.
+     Leave it at 1 for counts, levels, states, indices and the heartbeat.
+   - `COV increment`: see the COV warning below.
+6. **Build the command list as a CSV, not by hand** (Chapter 7, p54). Create two
+   or three commands in the web console first, **Export** to get the template,
+   then generate the rest. The CSV has four sections; the one that matters here
+   is **`[command_parameters]`**, one row per point, with fields including
+   `cmdIndex` (**1–1200, must increase in order**), `cmdEnable`, `cmdName`
+   (≤39 chars), `cmdDevIndex`, `cmdDataFormat` (`int16`), `cmdFunc` (`3`),
+   `cmdTrigger` (`Cyclic`) and `cmdPollinterval`, plus the BACnet object fields
+   (p57–58). Import, and check the error message against the named field if it
+   rejects.
+   - Generate the rows from the panel itself so they cannot drift from the live
+     configuration — the joint↔register table in §3 is the input.
+   - Note `cmdIndex` maxing at 1200: the CSV cannot express more points than the
+     model licenses, so the split in §4 has to be decided *before* the sheet is
+     generated, not after.
+7. **BACnet/IP Server settings** (p29):
+   - `Device name` and `Device instance` (0–4194302) — **distinct per gateway**,
+     recorded against the joint range it covers.
+   - `BACnet/IP port` **47808** default.
+   - `Ethernet port network number` (default 1) and `Virtual network number`
+     (default 1000, the Modbus side).
+   - **Different subnet from the BMS?** Set `BBMD role` = *Register as a foreign
+     device*, with the remote BBMD IP, UDP port and time-to-live (p29). Ask the
+     BMS integrator for these; guessing them wastes a site visit.
+8. **Save and export the configuration**, and store the CSV plus the export with
+   the panel's commissioning file. Two gateways with several hundred
+   hand-checked points is not something to rebuild from memory.
 
----
+### Two warnings from the manual that bite specifically at Tier 3
+
+**COV: keep subscriptions under 300** (p21). At Tier 3 a panel has 600–1200
+points, so the BMS **must not** COV-subscribe everything. Subscribe COV to the
+Tier 1 summary, the per-zone rollups and the alarm levels — the points that
+change rarely and matter immediately — and let the BMS poll the per-joint
+temperatures on a normal scan. Set `COV increment` deliberately: on a ×0.1
+temperature, `1` means "notify on a 1 °C change", which is sensible; leaving it
+at the smallest value turns every reading into a notification.
+
+**Scan time grows with command count.** The manual is explicit that "the module
+sends all requests in turns, [so] the actual polling interval also depends on the
+number of requests in the queue" (p26). With ~700 single-register commands the
+achievable cycle is set by the queue, not by `Poll interval`. Two practical
+consequences: measure the real update rate on the I/O Data Mapping page before
+promising the customer a refresh rate, and treat this as a second reason to
+split across two gateways — halving the command count halves the scan.
 
 ## 6. Verification, in the order that isolates faults
 
@@ -223,20 +274,26 @@ Each step proves one link, so a failure tells you where the problem is:
 
 ---
 
-## 7. Open items to confirm against the manual or with Moxa
+## 7. What the manual settled, and what is still open
 
-Worth settling before ordering the second gateway:
+Answered by the v1.4 manual:
 
-- **Does the 1200-point limit count Modbus registers polled, or BACnet objects
-  created?** The budget in §1 counts *mapped points*, which is the conservative
-  reading. If reserved gaps inside a polled block also count, the usable joint
-  count per gateway drops and the split in §4 must move.
-- **Does the gateway support a scaling multiplier**, or must the BMS divide by
-  10 (§3)?
-- **Can it express BACnet `Reliability` / out-of-service** for the −32768
-  sentinel, or is that purely a documented convention for the BMS (§3)?
-- **Maximum concurrent Modbus commands and total poll cycle time** at ~800
-  registers per gateway — this determines the achievable BACnet update rate.
+| Question | Answer |
+|---|---|
+| Does the 1200-point limit count registers or objects? | **Objects/commands.** `cmdIndex` runs 1–1200 (p57) and `Read quantity` is 1–2 (p19), so one command = one point. The §1 budget stands. |
+| Can the gateway apply our ×10 scaling? | **Yes** — `Data scaling (multiplication)`, range −1000…1000 (p20). Use `0.1`. |
+| Can it express BACnet `Reliability` for the no-data sentinel? | **No** per-command field exists. It stays a documented convention — and remember scaling turns −32768 into **−3276.8** (§3). |
+| Max Modbus TCP servers per gateway | **32** (p5), so one gateway could serve several panels if the point budget allows. |
+
+Still open, and only measurable on real hardware:
+
+- **Actual scan time** with ~700 commands. The manual says requests are sent in
+  turns and the real interval depends on queue depth (p26), but gives no figure.
+  Measure it on the I/O Data Mapping page before committing to an update rate
+  with the customer.
+- **Whether the BMS supports the BACnet `Description` property** — if not, the
+  object names carry no joint identity and the index table from §3 becomes the
+  only reference. Ask the integrator early.
 
 ---
 
@@ -247,6 +304,9 @@ Worth settling before ordering the second gateway:
 - [MGate 5217 Series datasheet (v1.5, PDF)](https://www.moxa.com/getmedia/8b9fe908-bc8c-454b-ba33-94194555cd4c/moxa-mgate-5217-series-datasheet-v1.5.pdf)
 - [MGate 5217 Series user manual (v1.4, PDF)](https://www.moxa.com/getmedia/55a90d7f-7625-45dd-be88-38557a058eb0/moxa-mgate-5217-series-manual-v1.4.pdf)
 - [MGate 5217 BACnet PICS / compatibility guide (PDF)](https://www.moxa.com/getmedia/948c095b-96fd-44f7-b076-7aeb84d9bf1c/moxa-mgate-5217-series-pics-compatibility-guide-v1.1.pdf)
+
+Primary source for §5: **MGate 5217 Series User Manual v1.4** (October 2024),
+supplied by the user. Page references throughout are to that document.
 
 Panel-side references: `docs/bms-register-map.md` (the customer-facing point
 map), `docs/bms-integration.md` (deployment and runbook).
