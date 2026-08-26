@@ -690,11 +690,25 @@ computed locally, works with the internet down. Full deployment/runbook:
   advances** (and correctly reported FROZEN before the tick had started),
   and a **BMS-originated ACK lands in the alarm history** with its Ack
   timestamp. **Three of the four §11 "Done when" criteria are met.**
+- **MGate 5217 CSV generator (2026-08-26)** — `tools/mgate-csv.js` (logic in
+  `src/integration/mgate-csv.js`) builds the gateway's Modbus-configuration
+  CSV from the panel's applied config via the same `buildRegisterMap` the
+  TCP server answers from, so the two cannot drift. One register = one
+  command = one BACnet object (`Read quantity` is 1 or 2), so Tier 3 is
+  600–1200 rows. The manual's import-time limits are encoded as tests
+  (object-type/function-code legality — **`Analog Value` is write-only**,
+  reads use `Analog Input`/`Multi-state Input`/`Integer Value`; instance
+  uniqueness per type; `cmdIndex` order + 1200 cap; 40/39-char fields;
+  forbidden charset; `devSequence` ≤ 32). **Two-gateway splits go by ZONE**
+  (`--zones=`) not joint index — a straddling zone would emit its Tier-2
+  rollup on both gateways. Prefer `--template=<gateway export>`; the CSV
+  format is versioned. Doc: `docs/bms-mgate5217-integration.md` §5c.
 - **Not yet done**: the
   **reference-gateway live validation** (workplan §11 "Done when": a stock
   gateway reads Tier 1 as BACnet with no custom mapping; a frozen Pi is
   detectable via the heartbeat; a BMS-originated ACK lands in the audit
-  trail). Both need the Modbus→BACnet gateway hardware.
+  trail). Both need the Modbus→BACnet gateway hardware — as does the first
+  real import of a generated CSV.
 
 ## Device blacklisting (Slice 9 — done, live-verified 2026-07-28)
 

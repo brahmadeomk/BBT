@@ -15,6 +15,7 @@ different confidence:
 |---|---|
 | §1–§4 — our register map, point budget, split boundaries, data types, concurrent-client behaviour | **Verified against this repo's code and by running it.** Numbers here were computed and tested, not recalled. |
 | §5 — MGate configuration | **From the MGate 5217 Series User Manual v1.4** (supplied by the user), with the parameter names, ranges and defaults quoted from it. Page references are given so each step can be checked. |
+| §5c — the CSV generator | **Built and unit-tested** (`src/integration/mgate-csv.js`, `test/integration/mgate-csv.test.js`); the manual's field limits are encoded as tests. **Not yet imported into a real gateway** — that is the one step that needs the hardware. |
 
 Manual facts that shaped this document (v1.4): the gateway connects **up to 32
 Modbus TCP servers** (p5); each Modbus command has a **Read quantity of 1 or 2
@@ -109,12 +110,12 @@ configuration** — the BMS has to be told about them. Full map:
 
 | Property | Value | Consequence for the BACnet side |
 |---|---|---|
-| Function code | **FC 3** (read holding registers) | Read-only points map naturally to **AV** (or AI if the gateway/BMS prefers); the ACK register needs a **writable** object |
+| Function code | **FC 3** (read holding registers) | **`Analog Value` is not legal on a read** — the manual restricts it to write functions 5/6/15/16 (p59). Scaled measurements become **`Analog Input`**; counts/indices become **`Integer Value`**; levels and states become **`Multi-state Input`**. Only the ACK register (FC 6) is an `Analog Value`. Getting this wrong is rejected at *import*, after the whole sheet is built |
 | Data type | **signed 16-bit** two's complement | Set the command's **`Data Format` = `int16`** (p19). Left on `uint16`, −1 reads as 65535 and every no-data point reads as 32768 |
 | Scaling | temperature / ΔT / RoR are **×10** | `615` = 61.5 °C. **Set `Data scaling (multiplication)` = `0.1` on those commands** (p20; range −1000…1000). The BMS then reads 61.5 directly and nobody has to remember a convention |
 | Counts, levels, states, indices, heartbeat | **unscaled** | Never apply the ÷10 to these |
 | No-data sentinel | **−32768** on a measurement point | Device blacklisted / joint dark. The gateway has no way to express BACnet `Reliability` per command, so **this stays a documented convention the BMS must honour**. Note the interaction with scaling: with ×0.1 applied the sentinel arrives as **−3276.8**, so tell the BMS that value, not −32768. Do not leave it implicit — a joint reading −3276.8 °C is the failure most likely to be misread later |
-| Levels | 0 none, 1 WATCH, 2 WARNING, 3 CRITICAL | Map as **Multi-state input** (p20) with no scaling, or **Integer value**. Never apply the ×0.1 |
+| Levels | 0 none, 1 WATCH, 2 WARNING, 3 CRITICAL | Map as **Multi-state Input** (p20) with no scaling. Never apply the ×0.1 |
 | Joint state | 0 LIVE, 1 STALE, 2 OFFLINE | Same |
 | `heartbeat` (reg 0) | increments every refresh, wraps 0..32767 | **Map this on every gateway.** A frozen value means the Pi or the flow has stopped — Modbus itself has no liveness, so this is the only way the BMS can tell a dead panel from a calm one |
 
@@ -140,28 +141,40 @@ readable to the building operator.
 
 ## 4. Splitting one panel across two gateways
 
-Only needed when a single panel exceeds the point limit (§1). Worked example —
-**200 joints, 8 zones, Tier 3** (`extent` 2098):
+Only needed when a single panel exceeds the point limit (§1).
 
-| | Register range | Contents | Points |
-|---|---|---|---|
-| **Gateway A** | `0 … 1299` | Tier 1 (0–11), **ACK (16)**, 8 zones (100–163), joints **J001–J100** (500–1299) | 669 |
-| **Gateway B** | `1300 … 2098` | joints **J101–J200**, plus register `0` for the heartbeat | 601 |
+**Split by ZONE, not by joint index.** A zone's Tier-2 rollup (base 100, stride
+8) summarises *every* joint in that zone, so a zone that straddles the boundary
+has to have its rollup mapped on both gateways — two BACnet objects reporting
+one register, each labelled as if it were the whole zone. That is worse than no
+rollup, because it looks authoritative on the gateway that holds only half the
+zone's joints. Splitting on the zone boundary makes each rollup belong to
+exactly one gateway by construction. `tools/mgate-csv.js --zones=` does this
+(§5c); the older joint-index option `--joints=` is kept only for a panel with no
+zones configured.
 
-Joint index *i* lives at `500 + i×8`, so the boundary is exact and you can move
-it: to give gateway A *k* joints, its range ends at `500 + k×8 − 1`.
+Worked example — **200 joints, 8 zones, Tier 3** (`extent` 2098), split 4 zones
+each:
 
-Three rules for the split:
+| | Contents | Points |
+|---|---|---|
+| **Gateway A** | Tier 1 (0–11), **ACK (16)**, zones z1–z4 and their joints | 541 |
+| **Gateway B** | zones z5–z8 and their joints, plus register `0` for the heartbeat | 529 |
 
-1. **The ACK register (16) belongs to exactly one gateway.** It is the only
+Four rules for the split:
+
+1. **A zone never straddles the boundary** — see above.
+2. **The ACK register (16) belongs to exactly one gateway.** It is the only
    writable point. Mapping it on both gives you two BACnet objects that write the
    same register, and an operator acknowledging on the wrong one is confusing at
    best. Put it on gateway A.
-2. **Panel-level summary points (Tier 1) go on gateway A only** — except the
+3. **Panel-level summary points (Tier 1) go on gateway A only** — except the
    heartbeat, which goes on both so each BACnet device proves its own liveness.
-3. **Each gateway is its own BACnet device instance.** Assign distinct device
-   instance numbers and document which joint range each covers, or the BMS
-   integrator will have no way to tell them apart.
+   The generator emits a one-point `Panel Heartbeat` device on gateway B for
+   exactly this.
+4. **Each gateway is its own BACnet device instance.** Assign distinct device
+   instance numbers and document which zones each covers, or the BMS integrator
+   will have no way to tell them apart.
 
 ---
 
@@ -196,9 +209,11 @@ Three rules for the split:
    - `Read starting address` = the register from `docs/bms-register-map.md`.
    - `Read quantity` **1**.
 5. **BACnet object per command** (p20):
-   - `Convert to BACnet object`: **Analog value** for temperature/ΔT/RoR;
-     **Multi-state input** or **Integer value** for levels, states, counts and
-     the heartbeat.
+   - `Convert to BACnet object`: **Analog Input** for temperature/ΔT/RoR;
+     **Multi-state Input** for levels and joint states; **Integer Value** for
+     counts, indices and the heartbeat. **Not `Analog Value`** — p59 permits
+     that type only on write functions, and every measurement here is FC 3.
+     The ACK register is the one exception, and it is a write.
    - `Description`: the joint id and point, e.g. `J001 deltaT` (≤40 chars).
    - `Units`: °C for temperatures; leave unset for counts and levels.
    - **`Data scaling (multiplication)` = `0.1`** on the ×10 points **only**.
@@ -213,8 +228,10 @@ Three rules for the split:
    `cmdTrigger` (`Cyclic`) and `cmdPollinterval`, plus the BACnet object fields
    (p57–58). Import, and check the error message against the named field if it
    rejects.
-   - Generate the rows from the panel itself so they cannot drift from the live
-     configuration — the joint↔register table in §3 is the input.
+   - **Use `tools/mgate-csv.js`** (§5c) rather than a spreadsheet. It generates
+     the rows from the panel's own applied config, so the gateway and the panel
+     cannot drift apart, and it enforces the field limits above at generation
+     time instead of at import time.
    - Note `cmdIndex` maxing at 1200: the CSV cannot express more points than the
      model licenses, so the split in §4 has to be decided *before* the sheet is
      generated, not after.
@@ -314,6 +331,79 @@ object list is short enough to read.
 
 ---
 
+## 5c. Generating the CSV — `tools/mgate-csv.js`
+
+Six hundred to twelve hundred commands is not a hand-entry job, and a
+hand-built sheet drifts from the panel the first time a joint is added. The
+generator reads the **same `buildRegisterMap`** the panel's Modbus TCP server
+answers from, so the gateway and the panel cannot disagree.
+
+Run it on the Pi (or anywhere with a copy of the panel's `cfg/` directory):
+
+```bash
+# single gateway, one virtual BACnet device per zone (§5b) — the default
+node tools/mgate-csv.js --pi=192.168.1.110 > gateway.csv
+
+# see the plan without writing a CSV — do this first
+node tools/mgate-csv.js --pi=192.168.1.110 --plan
+
+# two gateways, split by zone (§4)
+node tools/mgate-csv.js --pi=192.168.1.110 --zones=0-3           > gatewayA.csv
+node tools/mgate-csv.js --pi=192.168.1.110 --zones=4- --no-panel > gatewayB.csv
+```
+
+`--plan` prints, to stderr, one line per virtual device with its `devSequence`,
+unit id and point count — check that against §5b before generating the sheet.
+All diagnostics go to stderr, so `> gateway.csv` stays clean.
+
+**Pass `--template` if you can.** The manual documents the
+`[command_parameters]` columns (p57–61), but that list omits the `Data scaling`
+/ `Data addition` fields the web console has, and the CSV format is versioned
+(v1.2.0 at firmware v1.3, p54). Create two or three commands in the gateway's
+web console, **Export**, then:
+
+```bash
+node tools/mgate-csv.js --pi=... --template=exported.csv > gateway.csv
+```
+
+Rows are then emitted against *that* gateway's header, and any column the
+generator has no opinion about is filled with `*` — the manual's "not used"
+marker. Without a template it falls back to the documented p57–61 order and
+says so on stderr.
+
+| Option | Effect |
+|---|---|
+| `--pi=`, `--port=` | The Pi's IP and Modbus TCP port (default 1502) written into every device row |
+| `--zones=a-b` | Zone index range for this gateway — **the recommended way to split** (§4) |
+| `--joints=a-b` | Joint index range; only for a panel with no zones |
+| `--no-panel` | Omit Tier 1 and the ACK; emit a one-point `Panel Heartbeat` device instead. Use on gateway B |
+| `--flat` | One Modbus device for all joints instead of one per zone (no virtual devices) |
+| `--skip-absolute-temp` | Drop the per-joint absolute temperature, saving exactly one point per joint. On a 200-joint panel this is what brings a single gateway under 1200 |
+| `--limit=600\|1200` | The model's point licence. Over it, the generator **refuses** and exits non-zero rather than emitting a sheet the import will reject |
+| `--poll=` | `cmdPollinterval` in ms (default 1000) |
+| `--root=` | Config store directory (default `/var/busduct/cfg`) |
+
+What it enforces for you, all of it a rule the firmware checks at *import* time
+— i.e. after the whole sheet exists:
+
+- **`Analog Value` never on a read** (p59); scaled → `Analog Input`, levels and
+  states → `Multi-state Input`, everything else → `Integer Value`.
+- **`bacnetInstance` unique within each object type** (p60).
+- **`cmdIndex` starting at 1 and increasing** (p57), capped at the licence.
+- **Descriptions ≤40 chars, names ≤39** (p57, p20), with `- " ' # * , [ ]` and
+  non-ASCII stripped (p61) — the panel's own point labels contain "ΔT" and "°C".
+- **`devSequence` ≤ 32** (p57).
+
+Two things it deliberately does **not** put in the CSV, and warns about instead:
+
+- **`Data scaling (multiplication)` = `0.1`** on the ×10 points. The manual's
+  documented column list has no scaling field, so this is set in the web console
+  (or comes through your `--template`'s own columns). If it is missed, every
+  temperature reads ten times high.
+- COV guidance once the panel is large (p21, §5's warning).
+
+---
+
 ## 6. Verification, in the order that isolates faults
 
 Each step proves one link, so a failure tells you where the problem is:
@@ -361,6 +451,12 @@ Still open, and only measurable on real hardware:
 - **Whether the BMS supports the BACnet `Description` property** — if not, the
   object names carry no joint identity and the index table from §3 becomes the
   only reference. Ask the integrator early.
+- **Whether a generated sheet imports cleanly** (§5c). The manual's field limits
+  are encoded as tests, but the CSV format is versioned and only the gateway in
+  front of you can confirm its header. Export a template from it first, generate
+  with `--template`, and import a **short** sheet (say one zone) before the full
+  one — an import error names the offending field, which is far easier to read
+  against 150 rows than 700.
 
 ---
 

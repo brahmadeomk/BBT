@@ -3598,3 +3598,62 @@ Constraints recorded in §5b: the point budget is unchanged (virtual devices
 regroup the same commands, `cmdIndex` still caps at 1200), `devSequence` caps at
 32 so one device per *joint* is not possible, and two gateways need **different
 base instances** so instance numbers cannot collide.
+
+## 2026-08-26 — MGate CSV generator: derived from the live config, and split by zone
+
+`tools/mgate-csv.js` + `src/integration/mgate-csv.js` generate the gateway's
+Modbus-configuration CSV from the panel's own applied config, via the **same
+`buildRegisterMap`** the Modbus TCP server answers from. Rationale: the MGate
+reads one register per command (`Read quantity` is 1 or 2, manual v1.4 p19), so
+a Tier-3 panel is 600–1200 commands — not a hand-entry job, and a hand-built
+sheet drifts from the panel the first time a joint is added. Documented in
+`docs/bms-mgate5217-integration.md` §5c; 19 unit tests in
+`test/integration/mgate-csv.test.js`.
+
+### The tests encode manual constraints, because the firmware checks at IMPORT
+Every limit the gateway enforces — object-type/function-code legality (p59),
+`bacnetInstance` uniqueness within a type (p60), `cmdIndex` ordering and its
+1200 cap (p57), the 40/39-character description and name limits, the forbidden
+`- " ' # * , [ ]` characters (p61), `devSequence` ≤ 32 — is checked at *import*,
+after the whole sheet exists. A rule broken on row 3 of 700 is found only once
+all 700 have been produced, so each is a test here instead.
+
+### Two corrections to my own earlier advice, both from the manual
+1. **`Analog Value` is write-only** (p59: legal on functions 5/6/15/16). §3 and
+   §5 of the integration doc had recommended it for temperatures. Every
+   measurement we expose is FC 3, so scaled points are **`Analog Input`**, levels
+   and states **`Multi-state Input`**, counts and the heartbeat **`Integer
+   Value`**; only the ACK register is an `Analog Value`. Both sections corrected.
+2. **Object type is derived from the map's `scale`, not a hardcoded key list**,
+   so a point added to `register-map.js` later gets the right type without
+   touching this file. Pinned by a test.
+
+### A design flaw found in my own two-gateway split
+§4 originally split by **joint index** (`J001–J100` / `J101–J200`). With the
+per-zone virtual-device grouping from the 2026-08-19 entry, a zone whose joints
+straddle that boundary has its Tier-2 rollup emitted on **both** gateways — two
+BACnet objects reporting one register, each presented as if it were the whole
+zone. Worse than omitting the rollup, because the copy on the gateway holding
+half the zone's joints looks authoritative. **The split is now by zone**
+(`--zones=`), which makes each rollup belong to exactly one gateway by
+construction; a test asserts the two gateways' register sets overlap only on
+register 0, the heartbeat, which is deliberately on both. `--joints=` survives
+only for a panel with no zones configured.
+
+### Template-first, because the CSV format is versioned
+The manual documents the `[command_parameters]` columns (p57–61) but its list
+omits the `Data scaling` / `Data addition` fields the web console has, and the
+format changed at firmware v1.3 (p54). So `--template=<export from the actual
+gateway>` emits rows against **that** gateway's header, filling any column the
+generator has no opinion about with `*` ("not used"). Without a template it
+falls back to the documented order and says so on stderr. The ×10 → `0.1` `Data
+scaling` setting is therefore *not* in the generated CSV by default; the
+generator always warns about it, since missing it makes every temperature read
+ten times high.
+
+### Discovered while seeding a 200-joint test panel
+`config/schemas/busduct_modbus_joint_config.schema.json` caps `modbus.slaves` at
+**128**. A 200-joint panel therefore cannot use one single-channel unit per
+joint — it must use multi-channel units (e.g. 50 × 4-channel), which is how the
+hardware is actually built anyway. Recorded here because the cap is easy to hit
+in a synthetic test and hard to diagnose from the validation error alone.
