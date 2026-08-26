@@ -110,6 +110,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | Integration schema (I1–I5, Slice 11) | `config/schemas/busduct_integration_config.schema.json` | present |
 | BMS register map (customer-facing, append-only) | `docs/bms-register-map.md` | present |
 | BMS integration deployment/runbook | `docs/bms-integration.md` | present |
+| BACnet gateway integration (Moxa MGate 5217I-1200-T) | `docs/bms-mgate5217-integration.md` | present (2026-08-19) |
 | Existing Node-RED flow | `flows/flows_BBT.json` | present |
 | Arduino Nano firmware | `firmware/Nano_IOT.ino` | present |
 | Edge device user manual (operator/technician HMI guide) | `docs/edge-user-manual.md` | present |

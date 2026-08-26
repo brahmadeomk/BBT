@@ -2,7 +2,8 @@
 
 The panel exposes its live state to a customer Building Management System as
 a **Modbus TCP slave** on the Pi, read by an **off-the-shelf Modbus→BACnet
-gateway** (e.g. Intesis INMBSBAC, Babel Buster). No native BACnet stack and
+gateway** (e.g. Moxa MGate 5217I, Intesis INMBSBAC, Babel Buster). No native
+BACnet stack and
 no BOM commitment yet; the point model designed here carries over unchanged
 if native BACnet/IP on the Pi becomes a product later.
 
@@ -253,3 +254,11 @@ Per the workplan, Slice 11 is done when:
 Bench the register values first with a plain Modbus master (e.g.
 `modpoll`/a Python `pymodbus` client) against the Pi's port before
 introducing the gateway, cross-checking a few points against the HMI.
+
+---
+
+## Gateway-specific integration
+
+- **Moxa MGate 5217I-1200-T** (the selected gateway): step-by-step process,
+  point budget at Tier 3, and the two-gateway split —
+  `docs/bms-mgate5217-integration.md`.

@@ -3481,3 +3481,51 @@ password box the width of the screen is harder to aim at and looks broken.
 Capped `.nw-row`, `.nw-hint` and `.nw-status` at 760 px so the controls stay a
 comfortable size while the group still fills the page. Verified by rendering at
 the real 1236 px group width, not by assuming.
+
+## 2026-08-19 — BACnet gateway selected: Moxa MGate 5217I-1200-T
+
+Customer requires BACnet/IP at **full Tier 3**, using MGate 5217I-1200-T
+gateways — two where a panel carries more than ~200 sensors. Process written up
+in `docs/bms-mgate5217-integration.md`.
+
+**The OEM manual could not be read**: `moxa.com` and every mirror tried are
+blocked by this environment's egress proxy. Rather than reconstruct the MGate's
+configuration screens from memory — which is how a commissioning day gets
+burned — the document separates what was *verified* from what must be
+*cross-checked against the manual*, and describes the gateway's menus
+generically while giving the exact values to enter.
+
+### Verified by running the code, not recalled
+
+- **Two Modbus TCP clients can poll one panel simultaneously.** Bound the real
+  server and ran two clients against different register ranges concurrently;
+  both served repeatedly, no resets. So two gateways on one Pi need no change on
+  our side.
+- **Point budget at Tier 3** computed from `register-map.js`: Tier 1 = 12,
+  ACK = 1, Tier 2 = 7/zone, Tier 3 = **6/joint**. 100 joints = 669 points;
+  200 joints = 1269; 250 = 1625. The 1200-point model therefore needs a second
+  gateway from ~200 joints.
+
+### The finding worth money
+
+**`absolute_temp` (Tier-3 offset +5) is a documented duplicate of `temp` (+2)** —
+it exists only for gateways wanting a separate point. Dropping it saves one point
+per joint, and **at 200 joints that is 1069 vs 1269 — the difference between one
+gateway and two.** The crossover moves from ~200 joints to ~215. Worth asking the
+BMS integrator before the second unit is ordered.
+
+### Design points recorded for the split
+The ACK register is the only writable point and must be mapped on **exactly one**
+gateway, or two BACnet objects write the same register. Tier 1 goes on gateway A
+only — **except the heartbeat, which goes on both**, since Modbus has no liveness
+of its own and each BACnet device needs to prove it independently. Joint index
+*i* sits at `500 + i×8`, so the boundary is exact and movable.
+
+### Open questions for Moxa / the manual
+Whether the 1200-point limit counts polled registers or created BACnet objects
+(the budget uses the conservative reading — if reserved gaps count, the split
+moves); whether the gateway can apply the ×10 scaling itself; and whether it can
+express BACnet `Reliability` for our −32768 no-data sentinel, or whether that
+stays a documented convention the BMS must honour. The sentinel is the failure
+mode most likely to be misread later — a joint reading −3276.8 °C instead of
+"no data" — so §6 makes testing it a pre-handover step.
