@@ -39,6 +39,18 @@ class BlacklistTracker {
     this.probeBackoffS = opts.probeBackoffS ?? DEFAULTS.probeBackoffS.slice();
     this.restoreAfterGoodReads = opts.restoreAfterGoodReads ?? DEFAULTS.restoreAfterGoodReads;
     this.state = new Map(); // slaveId -> { status, fails, goods, backoffIndex, nextProbeMs, blacklistedAtMs }
+    // busId -> epoch ms of the most recent frame from that segment. Recorded
+    // here rather than in the flow because the flow's silence watchdogs keep
+    // their stamp in FLOW context on modbusMaster_V2, which the Cloud Gateway
+    // tab cannot read. Derived from the slave the frame came from, not from
+    // msg.bus_id: only bus2 frames are tagged, and unit addresses are unique
+    // panel-wide, so the slave resolves the segment exactly either way.
+    this.busSeen = {};
+  }
+
+  /** Record that a segment produced a frame. */
+  recordBusSeen(busId, nowMs) {
+    if (busId) this.busSeen[busId] = nowMs;
   }
 
   _slot(slaveId) {

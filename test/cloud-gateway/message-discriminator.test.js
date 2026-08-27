@@ -150,6 +150,36 @@ describe('wire contract - the discriminator is actually unambiguous', () => {
       [MESSAGE_TYPES.ALARM, MESSAGE_TYPES.HEARTBEAT, MESSAGE_TYPES.MANIFEST, MESSAGE_TYPES.TELEMETRY].sort());
   });
 
+  test('keyed and positional name their fields IDENTICALLY (CR-OPEN-5)', () => {
+    // The two encodings drifted: keyed emitted `ambient` where positional
+    // emitted `amb_avg` for the same number, and the design proposal showed a
+    // third name (`t_avg`) for a field the code computes as `t_max`. A cloud
+    // parser written against either one would be wrong for the other, and the
+    // panel can be switched between encodings at any time. One set, frozen:
+    const FIELDS = ['dt_min', 'dt_max', 'dt_avg', 'ror_max', 't_max', 'amb_avg'];
+
+    const keyedBox = freshOutbox();
+    const bk = new Batcher({ outbox: keyedBox, topic: 'tel' });
+    bk.ingestJointKpi(jointKpi('J01'));
+    bk.flush(10);
+    const keyedEntry = queued(keyedBox)[0].payload.joints.J01;
+    assert.deepEqual(Object.keys(keyedEntry).sort(), [...FIELDS].sort());
+
+    const posBox = freshOutbox();
+    const bp = new Batcher({ outbox: posBox, topic: 'tel', positional: true });
+    bp.ingestJointKpi(jointKpi('J01'));
+    bp.flush(10);
+    const posPayload = queued(posBox).find((m) => m.payload.type === MESSAGE_TYPES.TELEMETRY).payload;
+    for (const f of FIELDS) {
+      assert.ok(Array.isArray(posPayload[f]), `positional is missing the ${f} column`);
+      // ...and the same joint's value agrees across encodings
+      assert.equal(posPayload[f][0], Math.round(keyedEntry[f] * 100) / 100, `${f} differs between encodings`);
+    }
+    // no stray columns with other names
+    const extra = Object.keys(posPayload).filter((k) => Array.isArray(posPayload[k]) && !FIELDS.includes(k));
+    assert.deepEqual(extra, [], `positional has columns keyed does not: ${extra}`);
+  });
+
   test('`type` is the FIRST key, so a truncated payload in a log is still identifiable', () => {
     const outbox = freshOutbox();
     const b = new Batcher({ outbox, topic: 'tel' });

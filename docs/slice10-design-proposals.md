@@ -24,10 +24,18 @@ is the format the cloud must match.
 `max_payload_bytes` (4800):
 
 ```json
-{ "timestamp": "...", "interval_min": 10,
+{ "type": "telemetry", "encoding": "keyed", "timestamp": "...", "interval_min": 10,
   "joints": { "J01": { "dt_min": 1.1, "dt_max": 2.2, "dt_avg": 1.6,
-                       "ror_max": 3.0, "t_avg": 42.1, "amb_avg": 31.0 }, ... } }
+                       "ror_max": 3.0, "t_max": 42.1, "amb_avg": 31.0 }, ... } }
 ```
+
+> **Field names are frozen** (CR-OPEN-5, 2026-08-27):
+> `dt_min dt_max dt_avg ror_max t_max amb_avg` — identical in both
+> encodings. Earlier drafts of this section showed `t_avg`, which the code
+> never emitted (it computes a maximum), and the keyed encoding briefly
+> called the ambient average `ambient`. The authoritative list is
+> `docs/aws/README.md` Part G, pinned by
+> `test/cloud-gateway/message-discriminator.test.js`.
 
 At 100 joints that's ~several messages per interval → several AWS IoT
 **5 KB metering blocks** per interval per panel.
@@ -39,15 +47,16 @@ index. Whole panel in one ~2.5 KB message.
 
 Manifest (retained-style, sent on config change and on request):
 ```json
-{ "type": "manifest", "manifest_version": 7,
+{ "type": "manifest", "manifest_version": 7, "timestamp": "...",
   "joints": ["J01","J02", "...", "J100"] }
 ```
 
 Telemetry (per interval):
 ```json
-{ "timestamp": "...", "interval_min": 10, "manifest_version": 7,
+{ "type": "telemetry", "encoding": "positional", "timestamp": "...",
+  "interval_min": 10, "manifest_version": 7, "start_index": 0, "count": 100,
   "dt_min":  [1.1, ...], "dt_max": [2.2, ...], "dt_avg": [1.6, ...],
-  "ror_max": [3.0, ...], "t_avg":  [42.1, ...], "amb_avg": [31.0, ...] }
+  "ror_max": [3.0, ...], "t_max":  [42.1, ...], "amb_avg": [31.0, ...] }
 ```
 - Row *i* of every array is the joint at manifest index *i*.
 - A non-measurable joint (blacklisted / no data this interval) is `null`

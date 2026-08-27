@@ -7,6 +7,7 @@ const { Outbox } = require('../outbox');
 const { Batcher } = require('../batcher');
 const { AlarmPublisher } = require('../alarm-publisher');
 const { Heartbeat } = require('../heartbeat');
+const { buildDeviceHealth, DeviceHealthPublisher } = require('../device-health');
 const { createSoakRecorder, wrapTransportForSoak } = require('../soak-recorder');
 const { RuntimeSettings } = require('../runtime-settings');
 const handlers = require('./gateway-handler');
@@ -31,8 +32,9 @@ const { setupCertRotation, drainCertRotation } = require('./cert-rotation');
  * resolve {customer_id}/{site_id}/{panel_id} from the identity block.
  * Until Slice 6's provisioning writes a real identity, defaults keep
  * the topics well-formed for the loopback. The heartbeat publishes on
- * the telemetry topic (the yaml defines no separate heartbeat topic;
- * its payload is distinguishable by shape).
+ * the telemetry topic (the yaml defines no separate heartbeat topic);
+ * every payload carries a `type` discriminator, so nothing on that
+ * topic has to be distinguished by shape - see ../message-types.js.
  */
 
 const TOPIC_TEMPLATES = {
@@ -86,6 +88,7 @@ function createGateway({ outboxDir = DEFAULT_OUTBOX_DIR, identity = DEFAULT_IDEN
     batcher: new Batcher({ outbox, topic: telemetryTopic, positional }),
     alarmPublisher: new AlarmPublisher({ outbox, topic: alarmTopic }),
     heartbeat: new Heartbeat({ outbox, topic: telemetryTopic }),
+    deviceHealth: new DeviceHealthPublisher({ outbox, topic: telemetryTopic }),
     settings: new RuntimeSettings({ dir: outboxDir }),
     topics: {
       telemetry: telemetryTopic,
@@ -195,4 +198,4 @@ function getGatewayInfo() {
 const { derivePowerAlarm, summarizePower, initialState: initialPowerState, POWER_KEY } = require('../power-health');
 const { collectPiHealth } = require('../pi-health');
 
-module.exports = { createGateway, createGatewayFromEdgeConfig, getGateway, getGatewayInfo, resolveTopic, setupRemoteConfig, drainRemoteConfig, setupCertRotation, drainCertRotation, collectPiHealth, derivePowerAlarm, summarizePower, initialPowerState, POWER_KEY, ...handlers };
+module.exports = { createGateway, buildDeviceHealth, createGatewayFromEdgeConfig, getGateway, getGatewayInfo, resolveTopic, setupRemoteConfig, drainRemoteConfig, setupCertRotation, drainCertRotation, collectPiHealth, derivePowerAlarm, summarizePower, initialPowerState, POWER_KEY, ...handlers };

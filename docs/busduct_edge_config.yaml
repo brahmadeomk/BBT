@@ -69,8 +69,18 @@ publish:
       - dt_avg
       - ror_max
       - t_max
-    include_ambient: true
+    include_ambient: true     # adds amb_avg (the interval mean ambient)
+    # Field names are a frozen wire contract, identical in both encodings:
+    #   dt_min dt_max dt_avg ror_max t_max amb_avg
+    # See docs/aws/README.md Part G.
     max_payload_bytes: 4800   # stay under 5 KB AWS metering block
+  device_health:
+    # Panel self-diagnosis (blacklisted devices, joint LIVE/STALE/OFFLINE,
+    # per-segment bus liveness, Pi supply). A complete STATE snapshot, so the
+    # newest message always wins and no history has to be replayed.
+    mode: on_change           # ...plus the resync below, so a late subscriber converges
+    resync_sec: 3600
+    qos: 1                    # losing a recovery would leave the fleet view showing a stale fault
   alarm:
     mode: on_state_transition # RAISE, CLEAR, ACK only — no repeats
     qos: 1                    # must not be lost

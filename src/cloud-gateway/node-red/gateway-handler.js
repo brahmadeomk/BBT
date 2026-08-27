@@ -108,4 +108,28 @@ function sendHeartbeat(gateway, { fwVersion, configVersions }) {
   };
 }
 
-module.exports = { ingestKpiTap, ingestAlarmActiveTap, ingestAlarmClearedTap, flushTelemetry, flushIfDue, setTelemetryInterval, sendHeartbeat };
+/**
+ * Publishes the panel's device_health snapshot (EC-2), on change or on the
+ * publisher's resync schedule. The flow node passes the state the panel
+ * already keeps - it computes nothing new here.
+ *
+ * @param {object} gateway
+ * @param {object} args
+ * @param {object} args.summary - summarizeBlacklist(global.busduct_blacklist_state, now, {doc})
+ * @param {object} [args.doc] - applied cfg/modbus+joints
+ * @param {object} [args.busSeen] - tracker.busSeen (per-segment last-frame stamps)
+ * @param {object} [args.power] - summarizePower(global.busduct_power_health)
+ */
+function publishDeviceHealth(gateway, { summary, doc, busSeen, power } = {}, now = Date.now()) {
+  const { buildDeviceHealth } = require('../device-health');
+  const payload = buildDeviceHealth({ summary, doc, busSeen, power, nowMs: now });
+  const result = gateway.deviceHealth.publish(payload, now);
+  return {
+    device_health: result.published ? result.reason : 'unchanged',
+    counts: payload.counts,
+    buses: payload.buses.map((b) => `${b.bus_id}:${b.status}`),
+    outbox: gateway.outbox.counts(),
+  };
+}
+
+module.exports = { ingestKpiTap, ingestAlarmActiveTap, ingestAlarmClearedTap, flushTelemetry, flushIfDue, setTelemetryInterval, sendHeartbeat, publishDeviceHealth };

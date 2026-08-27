@@ -877,7 +877,8 @@ never break the heartbeat).
 property.** The authoritative list is
 **`src/cloud-gateway/message-types.js`**, required by every publisher so
 the code cannot drift from the docs: `telemetry`, `manifest`,
-`heartbeat`, `alarm`, `config_ack`, `cert_ack`, `lwt`. Full table with
+`heartbeat`, `alarm`, `device_health`, `config_ack`, `cert_ack`, `lwt`.
+Full table with
 topics, QoS and payload examples: **docs/aws/README.md Part G**.
 
 Why it exists: four shapes shared the telemetry topic (interval
@@ -905,10 +906,37 @@ development started**, so there is no deployed consumer to migrate.
   fault. Same hazard shape as the cert-rotation subscribe. Push
   `docs/aws/iot-policy-panel.template.json` as a new active policy version
   first.
-- `test/cloud-gateway/message-discriminator.test.js` pins it: a publish
-  path that forgets its `type` fails there rather than in a customer's
-  IoT Rule. `soak-verify.js` now reads `type` too, with the old sniffing
-  kept only as a fallback so pre-2026-08-27 soak logs stay verifiable.
+- **Field names are frozen** (CR-OPEN-5): `dt_min dt_max dt_avg ror_max
+  t_max amb_avg`, **identical in both encodings**. Keyed used to emit
+  `ambient` where positional emitted `amb_avg` for the same number, and
+  `slice10-design-proposals.md` §A showed a third name (`t_avg`) for a
+  field the code computes as a maximum. Every wire field now names its
+  statistic; the internal KPI input keeps `ambient: {slaveID, val,
+  age_sec}` (an object — reusing that name for a bare number on the wire
+  was the drift).
+- **`device_health` publishes the panel's self-diagnosis** (EC-2) —
+  blacklisted devices, joint LIVE/STALE/OFFLINE, **per-segment bus
+  liveness**, Pi supply. All of it was computed for the HMI's Device
+  Health tab and went no further, so a fleet view could see what the
+  panel measured but not whether it could still measure. Alarms don't
+  close that gap: they're transitions, so a consumer that starts late or
+  restarts can't know the CURRENT blacklist without replaying history.
+  Pure builder `src/cloud-gateway/device-health.js`; published **on
+  change + hourly resync** (the resync is for late subscribers, which
+  QoS 1 does nothing for); flow node "Publish Device Health"
+  (`8a1b2c3d4e5f6a36`–`38`, 60 s tick — the publisher decides whether to
+  send, so the tick is cheap). Per-bus liveness is recorded on the
+  blacklist tracker (`tracker.busSeen`, stamped in `processReadResult`
+  from `busForSlave`) because the flow's silence watchdogs keep their
+  stamp in **flow** context on `modbusMaster_V2`, unreadable from the
+  Cloud Gateway tab. **`last_frame_age_sec`/`next_probe_in_sec` are
+  excluded from change detection** — they move continuously, and
+  including them silently turned "on change" into "every tick".
+- `test/cloud-gateway/message-discriminator.test.js` pins the contract: a
+  publish path that forgets its `type`, or an encoding whose field names
+  drift, fails there rather than in a customer's IoT Rule.
+  `soak-verify.js` now reads `type` too, with the old sniffing kept only
+  as a fallback so pre-2026-08-27 soak logs stay verifiable.
 
 ## Remote config channel (Slice 7, built — live verification pending)
 

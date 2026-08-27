@@ -75,7 +75,7 @@ describe('Batcher - aggregation math', () => {
     batcher.ingestJointKpi(jointKpi({ ambient: { slaveID: 101, val: 32 } }));
 
     batcher.flush(10);
-    assert.equal(outbox.queues.telemetry[0].payload.joints.J01.ambient, 30);
+    assert.equal(outbox.queues.telemetry[0].payload.joints.J01.amb_avg, 30);
   });
 
   test('omits ambient when include_ambient is false', () => {
@@ -84,7 +84,7 @@ describe('Batcher - aggregation math', () => {
 
     batcher.ingestJointKpi(jointKpi());
     batcher.flush(10);
-    assert.equal(outbox.queues.telemetry[0].payload.joints.J01.ambient, undefined);
+    assert.equal(outbox.queues.telemetry[0].payload.joints.J01.amb_avg, undefined);
   });
 
   test('handles multiple joints independently', () => {
@@ -106,7 +106,7 @@ describe('Batcher - aggregation math', () => {
     batcher.ingestJointKpi(jointKpi({ ambient: null, deltaT: null }));
     batcher.flush(10);
     const entry = outbox.queues.telemetry[0].payload.joints.J01;
-    assert.equal(entry.ambient, undefined);
+    assert.equal(entry.amb_avg, undefined);
     assert.equal(entry.dt_min, undefined);
     assert.equal(entry.t_max, 40); // val is still tracked independent of ambient/deltaT
   });

@@ -3730,3 +3730,88 @@ Whether messages should also carry a **schema version** (`v: 1`). Greenfield is
 when that is cheapest to add, but the versioning policy — global or per
 message-type, and what a consumer does with an unknown version — is a
 cloud-side design decision, not one to make unilaterally in the edge repo.
+
+## 2026-08-27 — CR-OPEN-5 (field-name drift) and EC-2 (publish device health)
+
+Two more items from the same design review. The third, EC-1/M1 (the `type`
+discriminator), had already landed in `96a733b` before the review comment
+arrived — the reviewer was reading a pre-fix snapshot.
+
+### CR-OPEN-5: the two telemetry encodings named the same number differently
+
+Verified: `batcher.js` emitted `ambient` in keyed mode and `amb_avg` in
+positional for the same value (`_cell` mapped `amb_avg` ← `entry.ambient`), and
+`slice10-design-proposals.md` §A showed a third name, `t_avg`, for a field the
+code has always computed as a maximum (`t_max`). A parser written against
+either encoding would be wrong for the other, and the panel can be switched
+between them at any time.
+
+**Frozen on `dt_min dt_max dt_avg ror_max t_max amb_avg`, identical in both
+encodings.** `amb_avg` wins over `ambient` for two reasons: every other wire
+field names its statistic, and the value genuinely is an interval mean — but
+more importantly the *internal* KPI field `ambient` is an object
+(`{slaveID, val, age_sec}`). Reusing that name for a bare number on the wire is
+what let the drift go unnoticed. `_cell` no longer maps names at all, which
+removes the place where the encodings could diverge. The doc's `t_avg` was
+simply wrong and is corrected, with a note recording it so the next reader does
+not "fix" the code to match an old draft.
+
+A test now asserts the two encodings expose the same field set *and* the same
+values for the same joint, so they cannot drift apart again.
+
+### EC-2: device health went no further than the HMI
+
+Confirmed: `global.busduct_blacklist_state` (blacklisted/probing devices, joint
+LIVE/STALE/OFFLINE) and `global.busduct_power_health` fed only the Device
+Health dashboard tab. A fleet view could see what a panel *measured* but not
+whether it could still measure — the blind spot exactly where central
+monitoring beats standing in front of the panel.
+
+**Alarms do not close this gap**, which is worth stating because it is the
+obvious objection. Alarms are *transitions*; a consumer that starts late, drops
+a message, or restarts cannot know the current set of blacklisted devices
+without replaying history. So `device_health` is a complete **state snapshot** —
+newest message wins, nothing to replay.
+
+New `src/cloud-gateway/device-health.js` (pure, unit-tested) + a
+`DeviceHealthPublisher` on the existing outbox, and a 60 s "Publish Device
+Health" node on the Cloud Gateway tab. It computes nothing new — it publishes
+what the panel already derived for its own HMI.
+
+**Per-segment bus liveness needed a new source.** The flow's silence watchdogs
+keep their last-frame stamp in **flow** context on `modbusMaster_V2`, which the
+Cloud Gateway tab cannot read. Rather than plumb flow context across tabs, the
+blacklist tracker now records `busSeen[bus_id]` in `processReadResult`, deriving
+the segment from `busForSlave(doc, slaveId)` rather than `msg.bus_id` — only
+bus2 frames carry that tag, and unit addresses are unique panel-wide, so the
+slave resolves the segment exactly for both. Any frame counts, including an
+error response: the Nano answered, so the serial link is up even if that device
+is not.
+
+`status` is `ok | silent | unknown`, and **`unknown` (never seen) is
+deliberately distinct from `silent` (seen, then quiet)** — at boot every segment
+is briefly unseen, and reporting that as a fault would alarm the fleet view on
+every restart.
+
+### A bug found in my own cadence design, worth recording
+The first cut fingerprinted the whole payload minus `timestamp` for change
+detection. But `last_frame_age_sec` grows every second and `next_probe_in_sec`
+counts down, so **every snapshot compared as changed** and "publish on change"
+would have silently degraded into "publish every 60 s" — the exact cost the
+cadence exists to avoid, and invisible in production because the messages would
+all have looked correct. The fingerprint now excludes both; they stay in the
+payload because a human reading one message wants them, but the *state* is
+`buses[].status` and `devices[].status`. Documented in README Part G so no
+consumer keys alerting on the volatile fields either.
+
+(A test of mine was also wrong here in the opposite direction: it held `busSeen`
+fixed while advancing the clock and expected "unchanged". Holding the stamps
+still while time moves *is* a bus going silent — a real state change. The
+fixture now advances the stamps with the clock, as a live panel does.)
+
+### Cadence choice
+On change, plus an **hourly resync**. The resync is not redundancy for QoS 1:
+QoS 1 protects delivery to a *connected* subscriber and does nothing for a
+consumer that started after the last change. Without it a fleet view brought up
+against a calm panel would show nothing until the next fault. On a healthy panel
+this is one message an hour carrying an empty `devices` array.

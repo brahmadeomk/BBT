@@ -114,7 +114,12 @@ class Batcher {
       if (acc.rorValues.length) entry.ror_max = Math.max(...acc.rorValues);
       if (acc.tValues.length) entry.t_max = Math.max(...acc.tValues);
       if (this.includeAmbient && acc.ambientValues.length) {
-        entry.ambient = acc.ambientValues.reduce((a, b) => a + b, 0) / acc.ambientValues.length;
+        // amb_avg, not "ambient": every wire field names its statistic
+        // (dt_min/dt_max/dt_avg/ror_max/t_max), this value IS an interval
+        // average, and the positional encoding already called it amb_avg.
+        // The INPUT kpi.ambient is an object {slaveID, val, age_sec}; reusing
+        // that name for a bare number on the wire was the drift (CR-OPEN-5).
+        entry.amb_avg = acc.ambientValues.reduce((a, b) => a + b, 0) / acc.ambientValues.length;
       }
       if (Object.keys(entry).length) joints[jointId] = entry;
     }
@@ -171,7 +176,9 @@ class Batcher {
   // 0.01; null when the joint had no data for that column this interval).
   _cell(entry, col) {
     if (!entry) return null;
-    const v = col === 'amb_avg' ? entry.ambient : entry[col];
+    // Keyed and positional now use identical field names, so no mapping is
+    // needed here - that mapping was where the two encodings drifted apart.
+    const v = entry[col];
     return typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 100) / 100 : null;
   }
 

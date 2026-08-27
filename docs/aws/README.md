@@ -267,7 +267,7 @@ In the **AWS console** (same region):
   - `dt/c1001/s01/p01/tel` — heartbeat
     (`{timestamp, fwVersion, configVersions}`) and telemetry batches
     (`{timestamp, interval_min: 10, joints: {J01: {dt_min, dt_max,
-    dt_avg, ror_max, t_max, ambient}, ...}}`)
+    dt_avg, ror_max, t_max, amb_avg}, ...}}`)
   - timestamps are edge UTC — the time the panel *built* the message.
 
 ### C2. Alarm path test
@@ -369,7 +369,7 @@ by tooling, not eyeballs.
    ```
 
    PASS means: every published interval's per-joint aggregates
-   (dt_min/dt_max/dt_avg, ror_max, t_max, ambient) exactly match a
+   (dt_min/dt_max/dt_avg, ror_max, t_max, amb_avg) exactly match a
    recomputation from the raw KPI samples; the published alarm
    RAISE/CLEAR sequence matches the locally-observed transitions in
    order (a trailing still-queued alarm is tolerated, a reorder or
@@ -599,6 +599,7 @@ table.
 | `manifest` | `dt/{c}/{s}/{p}/tel` | 1 | Positional encoding only; published when the joint list changes, always before the telemetry it decodes |
 | `heartbeat` | `dt/{c}/{s}/{p}/tel` | 0 | Hourly |
 | `alarm` | `dt/{c}/{s}/{p}/alarm` | 1 | On RAISE / CLEAR / ACK transition |
+| `device_health` | `dt/{c}/{s}/{p}/tel` | 1 | On change, plus an hourly resync |
 | `config_ack` | `cmd/{c}/{s}/{p}/config/ack` | 1 | Reply to a remote config push |
 | `cert_ack` | `cmd/{c}/{s}/{p}/cert/ack` | 1 | Reply to a certificate rotation |
 | `lwt` | `status/{c}/{s}/{p}` | 1 | Broker-published on an unclean disconnect |
@@ -611,7 +612,7 @@ carries `encoding: 'keyed' | 'positional'`:
 ```jsonc
 // keyed (default) - self-describing, needs no manifest
 { "type":"telemetry", "encoding":"keyed", "timestamp":"...", "interval_min":10,
-  "joints": { "J01": { "dt_min":.., "dt_max":.., "dt_avg":.., "ror_max":.., "t_max":.., "ambient":.. } } }
+  "joints": { "J01": { "dt_min":.., "dt_max":.., "dt_avg":.., "ror_max":.., "t_max":.., "amb_avg":.. } } }
 
 // positional - a 100-joint panel in one message; decode against the manifest
 { "type":"telemetry", "encoding":"positional", "timestamp":"...", "interval_min":10,
@@ -640,6 +641,50 @@ publishes it from a payload fixed at connect time, so use the receipt
 time. It is a *secondary* offline signal — the primary one remains two
 missed heartbeats, which also covers a panel that dies without the broker
 noticing.
+
+**Device health answers "can the panel still measure?"** Telemetry and alarms
+tell you what the panel measured; `device_health` tells you what it can no
+longer see. It is a complete **state snapshot** — the newest message always
+wins, and no history has to be replayed:
+
+```jsonc
+{ "type":"device_health", "timestamp":"...",
+  "counts": { "joints_total":110, "joints_live":108, "joints_stale":1,
+              "joints_offline":1, "devices_blacklisted":1, "devices_probing":0 },
+  // ONLY the unhealthy devices - a healthy 110-device panel sends an empty array
+  "devices": [ { "slave_id":"sl02", "unit_address":50, "display":"50 (SCM_50)",
+                 "status":"blacklisted", "next_probe_in_sec":45,
+                 "joints":["J07"], "ambient_for_joints":[] } ],
+  "joints": { "stale":["J31"], "offline":["J07"] },
+  "buses": [ { "bus_id":"bus1", "port":"/dev/busduct-bus1", "status":"ok",
+               "last_frame_age_sec":0.4, "devices_total":60, "devices_unhealthy":0 },
+             { "bus_id":"bus2", "port":"/dev/busduct-bus2", "status":"silent",
+               "last_frame_age_sec":120, "devices_total":50, "devices_unhealthy":0 } ],
+  "power": { "state":"ok", "under_voltage_now":false,
+             "under_voltage_since_boot":true, "throttled_now":false } }
+```
+
+Four things to build against:
+
+- **`buses[].status`** is `ok` | `silent` | `unknown`. On a two-segment panel a
+  dead Nano still lets the other segment publish telemetry, so *"the panel is
+  reporting"* is not evidence both segments are. `unknown` means no frame has
+  been seen yet — normal for the first seconds after a restart, **not** a fault.
+- **`devices[]` lists only what is unhealthy**, named by the address it was
+  commissioned with. An empty array is the healthy state, not missing data.
+- **`under_voltage_since_boot`** stays true after a brown-out recovers. It is
+  the forensic flag for an intermittent supply — the failure mode that once cost
+  this project days of misdiagnosis. Surface it distinctly from
+  `under_voltage_now`.
+- **`last_frame_age_sec` and `next_probe_in_sec` are decoration**, not state.
+  They change continuously and are excluded from the panel's own change
+  detection; do not key alerting on them, key it on the `status` fields.
+
+Cadence is **on change plus an hourly resync**. The resync exists because QoS 1
+protects delivery to a *connected* subscriber and does nothing for a consumer
+that started later — without it, a fleet view brought up against a calm panel
+would show nothing until the next fault. A consumer should treat a snapshot
+older than ~2 h as stale.
 
 ### Deployment ordering (matters)
 

@@ -33,6 +33,12 @@ const MESSAGE_TYPES = Object.freeze({
   HEARTBEAT: 'heartbeat',
   /** Alarm state transition: RAISE / CLEAR / ACK. */
   ALARM: 'alarm',
+  /**
+   * Panel self-diagnosis: blacklisted devices, joint LIVE/STALE/OFFLINE,
+   * per-segment bus liveness, Pi supply health. A complete STATE snapshot,
+   * not an event - the newest message always wins.
+   */
+  DEVICE_HEALTH: 'device_health',
   /** Result of a remote config push. */
   CONFIG_ACK: 'config_ack',
   /** Result of a certificate rotation. */

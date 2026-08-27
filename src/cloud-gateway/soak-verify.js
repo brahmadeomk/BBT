@@ -94,7 +94,7 @@ function aggregate(samples) {
   }
   if (ror.length) entry.ror_max = Math.max(...ror);
   if (t.length) entry.t_max = Math.max(...t);
-  if (amb.length) entry.ambient = amb.reduce((a, b) => a + b, 0) / amb.length;
+  if (amb.length) entry.amb_avg = amb.reduce((a, b) => a + b, 0) / amb.length;
   return entry;
 }
 

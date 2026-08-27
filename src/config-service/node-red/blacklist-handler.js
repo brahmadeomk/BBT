@@ -222,7 +222,12 @@ function processReadResult(tracker, payload, ctx = {}) {
     // ctx.busId (or payload.bus_id) tags which segment the response came from
     const slaveId = unitToSlaveId(ctx.doc, payload.id, ctx.busId ?? payload.bus_id);
     if (slaveId) {
-      const ev = tracker.recordResult(slaveId, payload.st === 'ok', ctx.nowMs ?? Date.now());
+      const nowMs = ctx.nowMs ?? Date.now();
+      // Segment liveness (EC-2): ANY frame from a slave proves its bus is
+      // alive, including an error response - the Nano answered, so the serial
+      // link is up even if that one device is not.
+      tracker.recordBusSeen(busForSlave(ctx.doc, slaveId), nowMs);
+      const ev = tracker.recordResult(slaveId, payload.st === 'ok', nowMs);
       if (ev) events.push(ev);
     }
   }
