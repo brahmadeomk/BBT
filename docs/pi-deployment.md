@@ -293,6 +293,78 @@ A symptom of skipping the re-import is a dashboard that shows *some* of a
 change but not all of it — e.g. new column headers appear (they came with an
 earlier import) while a newly added button does not.
 
+### Deploying the cloud message contract + device health (2026-08-27)
+
+This release changes what the panel PUBLISHES, so the order matters more
+than usual. Do the AWS step first.
+
+**Step 0 — push the AWS policy BEFORE the code.** The LWT moved to a new
+`status/{c}/{s}/{p}` topic, and AWS IoT authorises the will topic as part
+of establishing the connection. In AWS IoT → Security → Policies →
+`bt-panel-policy` → *Create new version* from the current
+`docs/aws/iot-policy-panel.template.json` (REGION/ACCOUNT_ID replaced) →
+set it **active**. Skipping this no longer takes the panel dark - it
+falls back to connecting without a will - but you get a degraded panel
+and a warning on every flush until you fix it.
+
+**Step 1 — pull and restart.**
+
+```bash
+cd ~/busduct-cloud-edge
+git pull
+sudo systemctl restart nodered      # NOT just a Deploy - new modules under src/
+```
+
+**Step 2 — re-import the flow.** `flows/flows_BBT.json` changed: three new
+nodes on the **Cloud Gateway** tab ("device health (60s)" → "Publish
+Device Health" → debug). Menu → Import → the repo's
+`flows/flows_BBT.json` → Deploy.
+
+#### Verify, in the order that isolates faults
+
+1. **The library loaded.** The "Publish Device Health" node's status line
+   should read something like `20/20 live | bus1:ok | changed` within ~35 s
+   of the deploy. `lib not loaded - RESTART Node-RED` means step 1's
+   restart did not happen (or `settings.js` is missing the entry).
+
+2. **A message is actually queued.** Its debug output shows
+   `device_health: "changed"` on the first tick.
+
+3. **It goes QUIET.** Watch the next few ticks: they must report
+   `"unchanged"`. If every 60 s tick says `"changed"` on a calm panel,
+   something volatile is leaking into change detection - that is a bug,
+   not a quirk, and it would publish 60× more than intended.
+
+4. **`bus1:ok`, not `unknown`.** `unknown` after a minute of running means
+   the tracker is seeing no frames - check the Blacklist Engine node.
+   On a two-segment panel both buses must appear.
+
+5. **It reacts to a real fault.** Unplug one sensor. Within ~3 failed
+   polls the status line drops to `19/20 live` and a new message goes out
+   naming the device by its commissioned address. Plug it back in: after
+   the probe backoff it returns to `20/20 live`. This is the same drill as
+   the blacklist verification above, now visible from the cloud.
+
+6. **It reaches AWS.** In the IoT MQTT test client subscribe to
+   `dt/+/+/+/tel` and confirm a `{"type":"device_health","v":1,...}`
+   message. Also subscribe to `status/+/+/+` - it should be silent while
+   the panel is up.
+
+7. **The LWT is on its new topic.** Pull the panel's Ethernet abruptly;
+   within ~7.5 min (300 s keep-alive) `status/{c}/{s}/{p}` gets
+   `{"type":"lwt","v":1,"thing_name":"..."}`. A graceful
+   `systemctl restart nodered` must NOT produce one.
+
+8. **Check the will was accepted.** In the "gateway flush" debug output,
+   an `lwt:` field means the panel connected WITHOUT its will because the
+   broker refused it - i.e. step 0 was skipped or the policy version is
+   not active. Telemetry is fine; fix the policy and restart. No `lwt:`
+   field means all is well.
+
+9. **Field names.** In a telemetry message, the per-joint ambient is now
+   `amb_avg` (it was `ambient` in keyed mode). Nothing on the panel reads
+   it, so this only matters to whoever is building the cloud side.
+
 ### Troubleshooting: a dashboard table is blank
 
 A blank Modbus Settings table has two causes that look identical in the
