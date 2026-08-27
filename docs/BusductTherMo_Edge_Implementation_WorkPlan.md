@@ -326,3 +326,49 @@ no benefit.
 | Held (`STALE`) alarms mistaken for live ones | Distinct HMI/BMS/cloud representation with `last_valid_ts`; omit stale values from telemetry rather than repeating them |
 | BMS register map churn breaking deployed gateways | Versioned, append-only map; never renumber |
 | Gateway BOM cost at volume | Point model designed to carry over to a native BACnet/IP server; revisit when panel volume justifies development |
+
+---
+
+# Addendum B — Cloud message contract (added 2026-08-27)
+
+Slice 5's "emit one payload per panel per interval" (§Slice 5) said what
+the panel sends but not how a consumer identifies it. A design review
+found four different message shapes sharing the telemetry topic —
+interval aggregate, heartbeat, positional manifest and the LWT — with
+only the manifest carrying a `type` field. Resolved before cloud
+development began, so no deployed consumer had to migrate.
+
+**The published contract is now `docs/aws/README.md` Part G**, with
+`src/cloud-gateway/message-types.js` as its machine-readable half
+(required by every publisher, so code and docs cannot drift).
+
+Three properties this adds to the Slice 5/6 deliverable:
+
+1. **Every message carries `type` and `v`.** `type` identifies the shape
+   (`telemetry`, `manifest`, `heartbeat`, `alarm`, `device_health`,
+   `config_ack`, `cert_ack`, `lwt`); `v` identifies the revision of that
+   shape. `v` is not optional decoration: **OTA is not built** (Readiness
+   Phase 6), so panels are updated by visiting them and a fleet runs mixed
+   firmware for months — the cloud will parse two revisions at once.
+   Bump only on breaking changes; consumers must ignore unknown fields and
+   must fail loudly on an unknown `v`.
+
+2. **Telemetry field names are frozen** — `dt_min dt_max dt_avg ror_max
+   t_max amb_avg`, identical in the keyed and positional encodings. The
+   two had drifted (`ambient` vs `amb_avg`), and §Slice 5's own summary
+   above still describes the aggregate informally as "ambient"; the
+   authoritative list is Part G.
+
+3. **New message type: `device_health`.** The risk table above commits to
+   a "distinct HMI/BMS/cloud representation" for held/STALE alarms, but
+   nothing in Slices 5–7 actually published device state — blacklisted
+   units, joint LIVE/STALE/OFFLINE and per-segment bus liveness reached
+   the HMI and the BMS register map only. `device_health` closes that for
+   the cloud tier. It is a complete **state snapshot**, not an event,
+   because an alarm stream cannot tell a late or restarted consumer what
+   is *currently* blacklisted without replaying history.
+
+The LWT also moved off the telemetry topic to `status/{c}/{s}/{p}`. See
+Part G for the deployment-ordering consequence (the device policy must
+grant the new topic) and the connect-time fallback that keeps a panel
+online if that step is missed.

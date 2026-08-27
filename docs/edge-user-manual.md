@@ -425,6 +425,14 @@ who changed it" after any behaviour change.
   the device is dark) or **OFFLINE**. Each blacklisted unit also raises a
   `DEVICE_BLACKLIST` alarm in **Active Alarms**. "✔ All devices live" means
   nothing is blacklisted.
+
+  What this screen shows is **also sent to the cloud** (as a
+  `device_health` message) whenever it changes, so a central operator sees
+  the same picture without visiting the panel. Nothing on this screen
+  changes because of that — it is the same table, additionally published.
+  On a panel with two RS-485 segments the cloud copy also reports each
+  segment's liveness separately, which matters because one dead segment
+  still leaves the other half of the panel reporting normally.
 - **Diagnostics / Modbus Dashboard** — low-level Modbus read/transfer
   status for engineers verifying the RS-485 link.
 - **Connection Analytics → Disconnections** — a history of link drops

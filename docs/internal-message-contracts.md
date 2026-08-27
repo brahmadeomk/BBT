@@ -11,6 +11,20 @@ alongside the existing outputs, no logic changes — see decision log).
 Slice 5's Cloud Gateway batcher/alarm publisher are the intended
 consumers, via matching `link in` nodes added later.
 
+> **These are INTERNAL shapes. They are not what the panel publishes.**
+> The device → cloud wire contract is a separate, versioned document:
+> **`docs/aws/README.md` Part G** (machine-readable half:
+> `src/cloud-gateway/message-types.js`). Do not infer one from the other
+> — the same concept is deliberately named differently in each, because
+> internally a field can be a rich object while on the wire it is one
+> aggregated number.
+>
+> The trap, which caught us once (CR-OPEN-5, 2026-08-27): `ambient` here
+> is an **object** `{slaveID, val, age_sec}` for a single reading, while
+> the wire field is **`amb_avg`**, a bare number — the joint's mean
+> ambient over the whole telemetry interval. Reusing the internal name on
+> the wire is what let the two telemetry encodings drift apart unnoticed.
+
 ## KPI stream — `ProcessLogic` (node `39dad91df0c15744`)
 
 Fires once per incoming sensor reading. Three outputs, mutually
@@ -34,7 +48,7 @@ exclusive per message (exactly one fires):
   "val": 42.3,                   // raw sensor reading, degC
   "emaTemp": 42.1,                // EMA-smoothed temperature
   "ror": 3.256,                   // rate of rise, degC/hr (EMA-based)
-  "ambient": { "slaveID": 101, "val": 31.06, "age_sec": 0.8 } || null,
+  "ambient": { "slaveID": 101, "val": 31.06, "age_sec": 0.8 } || null,   // NB: publishes as `amb_avg` (a number) - see the note above
   "deltaT": { "raw": 11.2, "ema": 10.9 } || null,
   "sample_dt_sec": 1.7,           // time since last sample for this joint, clamped [0.5, 300]
   "timestamp": "2026-07-10T10:45:56.454Z",

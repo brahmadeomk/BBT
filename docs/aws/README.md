@@ -263,12 +263,15 @@ In the **AWS console** (same region):
   attributes `customer_id/site_id/panel_id/hw_serial`, a certificate
   attached, and `bt-panel-policy` on that certificate.
 - **IoT Core → MQTT test client → Subscribe to a topic**: subscribe to
-  `dt/#`. Within one flush interval you should see:
-  - `dt/c1001/s01/p01/tel` — heartbeat
-    (`{timestamp, fwVersion, configVersions}`) and telemetry batches
-    (`{timestamp, interval_min: 10, joints: {J01: {dt_min, dt_max,
-    dt_avg, ror_max, t_max, amb_avg}, ...}}`)
+  `dt/#`. Every message carries `type` and `v` (Part G). Within one
+  flush interval you should see, on `dt/c1001/s01/p01/tel`:
+  - `{"type":"heartbeat","v":1,"timestamp":..,"fwVersion":..,"configVersions":..,"system":..}`
+  - `{"type":"telemetry","v":1,"encoding":"keyed","timestamp":..,"interval_min":10,
+    "joints":{"J01":{"dt_min":..,"dt_max":..,"dt_avg":..,"ror_max":..,"t_max":..,"amb_avg":..}}}`
+  - `{"type":"device_health","v":1,...}` within ~35 s of the restart
   - timestamps are edge UTC — the time the panel *built* the message.
+- Also subscribe to `status/#`. It should be **silent** while the panel
+  is up; that topic carries only the LWT.
 
 ### C2. Alarm path test
 

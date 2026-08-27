@@ -108,6 +108,8 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | Modbus/joint schema (R1–R16) | `config/schemas/busduct_modbus_joint_config.schema.json` | present |
 | Alarms schema (A1–A10) | `config/schemas/busduct_alarms_config.schema.json` | present |
 | Integration schema (I1–I5, Slice 11) | `config/schemas/busduct_integration_config.schema.json` | present |
+| **Device → cloud wire contract (versioned; the cloud team's spec)** | `docs/aws/README.md` **Part G** + `src/cloud-gateway/message-types.js` | present (2026-08-27, `v1`) |
+| Internal (on-panel) message shapes — NOT the wire contract | `docs/internal-message-contracts.md` | present |
 | BMS register map (customer-facing, append-only) | `docs/bms-register-map.md` | present |
 | BMS integration deployment/runbook | `docs/bms-integration.md` | present |
 | BACnet gateway integration (Moxa MGate 5217I-1200-T) | `docs/bms-mgate5217-integration.md` | present (2026-08-19) |
