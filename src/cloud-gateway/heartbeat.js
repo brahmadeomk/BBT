@@ -1,6 +1,6 @@
 'use strict';
 
-const { MESSAGE_TYPES } = require('./message-types');
+const { MESSAGE_TYPES, SCHEMA_VERSION } = require('./message-types');
 
 /**
  * Hourly liveness ping (busduct_edge_config.yaml: publish.heartbeat,
@@ -29,6 +29,7 @@ class Heartbeat {
   send(status) {
     const payload = {
       type: MESSAGE_TYPES.HEARTBEAT,
+      v: SCHEMA_VERSION,
       timestamp: new Date().toISOString(),
       fwVersion: status.fwVersion,
       configVersions: status.configVersions,

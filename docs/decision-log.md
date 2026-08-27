@@ -3815,3 +3815,64 @@ QoS 1 protects delivery to a *connected* subscriber and does nothing for a
 consumer that started after the last change. Without it a fleet view brought up
 against a calm panel would show nothing until the next fault. On a healthy panel
 this is one message an hour carrying an empty `devices` array.
+
+## 2026-08-27 — Two open contract questions, decided
+
+Both were left open for the cloud requirements doc; the user asked for a
+decision rather than options.
+
+### 1. Schema version: YES — a single global `v`, integer, currently 1
+
+The deciding fact is not about JSON style, it is about **fleet reality: OTA
+update is not built** (Readiness Workplan Phase 6). Panels are updated by
+visiting them, so a fleet runs mixed firmware for months and the cloud will
+have to parse two revisions of a message *simultaneously* — a certainty, not a
+risk. Without a version the only way to tell revisions apart is to sniff which
+fields are present, which is precisely the habit the `type` discriminator was
+added to end. CR-OPEN-5 (the `ambient` → `amb_avg` rename) is the existing
+precedent: with `v` the cloud could have accepted both revisions instead of
+guessing.
+
+**Global, not per-message-type.** A consumer routes on `type` first and applies
+`v` inside that branch, so a bump caused by a telemetry change is already a
+no-op for an alarm consumer. Per-type counters would make every consumer track
+seven numbers and still could not express an envelope-wide change.
+
+Rules, written into `message-types.js` next to the constant: bump ONLY on a
+breaking change (field renamed/removed, meaning/unit/type changed, a
+switched-on value gaining a new meaning); an added optional field never bumps
+and consumers must ignore unknown fields; an unknown `v` must fail loudly
+rather than be guessed. The "never bump for additive" half matters as much as
+the other: bumping for additive changes trains people to ignore the number.
+
+### 2. Status-topic ordering: code-level fallback, not documentation alone
+
+The hazard: AWS IoT authorises the will topic as part of establishing the
+connection, so a policy that has not yet granted `status/{c}/{s}/{p}` refuses
+the whole CONNECT. Nothing at the MQTT client distinguishes that from any other
+connect failure, and the reconnect loop retries forever — so the naive
+behaviour is an **unbounded** dark panel that looks like a certificate fault.
+Documentation alone leaves that live, and this project has already been bitten
+by the same shape once (the cert-rotation subscribe, 2026-07-22).
+
+Rejected: a feature flag like `BUSDUCT_CERT_ROTATION`. That works for an
+optional feature you decide about in advance; the LWT is not optional and the
+operator would have to already know the answer to set the flag correctly.
+
+**Chosen: alternate.** Past three failed attempts, even-numbered dials carry
+the will and odd ones do not (`_willFor`). Whichever succeeds is the truth. If
+the will topic is unauthorised, only the no-will dials connect and the panel
+comes up with telemetry and alarms flowing, losing only immediate
+unclean-disconnect detection (missed heartbeats still catch an offline panel).
+If the cause is anything else, both kinds fail equally and a with-will dial
+connects once it clears.
+
+**Alternating rather than latching is the point.** Latching on the first
+no-will success would mean a panel that merely lost its uplink for a while runs
+without an LWT until someone restarts it — trading a loud failure for a silent
+one. A test pins exactly that case.
+
+The other half is telling someone. A panel running without its will is online
+and looks entirely healthy, so the reason — naming the unauthorised topic, the
+fix, and what still works — is repeated on **every telemetry flush**, not just
+at boot.

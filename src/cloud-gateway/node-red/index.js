@@ -1,6 +1,6 @@
 'use strict';
 
-const { MESSAGE_TYPES } = require('../message-types');
+const { MESSAGE_TYPES, SCHEMA_VERSION } = require('../message-types');
 
 const { LoopbackTransport } = require('../transport');
 const { Outbox } = require('../outbox');
@@ -148,7 +148,7 @@ function createGatewayFromEdgeConfig() {
     // measurement, and under Basic Ingest the telemetry topic is an IoT Rule
     // ingress - an LWT published there arrives as a malformed telemetry record
     // and cannot be subscribed to at all.
-    will: { topic: cfg.topics.status, payload: { type: MESSAGE_TYPES.LWT, thing_name: cfg.identity.thing_name } },
+    will: { topic: cfg.topics.status, payload: { type: MESSAGE_TYPES.LWT, v: SCHEMA_VERSION, thing_name: cfg.identity.thing_name } },
   });
   transport.connect();
   // Positional telemetry is opt-in via publish.telemetry.encoding: 'positional'

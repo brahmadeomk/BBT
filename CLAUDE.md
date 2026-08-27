@@ -899,13 +899,26 @@ development started**, so there is no deployed consumer to migrate.
   disconnect is not a measurement, and under Basic Ingest that topic is an
   IoT Rule ingress, so the LWT arrived as a malformed telemetry record and
   could not be subscribed to at all.
-- **Deployment ordering**: the device policy must grant publish on the
-  status topic *before* this code reaches a panel — AWS IoT authorises the
-  will topic when establishing the connection, so an ungranted status
-  topic can refuse the connect and the panel goes dark looking like a cert
-  fault. Same hazard shape as the cert-rotation subscribe. Push
-  `docs/aws/iot-policy-panel.template.json` as a new active policy version
-  first.
+- **Every message also carries `v`** (contract version, currently **1**).
+  `type` = shape, `v` = revision. It earns its keep because **OTA isn't
+  built** (Readiness Phase 6), so panels are updated by visiting them and
+  a fleet runs mixed firmware for months — the cloud *will* parse two
+  revisions at once. Rules: bump **only** on a breaking change (rename,
+  removal, changed meaning/unit/type); an added optional field never
+  bumps; **one global number**, since consumers route on `type` first;
+  an unknown `v` must fail loudly, never be guessed.
+- **Deployment ordering**: push the policy granting publish on the status
+  topic *before* this code reaches a panel — AWS IoT authorises the will
+  topic when establishing the connection. **But the panel no longer goes
+  dark if you forget**: after 3 failed attempts, dials **alternate**
+  with/without the will (`_willFor`, `aws-iot-transport.js`). If the will
+  topic is unauthorised only the no-will dials connect, so telemetry and
+  alarms keep flowing; if the cause is anything else both kinds fail
+  equally and a with-will dial connects once it clears — which is why this
+  alternates rather than latching (a transient outage must not strip the
+  LWT permanently). A suppressed LWT is reported on **every flush**
+  (`lwt:` in the flush status), because such a panel looks entirely
+  healthy otherwise.
 - **Field names are frozen** (CR-OPEN-5): `dt_min dt_max dt_avg ror_max
   t_max amb_avg`, **identical in both encodings**. Keyed used to emit
   `ambient` where positional emitted `amb_avg` for the same number, and

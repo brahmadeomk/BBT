@@ -2,6 +2,9 @@
 
 const fs = require('node:fs');
 
+/** Dials past this many failures alternate with/without the Last Will - see _willFor(). */
+const LWT_FALLBACK_AFTER_ATTEMPTS = 3;
+
 /**
  * AWS IoT Core transport (Slice 6) implementing the cloud-agnostic
  * transport interface from src/cloud-gateway/transport.js:
@@ -82,8 +85,12 @@ class AwsIotTransport {
       clean: true,
       reconnectPeriod: 0, // reconnects are ours (jittered backoff below)
       rejectUnauthorized: true,
-      ...(will ? { will: { topic: will.topic, payload: JSON.stringify(will.payload), qos: 1, retain: false } } : {}),
     };
+    // The will is kept separately from connectOptions so a dial can be made
+    // without it - see _willFor().
+    this.will = will ?? null;
+    this.lwtActive = null;         // null until the first successful connect
+    this.lwtSuppressedReason = null;
     this.backoffInitialSec = backoff.initialSec ?? 2;
     this.backoffMaxSec = backoff.maxSec ?? 300;
     this.mqttConnect = mqttConnect ?? require('mqtt').connect;
@@ -104,11 +111,52 @@ class AwsIotTransport {
     this._dial();
   }
 
+  /**
+   * Whether THIS dial should carry the Last Will, and the mqtt.js option for it.
+   *
+   * A broker can refuse the whole CONNECT because of the will topic alone -
+   * AWS IoT authorises it as part of establishing the connection, so a policy
+   * that has not yet been updated to grant publish on status/{c}/{s}/{p} takes
+   * the panel completely dark. Nothing distinguishes that from any other
+   * connect failure at the client, and our reconnect loop would retry forever,
+   * so the panel would stay dark indefinitely while looking like a certificate
+   * fault.
+   *
+   * So once the first few attempts have failed, dials ALTERNATE: even attempts
+   * carry the will, odd ones do not. Whichever succeeds is the truth.
+   *  - Will topic unauthorized  -> only the no-will dials connect; we come up
+   *    with telemetry flowing and report lwtActive:false with a reason.
+   *  - Anything else (network, certs, endpoint) -> both kinds fail equally,
+   *    and when the real problem clears a with-will dial connects normally.
+   * That last property is why this alternates rather than latching: a
+   * transient outage must not leave the panel permanently without an LWT.
+   */
+  _willFor(attempt) {
+    if (!this.will) return { include: false, option: {} };
+    const include = attempt < LWT_FALLBACK_AFTER_ATTEMPTS || attempt % 2 === 0;
+    return {
+      include,
+      option: include
+        ? { will: { topic: this.will.topic, payload: JSON.stringify(this.will.payload), qos: 1, retain: false } }
+        : {},
+    };
+  }
+
   _dial() {
-    const client = this.mqttConnect(this.url, this.connectOptions);
+    const { include: withWill, option: willOption } = this._willFor(this.reconnectAttempts);
+    const client = this.mqttConnect(this.url, { ...this.connectOptions, ...willOption });
     this.client = client;
 
     client.on('connect', () => {
+      if (this.will) {
+        this.lwtActive = withWill;
+        this.lwtSuppressedReason = withWill
+          ? null
+          : `connected WITHOUT a Last Will: ${this.reconnectAttempts} connect attempt(s) carrying the will were ` +
+            `refused. The broker most likely does not authorise publish on '${this.will.topic}' - push the current ` +
+            'iot-policy-panel.template.json as a new ACTIVE policy version, then restart. Telemetry is unaffected; ' +
+            'only immediate unclean-disconnect detection is lost (missed heartbeats still detect an offline panel).';
+      }
       this.reconnectAttempts = 0;
       this._setConnected(true);
       for (const topic of this.subscriptions.keys()) {

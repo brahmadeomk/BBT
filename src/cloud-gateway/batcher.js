@@ -1,6 +1,6 @@
 'use strict';
 
-const { MESSAGE_TYPES, TELEMETRY_ENCODINGS } = require('./message-types');
+const { MESSAGE_TYPES, TELEMETRY_ENCODINGS, SCHEMA_VERSION } = require('./message-types');
 
 /**
  * Aggregates ProcessLogic's KPI stream ("joint" messages - see
@@ -80,6 +80,7 @@ class Batcher {
   manifestMessage() {
     return {
       type: MESSAGE_TYPES.MANIFEST,
+      v: SCHEMA_VERSION,
       manifest_version: this.manifestVersion,
       joints: this.manifest.slice(),
       timestamp: new Date().toISOString(),
@@ -186,6 +187,7 @@ class Batcher {
     const slice = this.manifest.slice(start, end);
     const chunk = {
       type: MESSAGE_TYPES.TELEMETRY,
+      v: SCHEMA_VERSION,
       encoding: TELEMETRY_ENCODINGS.POSITIONAL,
       timestamp,
       interval_min: intervalMin,
@@ -220,6 +222,7 @@ class Batcher {
   _packIntoChunks(jointEntries, intervalMin, timestamp) {
     const envelope = (joints) => ({
       type: MESSAGE_TYPES.TELEMETRY,
+      v: SCHEMA_VERSION,
       encoding: TELEMETRY_ENCODINGS.KEYED,
       timestamp,
       interval_min: intervalMin,

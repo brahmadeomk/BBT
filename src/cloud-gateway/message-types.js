@@ -24,6 +24,42 @@
  * broker publishes it on the device's behalf, from a payload fixed at connect),
  * so it carries no timestamp. Everything else does.
  */
+/**
+ * Contract version, carried as `v` on every message.
+ *
+ * WHY A VERSION AT ALL, given `type` already says what a message is: `type`
+ * identifies the SHAPE, `v` identifies the REVISION of that shape. The two
+ * answer different questions and a consumer needs both.
+ *
+ * WHY IT EARNS ITS KEEP HERE SPECIFICALLY: OTA update is not built yet
+ * (Readiness Workplan Phase 6), so a panel is updated by visiting it. A fleet
+ * therefore runs mixed firmware for months at a time, and the cloud has to
+ * parse two revisions simultaneously - which is a certainty, not a risk. The
+ * alternative is sniffing which fields are present, the exact habit the `type`
+ * discriminator was added to end.
+ *
+ * WHEN TO BUMP. Only on a BREAKING change to any message:
+ *   - a field renamed or removed
+ *   - a field's meaning, unit or type changed
+ *   - a value that consumers switch on gaining a meaning it did not have
+ * Adding an optional field is NOT breaking and must NOT bump: consumers are
+ * required to ignore unknown fields. Bumping for additive changes trains people
+ * to ignore the number.
+ *
+ * ONE GLOBAL NUMBER, not one per message type. A consumer routes on `type`
+ * first and applies `v` inside that branch, so a bump caused by a telemetry
+ * change is a no-op for an alarm consumer - while per-type counters would make
+ * everyone track seven of them and could not express an envelope-wide change.
+ *
+ * A consumer that meets a `v` it does not know must FAIL LOUDLY rather than
+ * guess: an unrecognised revision means fields may have moved underneath it.
+ *
+ * v1 (2026-08-27): the first contract with `type` on every message, frozen
+ * telemetry field names (dt_min dt_max dt_avg ror_max t_max amb_avg), the LWT
+ * on its own status topic, and device_health.
+ */
+const SCHEMA_VERSION = 1;
+
 const MESSAGE_TYPES = Object.freeze({
   /** Interval aggregate of joint KPIs. Carries `encoding` (see below). */
   TELEMETRY: 'telemetry',
@@ -61,4 +97,4 @@ const TELEMETRY_ENCODINGS = Object.freeze({
   POSITIONAL: 'positional',
 });
 
-module.exports = { MESSAGE_TYPES, TELEMETRY_ENCODINGS };
+module.exports = { MESSAGE_TYPES, TELEMETRY_ENCODINGS, SCHEMA_VERSION };

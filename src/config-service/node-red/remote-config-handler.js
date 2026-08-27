@@ -1,6 +1,6 @@
 'use strict';
 
-const { MESSAGE_TYPES } = require('../../cloud-gateway/message-types');
+const { MESSAGE_TYPES, SCHEMA_VERSION } = require('../../cloud-gateway/message-types');
 
 const { nanoJobsEqual } = require('../nano-compiler');
 
@@ -57,6 +57,7 @@ function processRemoteConfig(payload, deps) {
 
   const ack = (result, extra = {}) => ({
     type: MESSAGE_TYPES.CONFIG_ACK,
+    v: SCHEMA_VERSION,
     request_id: requestId,
     domain: typeof domain === 'string' ? domain : null,
     result,

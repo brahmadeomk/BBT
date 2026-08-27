@@ -1,6 +1,6 @@
 'use strict';
 
-const { MESSAGE_TYPES } = require('./message-types');
+const { MESSAGE_TYPES, SCHEMA_VERSION } = require('./message-types');
 
 /**
  * Device health as a published message (design review EC-2).
@@ -47,6 +47,7 @@ function buildDeviceHealth({ summary, doc, busSeen = {}, power, nowMs = Date.now
 
   return {
     type: MESSAGE_TYPES.DEVICE_HEALTH,
+    v: SCHEMA_VERSION,
     timestamp: new Date(nowMs).toISOString(),
     counts: {
       joints_total: jointsTotal,

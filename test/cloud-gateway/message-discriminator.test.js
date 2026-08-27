@@ -22,7 +22,7 @@ const { Heartbeat } = require('../../src/cloud-gateway/heartbeat');
 const { AlarmPublisher } = require('../../src/cloud-gateway/alarm-publisher');
 const { Outbox } = require('../../src/cloud-gateway/outbox');
 const { LoopbackTransport } = require('../../src/cloud-gateway/transport');
-const { MESSAGE_TYPES, TELEMETRY_ENCODINGS } = require('../../src/cloud-gateway/message-types');
+const { MESSAGE_TYPES, TELEMETRY_ENCODINGS, SCHEMA_VERSION } = require('../../src/cloud-gateway/message-types');
 const { processRemoteConfig } = require('../../src/config-service/node-red/remote-config-handler');
 
 function freshOutbox() {
@@ -178,6 +178,25 @@ describe('wire contract - the discriminator is actually unambiguous', () => {
     // no stray columns with other names
     const extra = Object.keys(posPayload).filter((k) => Array.isArray(posPayload[k]) && !FIELDS.includes(k));
     assert.deepEqual(extra, [], `positional has columns keyed does not: ${extra}`);
+  });
+
+  test('every message carries the contract version', () => {
+    // `type` says what the SHAPE is; `v` says which REVISION of it. Both are
+    // needed because OTA does not exist yet - panels are updated by visiting
+    // them, so a fleet runs mixed firmware for months and the cloud must parse
+    // two revisions at once. Sniffing which fields are present is the habit
+    // this whole contract exists to end.
+    const outbox = freshOutbox();
+    const b = new Batcher({ outbox, topic: 'tel', positional: true });
+    b.ingestJointKpi(jointKpi('J01'));
+    b.flush(10);
+    new Heartbeat({ outbox, topic: 'tel' }).send({ fwVersion: '1', configVersions: {} });
+    new AlarmPublisher({ outbox, topic: 'alarm' }).ingestActiveAlarms([alarm()]);
+    for (const m of queued(outbox)) {
+      assert.equal(m.payload.v, SCHEMA_VERSION, `${m.payload.type} is missing the contract version`);
+    }
+    assert.equal(processRemoteConfig({ domain: 'nonsense' }, { store: null }).ack.v, SCHEMA_VERSION);
+    assert.equal(typeof SCHEMA_VERSION, 'number');
   });
 
   test('`type` is the FIRST key, so a truncated payload in a log is still identifiable', () => {

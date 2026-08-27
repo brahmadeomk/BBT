@@ -581,13 +581,42 @@ transport that reads its credentials from disk.
 ## Part G — the device → cloud message contract
 
 **Read this before writing the first IoT Rule.** Every message the panel
-publishes carries a **`type`** field as its first property. One field
-identifies the shape; nothing has to be inferred from which other fields
-happen to be present.
+publishes carries **`type`** as its first property and **`v`** as its
+second. `type` says what the shape is; `v` says which revision of that
+shape. Nothing has to be inferred from which other fields happen to be
+present.
 
 ```sql
 SELECT * FROM 'dt/+/+/+/tel' WHERE type = 'telemetry'
 ```
+
+### Versioning (`v`), and why it is not optional here
+
+**`v` is currently `1`.** It exists because **OTA update is not built yet**
+(Readiness Workplan Phase 6), so a panel is updated by visiting it. A fleet
+therefore runs mixed firmware for months at a time, and the cloud will have
+to parse two revisions simultaneously — a certainty, not a risk.
+
+The rules, which the edge follows and consumers should rely on:
+
+- **`v` bumps only on a BREAKING change** — a field renamed or removed, a
+  field's meaning/unit/type changed, or a switched-on value gaining a new
+  meaning.
+- **Adding an optional field is not breaking and does not bump.** Consumers
+  **must ignore unknown fields**; if you reject them, every additive change
+  becomes a fleet-wide outage.
+- **One global number, not one per message type.** You route on `type`
+  first and apply `v` inside that branch, so a bump caused by a telemetry
+  change is a no-op for an alarm consumer.
+- **An unknown `v` must fail loudly** — dead-letter it, alert, do not
+  guess. A revision you do not recognise means fields may have moved
+  underneath you. This is the one case where refusing to parse is correct.
+
+There is exactly one precedent so far for what a bump would look like: the
+keyed encoding used to call the ambient average `ambient` while positional
+called it `amb_avg`. That is now frozen as `amb_avg` in both — and had `v`
+existed then, the cloud could have accepted both revisions instead of
+guessing.
 
 The authoritative list is `src/cloud-gateway/message-types.js` — that
 module is required by every publisher, so the code cannot drift from this
@@ -686,13 +715,41 @@ that started later — without it, a fleet view brought up against a calm panel
 would show nothing until the next fault. A consumer should treat a snapshot
 older than ~2 h as stale.
 
-### Deployment ordering (matters)
+### Deployment ordering, and the safety net if you get it wrong
 
-The panel's policy must grant publish on `status/{c}/{s}/{p}` **before**
-code carrying the new LWT topic is deployed. AWS IoT authorises the will
-topic as part of establishing the connection, so an ungranted status
-topic can refuse the connect outright — the panel would go fully dark,
-looking like a certificate problem. Push
+**Push the policy first.** The panel's policy must grant publish on
+`status/{c}/{s}/{p}` before code carrying the new LWT topic is deployed:
+AWS IoT authorises the will topic as part of establishing the connection,
+so an ungranted status topic can refuse the CONNECT outright. Push
 `iot-policy-panel.template.json` as a new **active** policy version
-first, exactly as for the cert channel above. Recovery if it happens
-anyway: push the policy, or roll the panel back to the previous release.
+first, exactly as for the cert channel above.
+
+**The panel no longer goes dark if you forget.** Nothing at the MQTT
+client distinguishes "refused because of the will topic" from any other
+connect failure, and our reconnect loop retries forever — so the naive
+behaviour was an *unbounded* outage that looks like a certificate fault.
+Instead, once the first three attempts have failed, dials **alternate**:
+even-numbered attempts carry the will, odd ones do not.
+
+- **Will topic unauthorised** → only the no-will dials connect. The panel
+  comes up with telemetry and alarms flowing; only immediate
+  unclean-disconnect detection is lost, and missed heartbeats still detect
+  an offline panel.
+- **Anything else** (network, certs, endpoint) → both kinds fail equally,
+  and when the real problem clears a with-will dial connects normally. The
+  alternation is why a transient outage cannot leave a panel permanently
+  without an LWT.
+
+**You will be told.** A panel running without its will is online and looks
+entirely healthy, so the reason is repeated on **every telemetry flush**,
+not just at boot — look for `lwt:` in the "gateway flush" debug output:
+
+```
+lwt: connected WITHOUT a Last Will: 3 connect attempt(s) carrying the will were
+     refused. The broker most likely does not authorise publish on
+     'status/c1001/s01/p01' - push the current iot-policy-panel.template.json
+     as a new ACTIVE policy version, then restart. ...
+```
+
+Fix by pushing the policy and restarting Node-RED. Rolling the panel back
+to the previous release also works, but is no longer necessary.

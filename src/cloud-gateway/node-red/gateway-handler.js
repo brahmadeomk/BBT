@@ -52,6 +52,10 @@ function flushTelemetry(gateway, intervalMin) {
     outbox_bytes: gateway.outbox.totalSizeBytes(),
     transport_mode: gateway.mode,
     connected: gateway.transport.isConnected(),
+    // Surfaced on EVERY flush, not just at boot: a panel that came up without
+    // its Last Will is online and looks entirely healthy, so the only way an
+    // operator learns the status topic is not authorised is if we keep saying so.
+    ...(gateway.transport.lwtSuppressedReason ? { lwt: gateway.transport.lwtSuppressedReason } : {}),
     // loopback only - the AWS transport keeps no publish record (the cloud does)
     ...(gateway.transport.published ? { published_total: gateway.transport.published.length } : {}),
   };

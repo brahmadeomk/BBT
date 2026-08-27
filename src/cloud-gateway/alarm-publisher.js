@@ -1,6 +1,6 @@
 'use strict';
 
-const { MESSAGE_TYPES } = require('./message-types');
+const { MESSAGE_TYPES, SCHEMA_VERSION } = require('./message-types');
 
 const KPI_BY_ALARM_TYPE = {
   DELTA_T: 'delta_t',
@@ -75,6 +75,7 @@ class AlarmPublisher {
   _publish(action, alarm) {
     const event = {
       type: MESSAGE_TYPES.ALARM,
+      v: SCHEMA_VERSION,
       action, // "RAISE" | "CLEAR" | "ACK"
       joint_id: alarm.joint_id,
       level: alarm.level,

@@ -243,3 +243,95 @@ describe('AwsIotTransport - reloadCredentials (certificate rotation)', () => {
     transport.close();
   });
 });
+
+describe('AwsIotTransport - Last Will fallback (a refused will must not take the panel dark)', () => {
+  // AWS IoT authorises the will topic as part of establishing the connection,
+  // so a policy that has not yet granted publish on status/{c}/{s}/{p} refuses
+  // the whole CONNECT. Nothing at the client distinguishes that from any other
+  // connect failure, and the reconnect loop retries forever - so without this
+  // fallback the panel stays dark indefinitely, looking like a cert fault.
+
+  /** Fail the next dial the way a refused CONNECT arrives: error then close. */
+  const failLastDial = (dials) => {
+    const c = dials[dials.length - 1].client;
+    c.emit('error', new Error('connack: not authorized'));
+    c.emit('close');
+  };
+  const hasWill = (dial) => Boolean(dial.options.will);
+
+  test('the first attempts all carry the will - no fallback on a one-off blip', () => {
+    const { transport, dials } = makeTransport({ random: () => 0 });
+    transport.connect();
+    for (let i = 0; i < 3; i++) {
+      assert.equal(hasWill(dials[i]), true, `attempt ${i} must still carry the will`);
+      failLastDial(dials);
+      // backoff timer is real; drive the next dial directly
+      transport._dial();
+    }
+    transport.close();
+  });
+
+  test('once past the threshold, dials alternate', () => {
+    // Drive the policy directly: going through the reconnect machinery makes
+    // this a test of the backoff timer, not of the fallback rule.
+    const { transport } = makeTransport();
+    const withWill = (n) => transport._willFor(n).include;
+    assert.deepEqual([0, 1, 2].map(withWill), [true, true, true], 'early attempts keep the will');
+    assert.equal(withWill(3), false, 'first fallback attempt drops it to test the hypothesis');
+    assert.equal(withWill(4), true, '...and the next puts it back');
+    assert.equal(withWill(5), false);
+    assert.equal(withWill(6), true);
+    transport.close();
+  });
+
+  test('connecting without the will reports WHY, naming the topic and the fix', () => {
+    const { transport, dials } = makeTransport();
+    transport.reconnectAttempts = 3; // as if three with-will dials had been refused
+    transport._dial();
+    assert.equal(hasWill(dials[0]), false);
+
+    dials[0].client.emit('connect');
+    assert.equal(transport.isConnected(), true, 'telemetry is flowing - that is the point');
+    assert.equal(transport.lwtActive, false);
+    assert.match(transport.lwtSuppressedReason, /status\/c1024\/s02\/p07/, 'names the unauthorised topic');
+    assert.match(transport.lwtSuppressedReason, /policy/i, 'names the actual fix');
+    assert.match(transport.lwtSuppressedReason, /[Tt]elemetry is unaffected/, 'says what still works');
+    transport.close();
+  });
+
+  test('a transient outage does NOT permanently strip the will', () => {
+    // The failure mode this guards: latch on the first no-will success and a
+    // panel that merely lost its uplink for a while would run without an LWT
+    // forever. Alternating means a with-will dial is always retried, so when
+    // the real problem clears the panel comes back fully equipped.
+    const { transport, dials } = makeTransport();
+    transport.reconnectAttempts = 4; // even -> the will is back
+    transport._dial();
+    assert.equal(hasWill(dials[0]), true);
+
+    dials[0].client.emit('connect');
+    assert.equal(transport.lwtActive, true);
+    assert.equal(transport.lwtSuppressedReason, null, 'no misleading warning after a network blip');
+    transport.close();
+  });
+
+  test('a healthy panel connects first time, with its will, and reports nothing', () => {
+    const { transport, dials } = makeTransport();
+    transport.connect();
+    assert.equal(hasWill(dials[0]), true);
+    dials[0].client.emit('connect');
+    assert.equal(transport.lwtActive, true);
+    assert.equal(transport.lwtSuppressedReason, null);
+    transport.close();
+  });
+
+  test('a transport configured without a will never reports LWT state at all', () => {
+    const { transport, dials } = makeTransport({ will: undefined });
+    transport.connect();
+    assert.equal(dials[0].options.will, undefined);
+    dials[0].client.emit('connect');
+    assert.equal(transport.lwtActive, null, 'null means "not applicable", not "suppressed"');
+    assert.equal(transport.lwtSuppressedReason, null);
+    transport.close();
+  });
+});
