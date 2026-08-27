@@ -1,5 +1,7 @@
 'use strict';
 
+const { MESSAGE_TYPES } = require('./message-types');
+
 /**
  * Hourly liveness ping (busduct_edge_config.yaml: publish.heartbeat,
  * interval_min: 60, qos: 0) so the cloud can mark a panel offline
@@ -26,6 +28,7 @@ class Heartbeat {
    */
   send(status) {
     const payload = {
+      type: MESSAGE_TYPES.HEARTBEAT,
       timestamp: new Date().toISOString(),
       fwVersion: status.fwVersion,
       configVersions: status.configVersions,

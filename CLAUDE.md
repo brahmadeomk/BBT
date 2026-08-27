@@ -822,9 +822,8 @@ Mosquitto):
 - **`aws-iot-transport.js`**: implements the transport interface
   (publish/subscribe/isConnected/onConnectionChange) — TLS 1.2 mutual
   auth on 8883, thing name = client ID, keep-alive 300s, LWT
-  (`{lwt:true, thing_name}` on the telemetry topic, QoS 1 — the yaml
-  defines no status topic; flagged as a cloud-side design question),
-  and **self-managed reconnect** with full-jitter exponential backoff
+  (`{type:'lwt', thing_name}` on the **status** topic, QoS 1 — see the
+  message-contract section below), and **self-managed reconnect** with full-jitter exponential backoff
   2→300s (mqtt.js built-in reconnect disabled; subscriptions replayed
   on every reconnect). `publish` rejects while disconnected — that's
   what makes the outbox hold-and-drain behave correctly.
@@ -871,6 +870,45 @@ met. **Slices 1–6 are done.** Heartbeats now carry a `system` block
 ram_available_mb, low_voltage incl. Pi under-voltage/throttling flags
 from `vcgencmd get_throttled`; all fields null off-Pi, probe failures
 never break the heartbeat).
+
+## Device → cloud message contract (2026-08-27)
+
+**Every published message carries a `type` field as its first
+property.** The authoritative list is
+**`src/cloud-gateway/message-types.js`**, required by every publisher so
+the code cannot drift from the docs: `telemetry`, `manifest`,
+`heartbeat`, `alarm`, `config_ack`, `cert_ack`, `lwt`. Full table with
+topics, QoS and payload examples: **docs/aws/README.md Part G**.
+
+Why it exists: four shapes shared the telemetry topic (interval
+aggregate, heartbeat, positional manifest, LWT) and only the manifest
+said what it was, so a consumer had to discriminate by sniffing field
+presence — decodes today, mis-routes silently the first time anyone adds
+a field. Caught in design review as CR-OPEN-3 and fixed **before cloud
+development started**, so there is no deployed consumer to migrate.
+
+- `type` values are a wire contract: **append-only**, like the BMS
+  register map. A new message shape gets a new value, never a reused one
+  with an extra flag.
+- Telemetry carries `encoding: 'keyed' | 'positional'` — both are
+  `type:'telemetry'` on purpose, so a consumer needn't know how the panel
+  is configured. Keyed is the default and the only one live.
+- **The LWT moved to its own `status/{c}/{s}/{p}` topic**, never
+  Basic-Ingest rewritten. On the telemetry topic it was wrong twice: a
+  disconnect is not a measurement, and under Basic Ingest that topic is an
+  IoT Rule ingress, so the LWT arrived as a malformed telemetry record and
+  could not be subscribed to at all.
+- **Deployment ordering**: the device policy must grant publish on the
+  status topic *before* this code reaches a panel — AWS IoT authorises the
+  will topic when establishing the connection, so an ungranted status
+  topic can refuse the connect and the panel goes dark looking like a cert
+  fault. Same hazard shape as the cert-rotation subscribe. Push
+  `docs/aws/iot-policy-panel.template.json` as a new active policy version
+  first.
+- `test/cloud-gateway/message-discriminator.test.js` pins it: a publish
+  path that forgets its `type` fails there rather than in a customer's
+  IoT Rule. `soak-verify.js` now reads `type` too, with the old sniffing
+  kept only as a fallback so pre-2026-08-27 soak logs stay verifiable.
 
 ## Remote config channel (Slice 7, built — live verification pending)
 

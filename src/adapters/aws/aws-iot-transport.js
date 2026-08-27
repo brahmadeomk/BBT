@@ -28,12 +28,14 @@ const fs = require('node:fs');
  * jitter), resetting the attempt counter on a successful connect.
  * Subscriptions are replayed after every reconnect (clean session).
  *
- * The LWT publishes {lwt: true, thing_name} on the telemetry topic at
- * QoS 1 - the yaml defines no dedicated status topic, and the
- * heartbeat/2-missed rule remains the primary offline detector; the
- * LWT just makes an unclean disconnect visible immediately. (A
- * dedicated status topic is a cloud-side design question for the
- * companion chat.)
+ * The LWT publishes {type:'lwt', thing_name} at QoS 1 on the STATUS
+ * topic (topics.status), not telemetry. It used to share the telemetry
+ * topic, which was wrong twice over: a disconnect is not a measurement,
+ * and under Basic Ingest the telemetry topic is an IoT Rule ingress, so
+ * the LWT arrived as a malformed telemetry record and could not be
+ * subscribed to at all. The heartbeat/2-missed rule remains the primary
+ * offline detector; the LWT just makes an unclean disconnect visible
+ * immediately.
  */
 class AwsIotTransport {
   /**

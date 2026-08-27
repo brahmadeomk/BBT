@@ -192,6 +192,7 @@ mqtt:
 topics:
   telemetry: dt/{customer_id}/{site_id}/{panel_id}/tel
   alarm:     dt/{customer_id}/{site_id}/{panel_id}/alarm
+  status:    status/{customer_id}/{site_id}/{panel_id}   # LWT; see Part G
   telemetry_basic_ingest: $aws/rules/btTelemetry/dt/{customer_id}/{site_id}/{panel_id}/tel
   use_basic_ingest: false     # keep false until the IoT Rule exists (Part D)
 buffer:
@@ -309,10 +310,16 @@ different client ID must be refused.
 itself (same expectations, shorter gap).
 
 **Unclean-disconnect / LWT check:** pull the panel's Ethernet cable
-(or power) abruptly. On `dt/c1001/s01/p01/tel` the broker publishes
-`{"lwt": true, "thing_name": "bt-c1001-s01-p01"}` within roughly the
+(or power) abruptly. On **`status/c1001/s01/p01`** the broker publishes
+`{"type": "lwt", "thing_name": "bt-c1001-s01-p01"}` within roughly the
 keep-alive window (≤ ~7.5 min at 300s keep-alive). A graceful
-`systemctl restart nodered` should NOT produce an LWT.
+`systemctl restart nodered` should NOT produce an LWT. Subscribe to
+`status/+/+/+` in the MQTT test client to watch a whole fleet.
+
+> The LWT moved off the telemetry topic (see Part G). If you are testing
+> a panel whose policy predates that change, the connect may be refused
+> outright — push the current `iot-policy-panel.template.json` as a new
+> **active** policy version first.
 
 **24 h pull (the soak's centerpiece):** same as the short pull, left
 for 24 h. Watch outbox bytes stay far below the 200 MB cap
@@ -389,6 +396,13 @@ Once telemetry flows, you can bypass broker fan-out charges:
 
 Don't enable it before the rule exists — messages published to
 `$aws/rules/...` without a matching rule are dropped.
+
+Note the rule receives **three** message types on that topic —
+`telemetry`, `heartbeat` and `manifest` (Part G). Filter on `type` in
+the SQL rather than assuming everything arriving is an aggregate; a
+heartbeat has no `joints` and a `SELECT *` into a telemetry table will
+write a malformed row for each one. The LWT is *not* among them — it is
+on `status/{c}/{s}/{p}`, which Basic Ingest never rewrites.
 
 ---
 
@@ -561,3 +575,79 @@ Bench/portability note: on the loopback transport (unprovisioned bench,
 or the Slice 8 Mosquitto drill without file-based creds) the channel
 reports `enabled:false` — rotation only runs on a real MQTT-TLS
 transport that reads its credentials from disk.
+
+---
+
+## Part G — the device → cloud message contract
+
+**Read this before writing the first IoT Rule.** Every message the panel
+publishes carries a **`type`** field as its first property. One field
+identifies the shape; nothing has to be inferred from which other fields
+happen to be present.
+
+```sql
+SELECT * FROM 'dt/+/+/+/tel' WHERE type = 'telemetry'
+```
+
+The authoritative list is `src/cloud-gateway/message-types.js` — that
+module is required by every publisher, so the code cannot drift from this
+table.
+
+| `type` | Topic | QoS | When |
+|---|---|---|---|
+| `telemetry` | `dt/{c}/{s}/{p}/tel` | 0 | Every telemetry interval (default 10 min) |
+| `manifest` | `dt/{c}/{s}/{p}/tel` | 1 | Positional encoding only; published when the joint list changes, always before the telemetry it decodes |
+| `heartbeat` | `dt/{c}/{s}/{p}/tel` | 0 | Hourly |
+| `alarm` | `dt/{c}/{s}/{p}/alarm` | 1 | On RAISE / CLEAR / ACK transition |
+| `config_ack` | `cmd/{c}/{s}/{p}/config/ack` | 1 | Reply to a remote config push |
+| `cert_ack` | `cmd/{c}/{s}/{p}/cert/ack` | 1 | Reply to a certificate rotation |
+| `lwt` | `status/{c}/{s}/{p}` | 1 | Broker-published on an unclean disconnect |
+
+### Two things worth knowing before you build against it
+
+**Telemetry has two encodings, one type.** `type:'telemetry'` always
+carries `encoding: 'keyed' | 'positional'`:
+
+```jsonc
+// keyed (default) - self-describing, needs no manifest
+{ "type":"telemetry", "encoding":"keyed", "timestamp":"...", "interval_min":10,
+  "joints": { "J01": { "dt_min":.., "dt_max":.., "dt_avg":.., "ror_max":.., "t_max":.., "ambient":.. } } }
+
+// positional - a 100-joint panel in one message; decode against the manifest
+{ "type":"telemetry", "encoding":"positional", "timestamp":"...", "interval_min":10,
+  "manifest_version":3, "start_index":0, "count":100,
+  "dt_min":[...], "dt_max":[...], "dt_avg":[...], "ror_max":[...], "t_max":[...], "amb_avg":[...] }
+```
+
+Both are `type:'telemetry'` deliberately: a consumer that wants "the
+interval aggregate" should not need to know how the panel was configured,
+and a panel can be switched between encodings without the cloud
+re-subscribing. **Handle `keyed` first** — it is the default and the only
+one live today; positional stays off until the cloud can consume it.
+
+A positional payload may also be **chunked** if the panel is large enough
+to exceed the 5 KB metering block: several messages share a `timestamp`
+and `interval_min`, each with its own `start_index`/`count`. Key your
+upsert on `(panel, timestamp, joint)`, not on "one message per interval".
+
+**The LWT is on its own topic, and is not telemetry.** It used to share
+the telemetry topic, which was wrong twice over: a disconnect is not a
+measurement, and under Basic Ingest (Part D) the telemetry topic is a
+Rule ingress — an LWT published there would arrive as a malformed
+telemetry record and could not be subscribed to at all. `status/{c}/{s}/{p}`
+is never Basic-Ingest rewritten. It carries no timestamp: the broker
+publishes it from a payload fixed at connect time, so use the receipt
+time. It is a *secondary* offline signal — the primary one remains two
+missed heartbeats, which also covers a panel that dies without the broker
+noticing.
+
+### Deployment ordering (matters)
+
+The panel's policy must grant publish on `status/{c}/{s}/{p}` **before**
+code carrying the new LWT topic is deployed. AWS IoT authorises the will
+topic as part of establishing the connection, so an ungranted status
+topic can refuse the connect outright — the panel would go fully dark,
+looking like a certificate problem. Push
+`iot-policy-panel.template.json` as a new **active** policy version
+first, exactly as for the cert channel above. Recovery if it happens
+anyway: push the policy, or roll the panel back to the previous release.

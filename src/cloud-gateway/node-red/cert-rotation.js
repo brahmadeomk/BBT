@@ -1,5 +1,7 @@
 'use strict';
 
+const { MESSAGE_TYPES } = require('../message-types');
+
 const { CertRotator } = require('../cert-rotation');
 
 /**
@@ -108,6 +110,7 @@ async function drainCertRotation(gateway, configService, globalContext) {
     }
 
     const ack = {
+      type: MESSAGE_TYPES.CERT_ACK,
       request_id: requestId,
       domain: 'cert',
       result: outcome.ok ? 'applied' : 'rejected',

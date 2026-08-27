@@ -1,5 +1,7 @@
 'use strict';
 
+const { MESSAGE_TYPES } = require('../message-types');
+
 const { LoopbackTransport } = require('../transport');
 const { Outbox } = require('../outbox');
 const { Batcher } = require('../batcher');
@@ -36,6 +38,8 @@ const { setupCertRotation, drainCertRotation } = require('./cert-rotation');
 const TOPIC_TEMPLATES = {
   telemetry: 'dt/{customer_id}/{site_id}/{panel_id}/tel',
   alarm: 'dt/{customer_id}/{site_id}/{panel_id}/alarm',
+  // Device status (LWT) - its own topic, never Basic-Ingest rewritten.
+  status: 'status/{customer_id}/{site_id}/{panel_id}',
 };
 
 const DEFAULT_IDENTITY = { customer_id: 'c0000', site_id: 's0000', panel_id: 'p0000' };
@@ -73,6 +77,7 @@ function createGateway({ outboxDir = DEFAULT_OUTBOX_DIR, identity = DEFAULT_IDEN
   const outbox = new Outbox({ dir: outboxDir, transport: t });
   const telemetryTopic = topics?.telemetry ?? resolveTopic(TOPIC_TEMPLATES.telemetry, identity);
   const alarmTopic = topics?.alarm ?? resolveTopic(TOPIC_TEMPLATES.alarm, identity);
+  const statusTopic = topics?.status ?? resolveTopic(TOPIC_TEMPLATES.status, identity);
 
   const gateway = {
     transport: t,
@@ -85,6 +90,7 @@ function createGateway({ outboxDir = DEFAULT_OUTBOX_DIR, identity = DEFAULT_IDEN
     topics: {
       telemetry: telemetryTopic,
       alarm: alarmTopic,
+      status: statusTopic,
       ...(topics?.cmd_config ? { cmd_config: topics.cmd_config, cmd_config_ack: topics.cmd_config_ack } : {}),
       ...(topics?.cmd_cert ? { cmd_cert: topics.cmd_cert, cmd_cert_ack: topics.cmd_cert_ack } : {}),
     },
@@ -135,7 +141,11 @@ function createGatewayFromEdgeConfig() {
     clientId: cfg.identity.thing_name,
     keepAliveSec: cfg.mqtt.keep_alive_sec,
     backoff: { initialSec: cfg.mqtt.reconnect_backoff.initial_sec, maxSec: cfg.mqtt.reconnect_backoff.max_sec },
-    will: { topic: cfg.topics.telemetry, payload: { lwt: true, thing_name: cfg.identity.thing_name } },
+    // LWT on the STATUS topic, not telemetry: a disconnect is not a
+    // measurement, and under Basic Ingest the telemetry topic is an IoT Rule
+    // ingress - an LWT published there arrives as a malformed telemetry record
+    // and cannot be subscribed to at all.
+    will: { topic: cfg.topics.status, payload: { type: MESSAGE_TYPES.LWT, thing_name: cfg.identity.thing_name } },
   });
   transport.connect();
   // Positional telemetry is opt-in via publish.telemetry.encoding: 'positional'

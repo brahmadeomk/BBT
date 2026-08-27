@@ -3657,3 +3657,76 @@ ten times high.
 joint — it must use multi-channel units (e.g. 50 × 4-channel), which is how the
 hardware is actually built anyway. Recorded here because the cap is easy to hit
 in a synthetic test and hard to diagnose from the validation error alone.
+
+## 2026-08-27 — CR-OPEN-3: every device→cloud message now says what it is
+
+Design review raised CR-OPEN-3: four distinct message types share the
+telemetry topic — interval aggregate, heartbeat, positional manifest and the
+LWT — and only the manifest carried a `type` field. **Verified true against the
+code** (`node-red/index.js:81/83/138` all resolve to `cfg.topics.telemetry`;
+`AlarmPublisher` alone is on its own topic), and fixed here. Cloud development
+has not started, so there is no deployed consumer to migrate — this is the one
+moment the contract is free to change.
+
+### One correction to the finding's wording
+"The cloud cannot cleanly discriminate them today" overstated it: each shape
+*was* separable by field-presence sniffing (`type`→manifest, `lwt`→LWT,
+`fwVersion`→heartbeat, `start_index`→positional, else keyed). It decoded; it
+just had no uniform discriminator, so a rule had to encode five structural
+signatures and would mis-route the first time anyone added a field. The
+accurate charge is "fragile and undocumented", not "impossible" — worth
+recording because a reviewer reading only the finding might think the pipeline
+was broken.
+
+### What the finding missed, which made the case stronger
+With `use_basic_ingest: true`, `edge-config.js` rewrites `topics.telemetry`
+itself to the `$aws/rules/btTelemetry/...` form, and the LWT read that
+**already-rewritten** value. So in the mode a production panel would actually
+run, the LWT was published straight into the rule engine: it arrived as a
+malformed telemetry record with no timestamp and no joints, and could not be
+subscribed to at all (nothing can subscribe to a Basic Ingest topic). The
+README's LWT verification drill only ever worked with Basic Ingest off — which
+is how the 24h soak ran, so this had never been exercised.
+
+### The fix
+- **`src/cloud-gateway/message-types.js`** — one frozen list of `type` values
+  (`telemetry`, `manifest`, `heartbeat`, `alarm`, `config_ack`, `cert_ack`,
+  `lwt`), required by every publisher so code and docs cannot drift. Values are
+  append-only, like the BMS register map.
+- `type` is the **first** property of every payload, so a truncated line in a
+  log is still identifiable. Pinned by a test.
+- **Telemetry keeps ONE type with an `encoding` field** (`keyed` |
+  `positional`) rather than two types. A consumer wanting "the interval
+  aggregate" should not have to know how the panel was configured, and a panel
+  can be switched between encodings without the cloud re-subscribing.
+- **The LWT moved to its own `status/{c}/{s}/{p}` topic**, never Basic-Ingest
+  rewritten, with a documented default so configs predating the field keep
+  working.
+- Acks got `type` too. They are on dedicated topics with one shape each, so
+  they were never ambiguous — but a contract with an exception is a contract
+  people stop trusting.
+
+### Deployment hazard, recorded because it has bitten us before
+The device policy must grant publish on the status topic **before** this code
+reaches a panel. AWS IoT authorises the will topic as part of establishing the
+connection, so an ungranted status topic can refuse the connect outright — the
+panel goes fully dark, looking like a certificate problem. This is the same
+shape as the cert-rotation lesson (an unauthorized *subscribe* dropping the
+whole connection, 2026-07-22), which is why the policy template, the README and
+CLAUDE.md all now state the ordering. Unlike cert rotation there is no feature
+flag to fall back to: the LWT is not optional, so ordering is the only control.
+
+### Our own soak tool was doing the same sniffing
+`soak-verify.js` discriminated on `payload.joints` / `payload.fwVersion` /
+`payload.action` — the exact habit the finding objects to, inside our own
+verification tool. It now reads `type`, with the old sniffing kept **only** as
+a fallback so soak logs recorded before today (including the 2026-07-18
+combined-soak evidence) stay verifiable. Note its telemetry check is
+deliberately keyed-only: the aggregate comparison reads `payload.joints`, which
+a positional payload does not have.
+
+### Left for the requirements doc, not decided here
+Whether messages should also carry a **schema version** (`v: 1`). Greenfield is
+when that is cheapest to add, but the versioning policy — global or per
+message-type, and what a consumer does with an unknown version — is a
+cloud-side design decision, not one to make unilaterally in the edge repo.

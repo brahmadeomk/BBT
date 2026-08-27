@@ -39,6 +39,13 @@ mqtt:
 topics:
   telemetry: dt/{customer_id}/{site_id}/{panel_id}/tel
   alarm:     dt/{customer_id}/{site_id}/{panel_id}/alarm
+  # Device status (MQTT Last Will). Its OWN topic, deliberately:
+  #  - an unclean disconnect is not a measurement, and
+  #  - under Basic Ingest the telemetry topic is an IoT Rule ingress, so an
+  #    LWT published there arrives as a malformed telemetry record and cannot
+  #    be subscribed to at all.
+  # Never Basic-Ingest rewritten. Defaults to this template when absent.
+  status:    status/{customer_id}/{site_id}/{panel_id}
   # Basic Ingest variant (cheaper, no broker fan-out). Enable once
   # IoT Rules are in place:
   telemetry_basic_ingest: $aws/rules/btTelemetry/dt/{customer_id}/{site_id}/{panel_id}/tel

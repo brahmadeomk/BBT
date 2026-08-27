@@ -1,5 +1,7 @@
 'use strict';
 
+const { MESSAGE_TYPES, TELEMETRY_ENCODINGS } = require('./message-types');
+
 /**
  * Aggregates ProcessLogic's KPI stream ("joint" messages - see
  * docs/internal-message-contracts.md) into one batched telemetry
@@ -77,7 +79,7 @@ class Batcher {
 
   manifestMessage() {
     return {
-      type: 'manifest',
+      type: MESSAGE_TYPES.MANIFEST,
       manifest_version: this.manifestVersion,
       joints: this.manifest.slice(),
       timestamp: new Date().toISOString(),
@@ -176,6 +178,8 @@ class Batcher {
   _buildPositionalChunk(agg, cols, intervalMin, timestamp, start, end) {
     const slice = this.manifest.slice(start, end);
     const chunk = {
+      type: MESSAGE_TYPES.TELEMETRY,
+      encoding: TELEMETRY_ENCODINGS.POSITIONAL,
       timestamp,
       interval_min: intervalMin,
       manifest_version: this.manifestVersion,
@@ -207,7 +211,13 @@ class Batcher {
   }
 
   _packIntoChunks(jointEntries, intervalMin, timestamp) {
-    const envelope = (joints) => ({ timestamp, interval_min: intervalMin, joints });
+    const envelope = (joints) => ({
+      type: MESSAGE_TYPES.TELEMETRY,
+      encoding: TELEMETRY_ENCODINGS.KEYED,
+      timestamp,
+      interval_min: intervalMin,
+      joints,
+    });
     const fitsBudget = (joints) => Buffer.byteLength(JSON.stringify(envelope(joints)), 'utf8') <= this.maxPayloadBytes;
 
     if (fitsBudget(Object.fromEntries(jointEntries))) {

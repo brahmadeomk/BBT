@@ -15,7 +15,8 @@
         "arn:aws:iot:REGION:ACCOUNT_ID:topic/dt/${iot:Connection.Thing.Attributes[customer_id]}/${iot:Connection.Thing.Attributes[site_id]}/${iot:Connection.Thing.Attributes[panel_id]}/alarm",
         "arn:aws:iot:REGION:ACCOUNT_ID:topic/$aws/rules/btTelemetry/dt/${iot:Connection.Thing.Attributes[customer_id]}/${iot:Connection.Thing.Attributes[site_id]}/${iot:Connection.Thing.Attributes[panel_id]}/tel",
         "arn:aws:iot:REGION:ACCOUNT_ID:topic/cmd/${iot:Connection.Thing.Attributes[customer_id]}/${iot:Connection.Thing.Attributes[site_id]}/${iot:Connection.Thing.Attributes[panel_id]}/config/ack",
-        "arn:aws:iot:REGION:ACCOUNT_ID:topic/cmd/${iot:Connection.Thing.Attributes[customer_id]}/${iot:Connection.Thing.Attributes[site_id]}/${iot:Connection.Thing.Attributes[panel_id]}/cert/ack"
+        "arn:aws:iot:REGION:ACCOUNT_ID:topic/cmd/${iot:Connection.Thing.Attributes[customer_id]}/${iot:Connection.Thing.Attributes[site_id]}/${iot:Connection.Thing.Attributes[panel_id]}/cert/ack",
+        "arn:aws:iot:REGION:ACCOUNT_ID:topic/status/${iot:Connection.Thing.Attributes[customer_id]}/${iot:Connection.Thing.Attributes[site_id]}/${iot:Connection.Thing.Attributes[panel_id]}"
       ]
     },
     {

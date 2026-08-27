@@ -54,6 +54,12 @@ function loadEdgeConfig(configPath = process.env.BUSDUCT_EDGE_CONFIG || DEFAULT_
     // topic keeps broker delivery so subscribers/tests can listen.
     telemetry: resolveTopic(useBasicIngest ? raw.topics.telemetry_basic_ingest : raw.topics.telemetry, identity),
     alarm: resolveTopic(raw.topics.alarm, identity),
+    // Device status (LWT). Deliberately its OWN topic and never Basic-Ingest
+    // rewritten: an unclean disconnect is not telemetry, and under Basic
+    // Ingest the telemetry topic goes straight into an IoT Rule, so an LWT
+    // published there would arrive as a malformed telemetry record instead of
+    // a status event - and could not be subscribed to at all.
+    status: resolveTopic(raw.topics.status ?? 'status/{customer_id}/{site_id}/{panel_id}', identity),
     // remote config channel (Slice 7) - cmd topics, with the yaml's
     // documented templates as defaults when the config predates them
     cmd_config: resolveTopic(raw.topics.cmd_config ?? 'cmd/{customer_id}/{site_id}/{panel_id}/config', identity),

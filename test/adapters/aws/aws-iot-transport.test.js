@@ -46,7 +46,7 @@ function makeTransport(overrides = {}) {
     caPath: path.join(dir, 'ca.pem'),
     clientId: 'bt-c1024-s02-p07',
     backoff: { initialSec: 2, maxSec: 300 },
-    will: { topic: 'dt/c1024/s02/p07/tel', payload: { lwt: true, thing_name: 'bt-c1024-s02-p07' } },
+    will: { topic: 'status/c1024/s02/p07', payload: { type: 'lwt', thing_name: 'bt-c1024-s02-p07' } },
     mqttConnect: (url, options) => {
       const client = new FakeMqttClient();
       dials.push({ url, options, client });
@@ -72,8 +72,8 @@ describe('AwsIotTransport - connection & options', () => {
     assert.equal(o.key.toString(), 'fake key.pem');
     assert.equal(o.ca.toString(), 'fake ca.pem');
     assert.equal(o.rejectUnauthorized, true);
-    assert.equal(o.will.topic, 'dt/c1024/s02/p07/tel');
-    assert.deepEqual(JSON.parse(o.will.payload), { lwt: true, thing_name: 'bt-c1024-s02-p07' });
+    assert.equal(o.will.topic, 'status/c1024/s02/p07');
+    assert.deepEqual(JSON.parse(o.will.payload), { type: 'lwt', thing_name: 'bt-c1024-s02-p07' });
     assert.equal(o.will.qos, 1);
     transport.close();
   });

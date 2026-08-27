@@ -1,5 +1,7 @@
 'use strict';
 
+const { MESSAGE_TYPES, TELEMETRY_ENCODINGS } = require('./message-types');
+
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -48,16 +50,35 @@ function loadSoakDir(dir) {
   };
 }
 
+// Every payload now carries `type` (src/cloud-gateway/message-types.js), so
+// these read one field. The legacy field-sniffing is kept as a fallback ONLY
+// so soak logs recorded before the discriminator existed - including the
+// 2026-07-18 combined-soak evidence - stay verifiable. New code should never
+// sniff; that is the habit the discriminator was added to end.
+const payloadOf = (entry) =>
+  entry.payload && typeof entry.payload === 'object' ? entry.payload : null;
+
 function isTelemetryBatch(entry) {
-  return entry.payload && typeof entry.payload === 'object' && entry.payload.joints && entry.payload.interval_min != null;
+  const p = payloadOf(entry);
+  if (!p) return false;
+  // Only the KEYED encoding is verifiable here: the aggregate comparison below
+  // reads payload.joints, which a positional payload does not have.
+  if (p.type != null) return p.type === MESSAGE_TYPES.TELEMETRY && p.encoding !== TELEMETRY_ENCODINGS.POSITIONAL;
+  return Boolean(p.joints) && p.interval_min != null; // pre-discriminator log
 }
 
 function isHeartbeat(entry) {
-  return entry.payload && typeof entry.payload === 'object' && entry.payload.fwVersion != null;
+  const p = payloadOf(entry);
+  if (!p) return false;
+  if (p.type != null) return p.type === MESSAGE_TYPES.HEARTBEAT;
+  return p.fwVersion != null; // pre-discriminator log
 }
 
 function isAlarmEvent(entry) {
-  return entry.payload && typeof entry.payload === 'object' && ['RAISE', 'CLEAR', 'ACK'].includes(entry.payload.action);
+  const p = payloadOf(entry);
+  if (!p) return false;
+  if (p.type != null) return p.type === MESSAGE_TYPES.ALARM;
+  return ['RAISE', 'CLEAR', 'ACK'].includes(p.action); // pre-discriminator log
 }
 
 function aggregate(samples) {
