@@ -796,7 +796,7 @@ no readable doc, or an empty `joints[]`, sweeps nothing. The old `|| []`
 fallback meant a missing global made every joint look deleted and would have
 auto-cleared every PROCESS alarm on the panel at once. The call sits in a
 `try/catch` on the live alarm path and defaults to sweeping nothing, so it can
-never break alarming; `test/flows-integrity.test.js` pins both properties.
+never break alarming; `test/flows-integrity.test.js` pins both properties. **Live-verified on the Pi (2026-08-31)**: three stale alarms auto-cleared together, shown in Cleared Alarm History as "(Auto-cleared)". Note one of them (`J1_2143124`, 10 chars) could never have passed the 6-char schema pattern — because **ProcessLogic raises alarms from the legacy DRAFT global**, not the applied doc. Alarms are therefore raised from the draft but swept against the applied config; that asymmetry is correct for cleanup but means a saved-not-applied joint can raise an alarm the sweep then clears. Repointing ProcessLogic is a design-chat call (it changes which joints are monitored at all) — see the decision log.
 
 **Stale-alarm reconciliation (2026-08-31, from a live report).** The panel
 showed a CRITICAL `Slave 101 (AmbientT) blacklisted` alarm while the same

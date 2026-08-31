@@ -4121,3 +4121,38 @@ call is wrapped in `try/catch` and defaults to an empty sweep, so a fault in the
 library can never stop alarms being evaluated. `test/flows-integrity.test.js`
 asserts both that the cleanup no longer READS the draft global (mentioning it in
 a comment is fine) and that the call is inside a try/catch.
+
+## 2026-08-31 — Config sweep live-verified, and where alarms are actually raised from
+
+The sweep ran on the panel. Cleared Alarm History shows three entries cleared
+together at 12:24:26 with "(Auto-cleared)": `J05`, `J001` and `J1_2143124`, all
+"Sensor communication failure". Two SYSTEM blacklist alarms from 12:12 are in the
+same list, cleared by the normal restore path. That is the reported problem
+resolved.
+
+### What `J1_2143124` reveals
+That joint id is 10 characters. The schema pattern caps `joint_id` at 6, so it
+could never have passed `validateModbusJoints` — yet it raised alarms. The reason
+is that **ProcessLogic reads the joint list from the legacy DRAFT global**:
+
+```js
+const JOINT_MASTER_KEY = "joint_master_zone_A";
+const joints = global.get(JOINT_MASTER_KEY) || [];
+```
+
+So the panel evaluates and alarms against whatever is in the draft, including
+rows that were saved but never applied, and ids that the applied config would
+have rejected.
+
+Combined with today's fix this is now asymmetric on purpose: alarms are **raised**
+from the draft, but **swept** against the applied document. For cleanup that is
+the right way round — anything not genuinely applied gets removed. But it does
+mean a joint edited into the draft without applying can raise an alarm that the
+sweep then clears, which is churn rather than a fault.
+
+**Not changed here.** Pointing ProcessLogic at the applied document instead would
+be the consistent fix, but it alters the live measurement path — which joints are
+evaluated at all — and would stop a saved-not-applied joint being monitored,
+which some commissioning workflows may currently rely on. That is a design-chat
+decision, not a unilateral one. Recorded so the asymmetry is deliberate and
+visible rather than discovered again later.
