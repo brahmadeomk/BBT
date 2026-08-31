@@ -353,6 +353,22 @@ hasn't been provisioned into the applied `cfg/modbus` yet, `apply`
 rejects with a clear error — commissioning slaves happens in the
 Modbus Settings dashboard (above), not here.
 
+**Joint ID format widened to 6 characters (user request 2026-08-31):**
+`joints[].joint_id` was `^J[0-9]{2,3}$` — a literal `J` plus 2-3 digits, so
+4 characters maximum. Sites name joints to their own convention (riser/floor
+coding), not `J01..J999`. Now **`^[A-Za-z0-9][A-Za-z0-9_]{1,5}$`**: 2-6
+characters of letters, digits and underscore, not starting with underscore.
+Every previously legal id still validates, so the installed base is unaffected.
+Two characters are deliberately excluded: **`|`**, because the alarm
+instanceId is `PROCESS|{joint}|{type}|{level}` and a pipe would make that key
+ambiguous to split; and **`-`**, because the MGate BACnet `description` field
+forbids it (manual v1.4 p61) — `R1-J12` would reach the BMS as `R1 J12`, a
+different string from the one on the HMI. Nothing derives an index or ordering
+from a joint_id, so the shape itself is otherwise free. Checked against the
+downstream consumers at 6 chars: MGate `cmdName`/`bacnetDescription` peak at 26
+of 39/40, and keyed telemetry grows ~300 B per interval at 100 joints against a
+4800 B budget that already chunks.
+
 **Joint channel mapping (user requirement 2026-07-14):** the joint
 table has a `Ch` column — each joint maps one dedicated channel of a
 slave (`joints[].channel`; drafts predating the column default to 1).

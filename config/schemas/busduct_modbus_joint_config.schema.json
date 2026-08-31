@@ -113,7 +113,7 @@
         "required": ["joint_id", "slave_id", "channel", "zone_id"],
         "additionalProperties": false,
         "properties": {
-          "joint_id":  { "type": "string", "pattern": "^J[0-9]{2,3}$", "description": "Display ID used on HMI, heat map, alarms, cloud payloads" },
+          "joint_id":  { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_]{1,5}$", "description": "Display ID used on HMI, heat map, alarms, cloud payloads. 2-6 characters, letters/digits/underscore, not starting with underscore. Widened from ^J[0-9]{2,3}$ on 2026-08-31 so sites can use their own joint naming (e.g. TR1A01, BD101) instead of J01..J999. Hyphen is deliberately excluded: the MGate BACnet description field forbids it (manual v1.4 p61), so a hyphenated id would render differently on the BMS than on the HMI. Pipe is excluded because the alarm instanceId is PROCESS|{joint}|{type}|{level}." },
           "slave_id":  { "type": "string", "pattern": "^sl[0-9]{2,3}$" },
           "channel":   { "type": "integer", "minimum": 1, "maximum": 8 },
           "zone_id":   { "type": "string", "pattern": "^z[0-9]{1,2}$" },

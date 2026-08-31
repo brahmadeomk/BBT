@@ -391,3 +391,64 @@ describe('R12 - maintenance-mode gate for remote changes', () => {
     assert.equal(errorsFor('R12', result).length, 1);
   });
 });
+
+describe('joint_id format (widened 2026-08-31 to 6 characters)', () => {
+  // Sites name joints to their own convention (riser/floor coding), not
+  // J01..J999. The old pattern ^J[0-9]{2,3}$ capped ids at 4 characters and
+  // forced a literal J prefix; this is now 2-6 chars of letters, digits and
+  // underscore. Nothing derives an index from a joint_id, so the shape is free.
+  const withId = (id) => {
+    const d = validModbusJointsDoc();
+    d.joints[0].joint_id = id;
+    return validateModbusJoints(d);
+  };
+  const patternError = (r) => (r.errors || []).some((e) => /joint_id/.test(e.message || ''));
+
+  test('every id that was legal before is still legal', () => {
+    // The whole installed base is J01..J999; widening must not orphan it.
+    for (const id of ['J01', 'J99', 'J001', 'J999']) {
+      assert.equal(withId(id).valid, true, `${id} used to be valid and must stay valid`);
+    }
+  });
+
+  test('accepts the 5- and 6-character ids the old pattern rejected', () => {
+    for (const id of ['J0001', 'J00001', 'BD101', 'TR1A01', 'AB_123']) {
+      assert.equal(withId(id).valid, true, `${id} should now be accepted`);
+    }
+  });
+
+  test('still rejects anything longer than 6', () => {
+    assert.ok(patternError(withId('ABCDEFG')), '7 characters must be rejected');
+  });
+
+  test('still rejects a single character', () => {
+    // A 1-char id is almost certainly a typo, and reads badly on the heat map.
+    assert.ok(patternError(withId('X')));
+  });
+
+  test('rejects a pipe, because it would break the alarm instanceId', () => {
+    // Alarm keys are PROCESS|{joint}|{type}|{level}; a pipe inside the joint id
+    // would make that key ambiguous to split.
+    assert.ok(patternError(withId('J|01')));
+  });
+
+  test('rejects a hyphen, because the BACnet description field forbids it', () => {
+    // MGate manual v1.4 p61 strips `- " \' # * , [ ]` from bacnetDescription, so
+    // "R1-J12" would reach the BMS as "R1 J12" - a different string from the one
+    // on the HMI. Excluding it keeps the id identical on every surface.
+    assert.ok(patternError(withId('R1-J12')));
+  });
+
+  test('rejects a leading underscore', () => {
+    assert.ok(patternError(withId('_J01')));
+  });
+
+  test('R5 uniqueness still applies to the widened ids', () => {
+    const d = validModbusJointsDoc();
+    d.joints[0].joint_id = 'TR1A01';
+    d.joints[1].joint_id = 'TR1A01';
+    const r = validateModbusJoints(d);
+    assert.equal(r.valid, false);
+    assert.ok(errorsFor('R5', r).length > 0, 'duplicate joint ids must still fail R5');
+  });
+});

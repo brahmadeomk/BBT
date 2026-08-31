@@ -3958,3 +3958,41 @@ Not yet verified, both needing the AWS side: receipt of `device_health` in the
 MQTT test client, and the LWT on `status/{c}/{s}/{p}` — which needs the updated
 `iot-policy-panel.template.json` pushed as an active policy version first. Until
 then the panel connects without a Last Will and says so in every flush status.
+
+## 2026-08-31 — joint_id widened from 4 to 6 characters
+
+Reported from the panel: the Joint Configuration screen would not accept an id
+longer than 4 characters. The input field has no `maxlength` — the rejection was
+the schema pattern `^J[0-9]{2,3}$` failing at apply time, which forces a literal
+`J` prefix followed by 2-3 digits.
+
+Sites want to name joints to their own convention (riser / floor / feeder
+coding), not `J01..J999`. New pattern: **`^[A-Za-z0-9][A-Za-z0-9_]{1,5}$`** —
+2 to 6 characters of letters, digits and underscore, not starting with an
+underscore.
+
+### Why a general format rather than just more digits
+`^J[0-9]{2,5}$` would have delivered 6 characters too, but only as `J00001`. The
+request was for room to *name* joints, and a general format is a superset — it
+still accepts every `J`-prefixed id. Every currently valid id keeps validating,
+so the installed base is untouched; that is pinned by its own test.
+
+### Two characters deliberately excluded
+- **`|`** — the alarm instanceId is `PROCESS|{joint}|{type}|{level}`. A pipe
+  inside the joint id would make that key ambiguous to split.
+- **`-`** — the MGate BACnet `description` field forbids `- " ' # * , [ ]`
+  (manual v1.4 p61) and the generator strips them. A joint named `R1-J12` would
+  reach the BMS as `R1 J12`: a different string from the one on the HMI and in
+  the alarm. Excluding the hyphen keeps the id byte-identical on every surface.
+  Flagged to the user in case hyphens are wanted anyway — the trade is a
+  cosmetic difference on the BACnet side only.
+
+### Verified against the downstream consumers at 6 characters
+Nothing derives an index or sort order from a joint_id (checked), so only string
+length mattered. MGate `cmdName` and `bacnetDescription` peak at 26 characters
+against limits of 39 and 40. Keyed telemetry grows about 300 bytes per interval
+at 100 joints, against a 4800-byte budget that already chunks. Tier-3 registers
+are index-based and unaffected.
+
+**Not changed: `zone_id`**, still `^z[0-9]{1,2}$`. The report was specifically
+about joint ids; widening zones is a separate call.
