@@ -336,3 +336,73 @@ describe('blacklist-handler — per-bus resend (Slice 10 two-segment)', () => {
     assert.deepEqual(r.resendBusIds, ['bus1']);
   });
 });
+
+describe('stale blacklist alarms after a restart (reconcileBlacklistAlarms)', () => {
+  // The failure this guards, seen on the panel 2026-08-31: the tracker is an
+  // in-memory singleton and is EMPTY after a Node-RED restart, while the alarm
+  // lives in localfilesystem-backed context and SURVIVES. A device blacklisted
+  // before the restart never gets its `restored` event, so its CRITICAL alarm
+  // stays active forever while the device is polled normally and reads fine.
+  const rdoc = {
+    modbus: {
+      slaves: [
+        { slave_id: 'sl01', unit_address: 1, label: 'Sensor1' },
+        { slave_id: 'sl21', unit_address: 101, label: 'AmbientT' },
+      ],
+    },
+    joints: [{ joint_id: 'J01', slave_id: 'sl01', channel: 1, zone_id: 'z1', enabled: true }],
+    zones: [{ zone_id: 'z1', ambient_sensor: { slave_id: 'sl21', channel: 1 } }],
+  };
+  const blacklistAlarm = (slaveId) => ({
+    [`SYSTEM|${slaveId}|BLACKLIST`]: {
+      instanceId: `SYSTEM|${slaveId}|BLACKLIST`, category: 'SYSTEM',
+      alarm_type: 'DEVICE_BLACKLIST', level: 'CRITICAL', status: 'ACTIVE_NACK', slave_id: slaveId,
+    },
+  });
+
+  test('clears an alarm the fresh tracker has no record of', () => {
+    const tracker = bh.newTracker(trackerOpts);            // as after a restart
+    const clears = bh.reconcileBlacklistAlarms(blacklistAlarm('sl21'), tracker, rdoc);
+    assert.equal(clears.length, 1);
+    assert.equal(clears[0].action, 'clear');
+    assert.equal(clears[0].slave_id, 'sl21');
+    assert.equal(clears[0].unit_address, 101);
+    assert.match(clears[0].description, /101/, 'names the device as commissioned');
+    assert.match(clears[0].description, /stale alarm/i, 'and says why it cleared');
+  });
+
+  test('names the joints the stale alarm was blaming', () => {
+    const [c] = bh.reconcileBlacklistAlarms(blacklistAlarm('sl21'), bh.newTracker(trackerOpts), rdoc);
+    assert.deepEqual(c.ambient_for_joints, ['J01'], "sl21 is J01's ambient reference");
+  });
+
+  test('LEAVES a genuinely blacklisted device alone', () => {
+    // The whole risk of this function is clearing an alarm that is still true.
+    const tracker = bh.newTracker(trackerOpts);
+    for (let i = 0; i < 3; i++) tracker.recordResult('sl21', false, T0);
+    assert.equal(tracker.status('sl21'), 'blacklisted');
+    assert.deepEqual(bh.reconcileBlacklistAlarms(blacklistAlarm('sl21'), tracker, rdoc), []);
+  });
+
+  test('leaves a device mid-probe alone too', () => {
+    const tracker = bh.newTracker(trackerOpts);
+    for (let i = 0; i < 3; i++) tracker.recordResult('sl21', false, T0);
+    tracker.tick(T0 + 60_000);                              // backoff elapsed -> probing
+    assert.equal(tracker.status('sl21'), 'probing');
+    assert.deepEqual(bh.reconcileBlacklistAlarms(blacklistAlarm('sl21'), tracker, rdoc), []);
+  });
+
+  test('ignores every other kind of alarm', () => {
+    const others = {
+      'SYSTEM|MODULE|COMM_FAILURE': { instanceId: 'SYSTEM|MODULE|COMM_FAILURE', category: 'SYSTEM' },
+      'PROCESS|J01|DELTA_T': { instanceId: 'PROCESS|J01|DELTA_T', category: 'PROCESS' },
+      'SYSTEM|PI|POWER': { instanceId: 'SYSTEM|PI|POWER', category: 'SYSTEM' },
+    };
+    assert.deepEqual(bh.reconcileBlacklistAlarms(others, bh.newTracker(trackerOpts), rdoc), []);
+  });
+
+  test('empty or missing alarm set is not an error', () => {
+    assert.deepEqual(bh.reconcileBlacklistAlarms({}, bh.newTracker(trackerOpts), rdoc), []);
+    assert.deepEqual(bh.reconcileBlacklistAlarms(undefined, bh.newTracker(trackerOpts), rdoc), []);
+  });
+});

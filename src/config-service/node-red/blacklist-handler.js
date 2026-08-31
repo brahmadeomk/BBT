@@ -295,6 +295,56 @@ function summarizeBlacklist(state, nowMs = Date.now(), opts = {}) {
   };
 }
 
+/**
+ * Reconcile blacklist ALARMS against the tracker's actual state.
+ *
+ * WHY THIS IS NEEDED. The two halves of the blacklist feature live in places
+ * with different lifetimes:
+ *   - the tracker is a process-wide, IN-MEMORY singleton (see getTracker) and
+ *     is therefore EMPTY after every Node-RED restart;
+ *   - the alarm lives in the Alarm Manager's context, which on the Pi is
+ *     localfilesystem-backed and SURVIVES a restart.
+ * A blacklist alarm clears only when the tracker emits a `restored` event. So
+ * if a device is blacklisted and Node-RED is restarted before it recovers, the
+ * tracker forgets the device was ever bad, never emits `restored`, and the
+ * CRITICAL alarm stays active forever - while the device is polled normally
+ * and shows up healthy everywhere else. That is a stuck alarm, not a fault.
+ *
+ * The tracker is the single source of truth for "who is blacklisted right
+ * now". Any active blacklist alarm naming a slave the tracker considers
+ * healthy is stale and is cleared here.
+ *
+ * Run this ONCE at boot, after polling has resumed (~20 s), not on every tick:
+ * by then a genuinely dead device has already failed its 3 reads and been
+ * re-blacklisted, so its alarm is correctly left alone. Running it continuously
+ * would race the raise path.
+ *
+ * @param {object} activeAlarms - global busbartherm.activeAlarms (keyed by instanceId)
+ * @param {object} tracker
+ * @param {object} [doc] - applied cfg/modbus+joints, for the display name
+ * @returns {Array<object>} clear commands, in the shape the Alarm Manager expects
+ */
+function reconcileBlacklistAlarms(activeAlarms, tracker, doc) {
+  const clears = [];
+  for (const key of Object.keys(activeAlarms || {})) {
+    const m = /^SYSTEM\|(.+)\|BLACKLIST$/.exec(key);
+    if (!m) continue;
+    const slaveId = m[1];
+    // 'blacklisted' and 'probing' are both live states the tracker is managing;
+    // only a slave it considers fully active can have a stale alarm.
+    if (tracker.status(slaveId) !== 'active') continue;
+    clears.push({
+      action: 'clear',
+      slave_id: slaveId,
+      unit_address: (doc?.modbus?.slaves || []).find((x) => x.slave_id === slaveId)?.unit_address ?? null,
+      joints: jointsForSlave(doc, slaveId),
+      ambient_for_joints: jointsUsingAmbientSlave(doc, slaveId),
+      description: `Slave ${slaveDisplayName(doc, slaveId)} restored (stale alarm cleared at startup)`,
+    });
+  }
+  return clears;
+}
+
 module.exports = {
   newTracker,
   getTracker,
@@ -309,4 +359,5 @@ module.exports = {
   processReadResult,
   processTick,
   summarizeBlacklist,
+  reconcileBlacklistAlarms,
 };

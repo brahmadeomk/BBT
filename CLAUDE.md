@@ -762,6 +762,25 @@ slave from the scan so one bad device can't tax the other 109.
   The Alarm Manager's blacklist-clear also resets `PROCESS|<joint>|*`
   persistence timers so a re-appearing condition re-proves from zero.
 
+**Stale-alarm reconciliation (2026-08-31, from a live report).** The panel
+showed a CRITICAL `Slave 101 (AmbientT) blacklisted` alarm while the same
+device read 31.39 °C and showed **Connected/Active** on the Diagnostics and
+BMS views. Not a false blacklist — a **stuck alarm**. The two halves have
+different lifetimes: the tracker is an in-memory singleton (empty after every
+Node-RED **restart**), while the alarm lives in the Alarm Manager's
+localfilesystem-backed context and **survives** one. The alarm clears only on a
+tracker `restored` event, so a device blacklisted *before* a restart never gets
+one and its alarm stays active forever. `reconcileBlacklistAlarms(activeAlarms,
+tracker, doc)` (blacklist-handler.js) emits a clear for any
+`SYSTEM|<slave>|BLACKLIST` alarm whose slave the tracker considers `active`;
+a slave it considers `blacklisted` or `probing` is left alone. Wired as
+"Reconcile Blacklist Alarms" on the Device Health tab
+(`d9b1ac57e0f10051`–`53`), a **one-shot boot inject at 20 s** — late enough
+that polling has resumed and a genuinely dead device has already re-failed its
+3 reads, so its alarm survives correctly. Deliberately NOT on the 10 s tick:
+that would race the raise path. Any deploy that restarts Node-RED while a
+blacklist alarm is active would otherwise leave it stuck.
+
 **Blacklist live-verified on the Pi (2026-07-24):** disconnecting a
 device blacklists it (after the tap was fixed to read the PARSED Nano
 stream, and the tracker moved to a module singleton) and raises its

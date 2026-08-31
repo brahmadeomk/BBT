@@ -3876,3 +3876,57 @@ The other half is telling someone. A panel running without its will is online
 and looks entirely healthy, so the reason — naming the unauthorised topic, the
 fix, and what still works — is repeated on **every telemetry flush**, not just
 at boot.
+
+## 2026-08-31 — Stuck blacklist alarm after a restart (reported from the panel)
+
+Live report: a CRITICAL `Slave 101 (AmbientT) blacklisted after 3 consecutive
+read failures` alarm was active, while the *same* device showed **Connected**,
+**Active** and a live 31.39 °C reading on both the Diagnostics table and the BMS
+register view. Two screenshots taken minutes apart, so not a transient.
+
+**Diagnosis: a stuck alarm, not a false blacklist.** The Device column reads
+`tracker.snapshot().status`, and it said `active` — so the tracker itself did
+NOT think the device was blacklisted. Only the alarm did.
+
+The cause is a lifetime mismatch between the two halves of the feature:
+
+- the blacklist tracker is a **process-wide in-memory singleton**
+  (`getTracker`, deliberately not in context because serialisation strips the
+  class prototype), so it is **empty after every Node-RED restart**;
+- the alarm lives in the Alarm Manager's `context.get("activeAlarms")`, which on
+  this Pi is **localfilesystem-backed and survives a restart**.
+
+A blacklist alarm clears *only* on a tracker `restored` event. So if a device is
+blacklisted and Node-RED restarts before it recovers, the tracker forgets the
+device was ever bad, never emits `restored`, and the CRITICAL alarm stays active
+indefinitely while the device is polled normally. Any deployment restart can
+trigger it — which is what happened here, right after the message-contract
+release was loaded.
+
+**Not caused by that release.** The only blacklist-path change in it was adding
+`tracker.recordBusSeen(...)` alongside the existing `recordResult`, which cannot
+affect a blacklist decision. The release *exposed* a latent bug by requiring a
+restart, and would have done so at any restart since Slice 9.
+
+### Fix
+`reconcileBlacklistAlarms(activeAlarms, tracker, doc)` — pure, in
+blacklist-handler.js. The tracker is the single source of truth for who is
+blacklisted *now*; any active `SYSTEM|<slave>|BLACKLIST` alarm naming a slave
+the tracker considers `active` is stale and gets a clear command in the shape
+the Alarm Manager already accepts. A slave the tracker considers `blacklisted`
+or `probing` is left strictly alone — clearing an alarm that is still true is
+the one thing this must never do, and it has its own tests.
+
+Wired as a **one-shot boot inject at 20 s** ("Reconcile Blacklist Alarms",
+Device Health tab). The delay is the design: by 20 s polling has resumed and a
+genuinely dead device has already failed its 3 reads and been re-blacklisted, so
+its alarm is correctly preserved. Running this on the existing 10 s tick was
+rejected — it would race the raise path and could clear an alarm microseconds
+after it was legitimately raised.
+
+### Alternative considered and rejected
+Persisting the tracker snapshot and restoring it at boot. It keeps more state,
+but it also means a device repaired while Node-RED was down stays blacklisted
+until it probes out — turning a stuck alarm into a stuck *exclusion*, which is
+worse. Reconciling in the other direction is self-healing: the panel re-learns
+the truth from the bus within ~3 poll cycles.
