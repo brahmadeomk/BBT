@@ -3930,3 +3930,31 @@ but it also means a device repaired while Node-RED was down stays blacklisted
 until it probes out — turning a stuck alarm into a stuck *exclusion*, which is
 worse. Reconciling in the other direction is self-healing: the panel re-learns
 the truth from the bus within ~3 poll cycles.
+
+## 2026-08-31 — device_health live on the panel
+
+First live run of the message-contract release (`d53d7d1`) on the real Pi. The
+"Publish Device Health" node reports:
+
+```
+4/4 live | bus1:ok bus2:ok | unchanged
+```
+
+Three things confirmed by that one line:
+
+- **Both RS-485 segments are seen.** `busSeen` is being stamped from
+  `processReadResult` for bus1 and bus2 alike, which is the whole point of
+  deriving the segment from `busForSlave(doc, slaveId)` rather than `msg.bus_id`
+  — only bus2 frames carry that tag. Per-segment liveness now leaves the panel;
+  previously a dead Nano on one segment was invisible from outside.
+- **On-change cadence works.** `unchanged` means a second tick ran and correctly
+  published nothing. This is the property the volatile-field exclusion in
+  `healthFingerprint` exists to protect, and it was the bug found during the
+  build (including `last_frame_age_sec` made every snapshot compare as changed,
+  turning "on change" into "every 60 s" while every message still looked right).
+- **The stuck blacklist alarm is gone**, and the ambient reads normally.
+
+Not yet verified, both needing the AWS side: receipt of `device_health` in the
+MQTT test client, and the LWT on `status/{c}/{s}/{p}` — which needs the updated
+`iot-policy-panel.template.json` pushed as an active policy version first. Until
+then the panel connects without a Last Will and says so in every flush status.

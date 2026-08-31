@@ -955,6 +955,11 @@ development started**, so there is no deployed consumer to migrate.
   panel measured but not whether it could still measure. Alarms don't
   close that gap: they're transitions, so a consumer that starts late or
   restarts can't know the CURRENT blacklist without replaying history.
+  **Live-verified on the Pi (2026-08-31)**: the "Publish Device Health" node
+  reports `4/4 live | bus1:ok bus2:ok | unchanged` — both segments seen, and
+  the second tick correctly publishing nothing, so on-change detection is not
+  degrading into publish-every-tick. Still unverified: AWS-side receipt of the
+  message, and the LWT on the status topic (needs the policy pushed first).
   Pure builder `src/cloud-gateway/device-health.js`; published **on
   change + hourly resync** (the resync is for late subscribers, which
   QoS 1 does nothing for); flow node "Publish Device Health"
