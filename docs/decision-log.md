@@ -4316,7 +4316,11 @@ a 15:53 sensor-fault row reads `Sensor communication failure`, and the 17:00 row
 for the same joint reads `J02: Sensor communication failure`. The Joint column
 renders the operator's name (`Dc/07/Fl_0/Tx/Line_1`) on both, since `joint_name`
 deployed first. The two blacklist rows show `SYSTEM` with unprefixed
-descriptions - the panel/device exclusion working.
+descriptions - the panel/device exclusion working. The remaining two surfaces
+were confirmed on the panel the same day: the history **Export CSV** carries its
+new `Location` column, and the raise e-mail body reads
+`Joint: J02 (Dc/07/Fl_0/Tx/Line_1)`. All five surfaces verified - both HMI
+tables, the CSV, the e-mails and the description prefix.
 
 One thing that check incidentally settled: the site names joints with slashes
 and underscores (`Dc/07/Fl_0/Tx/Line_1`). That is fine for the MGate export,
