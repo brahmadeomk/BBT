@@ -778,6 +778,26 @@ slave from the scan so one bad device can't tax the other 109.
   The Alarm Manager's blacklist-clear also resets `PROCESS|<joint>|*`
   persistence timers so a re-appearing condition re-proves from zero.
 
+**Config-change alarm sweep (2026-08-31, from a live report).** After editing
+the joint configuration, alarms raised against the *old* setup stayed in Active
+Alarms. The Alarm Manager has always had a "CLEANUP DELETED SENSORS" sweep, but
+it had two gaps: it compared against **`global.joint_master_zone_A`** — the
+legacy DRAFT the dashboard edits, which can disagree with what is actually
+running — and it **skipped every SYSTEM alarm**, so a `SYSTEM|<slave>|BLACKLIST`
+alarm for a *deleted* device could never clear (a deleted device is never
+polled, so the tracker never emits `restored`). `sweepDecommissionedAlarms`
+(`src/alarms/config-sweep.js`, on `busductConfigService.alarmSweep`) replaces
+it: source of truth is the **applied** `cfg/modbus+joints` doc, PROCESS alarms
+clear when their `joint_id` is gone, device-scoped SYSTEM alarms clear when
+their `slave_id` is gone, and **panel-scoped** SYSTEM alarms
+(`MODULE`/`BUS1`/`BUS2`/`PI`) are never swept — "not in the config" is
+meaningless for those. Critically it **refuses to act on absent information**:
+no readable doc, or an empty `joints[]`, sweeps nothing. The old `|| []`
+fallback meant a missing global made every joint look deleted and would have
+auto-cleared every PROCESS alarm on the panel at once. The call sits in a
+`try/catch` on the live alarm path and defaults to sweeping nothing, so it can
+never break alarming; `test/flows-integrity.test.js` pins both properties.
+
 **Stale-alarm reconciliation (2026-08-31, from a live report).** The panel
 showed a CRITICAL `Slave 101 (AmbientT) blacklisted` alarm while the same
 device read 31.39 °C and showed **Connected/Active** on the Diagnostics and

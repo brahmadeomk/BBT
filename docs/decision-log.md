@@ -4064,3 +4064,60 @@ it to the `memory` store explicitly — so it cannot outlive the tracker. Left f
 the design chat: it changes restart behaviour for a genuinely-dead device (it
 would be polled once more before being re-blacklisted, which is correct but
 worth agreeing).
+
+## 2026-08-31 — Alarms surviving a configuration change
+
+Live report: after changing the joint configuration, alarms raised against the
+old setup stayed in Active Alarms. The question asked was whether an alarm can
+be removed when its sensor is no longer in the joint configuration — and the
+answer is that the panel already tried to do exactly that, via the Alarm
+Manager's "CLEANUP DELETED SENSORS" sweep, but the sweep had two gaps.
+
+### Gap 1 — it read the draft, not the applied config
+```js
+const joints = global.get("joint_master_zone_A") || [];
+```
+That global is the legacy DRAFT the dashboard edits. It can disagree with the
+applied `cfg/modbus+joints` document: mid-edit, after a remote config push, or
+on a panel whose draft was never rebuilt. So alarms for genuinely-removed joints
+survived, and — the mirror risk — alarms for joints that existed only in a draft
+could be cleared.
+
+### Gap 2 — every SYSTEM alarm was skipped
+```js
+if (alarm.category !== "SYSTEM" && ...)
+```
+That skip is right for an *unhealthy* device: a blacklisted slave must not clear
+its own alarm. But it also means a `SYSTEM|<slave>|BLACKLIST` alarm for a device
+**deleted from the configuration** can never clear, and cannot recover on its
+own either — a deleted device is never polled, so the tracker never emits
+`restored`. Same deadlock shape as the two blacklist bugs found earlier today.
+
+### The distinction that fixes it
+"Unhealthy" and "no longer configured" are different questions.
+`sweepDecommissionedAlarms(activeAlarms, doc)` answers only the second:
+
+- PROCESS alarm → clear when its `joint_id` is absent from the applied `joints[]`
+- device-scoped SYSTEM alarm → clear when its `slave_id` is absent from the
+  applied `modbus.slaves[]`
+- **panel-scoped** SYSTEM alarms (`MODULE`, `BUS1`, `BUS2`, `PI`) → never swept;
+  they belong to no configured device, so "not in the config" is meaningless
+- `AMBIENT_*` pseudo-joints → never swept, as before
+
+A device that is still commissioned keeps its alarm however sick it is. That is
+the tracker's business, not the sweep's.
+
+### Refusing to act on absent information
+The old `|| []` fallback was a latent hazard: a missing or unreadable global made
+every joint look deleted, which would have auto-cleared every PROCESS alarm on
+the panel in one pass. The new sweep returns nothing when the document cannot be
+read, and treats an empty `joints[]` the same way — it is indistinguishable from
+"could not read it", and leaving one stale alarm is far better than silently
+clearing all of them. Five tests cover that path specifically.
+
+### Safety on the live path
+The sweep runs inside the Alarm Manager, which is the panel's alarm engine. The
+call is wrapped in `try/catch` and defaults to an empty sweep, so a fault in the
+library can never stop alarms being evaluated. `test/flows-integrity.test.js`
+asserts both that the cleanup no longer READS the draft global (mentioning it in
+a comment is fine) and that the call is inside a try/catch.
