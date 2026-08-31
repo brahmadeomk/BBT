@@ -366,10 +366,22 @@ e-mail bodies via `jointLabel()`, and the cloud alarm message as a top-level
 field beside `joint_id`. It is **null when unnamed and absent on panel/device
 SYSTEM alarms** — never echoed from the id, since a fabricated name would be
 indistinguishable from a real one, and the same `joint_name || joint_id`
-fallback covers alarms already in persisted context. **Descriptions are
-unchanged**: a description is the *condition* (`ΔT 29.48 ≥ 25`), and identity
-belongs in its own field rather than in text every consumer must parse back out.
-An added optional field, so the wire contract stays `v: 1`.
+fallback covers alarms already in persisted context. An added optional field, so
+the wire contract stays `v: 1`.
+
+**Joint-scoped alarm descriptions lead with the joint id (user request
+2026-08-31):** `J02: ΔT 29.48 ≥ 25`, `J02: RoR 3.10 ≥ 2`, `J02: Sensor
+communication failure`, via `describeJoint()` in the Alarm Manager. The
+description is the one field that travels everywhere intact — e-mail subjects
+and bodies, the CSV export, the alarm history, the cloud snapshot — and several
+of those show it with no joint column beside it. **Nothing keys on this string**
+(dedupe is by `instanceId`, historian matching by `instanceId` + `raisedTs`;
+description is only ever displayed), so changing it is safe. The **id**, not the
+name: short, stable, and it matches the `instanceId` in the e-mail subject,
+while the name is already carried in `joint_name` and shown in the Location
+column. Panel- and device-scoped alarms (`COMM_FAILURE`, `BLACKLIST`,
+`PI|POWER`) are deliberately **not** prefixed — they belong to no joint, and the
+blacklist alarm already names its device and affected joints.
 
 **Joint ID format widened to 6 characters (user request 2026-08-31):**
 `joints[].joint_id` was `^J[0-9]{2,3}$` — a literal `J` plus 2-3 digits, so

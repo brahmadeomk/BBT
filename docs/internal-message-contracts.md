@@ -128,7 +128,7 @@ just-this-message deltas).
   "status": "ACTIVE_NACK",                        // "ACTIVE_NACK" | "CLEARED" | "EVENT"
   "raisedTs": "2026-07-03T05:13:53.166Z",
   "clearedTs": "2026-07-04T04:36:05.444Z",         // present once cleared
-  "description": "ΔT 29.48 ≥ 25",
+  "description": "J01: ΔT 29.48 ≥ 25",          // joint-scoped alarms lead with the joint id; panel/device SYSTEM alarms are unprefixed
   "reason": "CONFIG_REMOVED",                       // present only on auto-clear (joint removed from config)
   "kpi": { "state": "No Data" },                   // present only on some SYSTEM alarms
   "value": 29.48,                                   // PROCESS (ROR/DELTA_T) alarms only - the evaluated reading (ror or deltaT.ema)
@@ -146,10 +146,18 @@ is unnamed and **absent** on panel- and device-scoped `SYSTEM` alarms
 `SYSTEM|PI|POWER`), which belong to no joint. It is deliberately not
 echoed from `joint_id` when missing — a fabricated name would be
 indistinguishable from a real one, so consumers apply their own fallback
-(`joint_name || joint_id`). The `description` string does **not** repeat
-it: the description is the *condition* (`ΔT 29.48 ≥ 25`), and identity
-belongs in its own field rather than in text every consumer has to parse
-back out.
+(`joint_name || joint_id`).
+
+`description` **leads with the joint id** on joint-scoped alarms
+(`J01: ΔT 29.48 ≥ 25`, user request 2026-08-31) — it is the one field
+that travels everywhere intact, including e-mail subject lines, the CSV
+export and the cloud snapshot, several of which render it with no joint
+column beside it. The **id**, not the name: it matches the `instanceId`
+and stays short. Panel- and device-scoped `SYSTEM` alarms are not
+prefixed, since they belong to no joint. Nothing keys on this string
+(dedupe is by `instanceId`, historian matching by `instanceId` +
+`raisedTs`), so read it as prose, never as an identifier — parse
+`joint_id` for that.
 
 `value`/`threshold`/`persistence_min`/`absolute_temp_c` are only
 present on `PROCESS` alarms (`ROR`/`DELTA_T`). `value`/`threshold`/

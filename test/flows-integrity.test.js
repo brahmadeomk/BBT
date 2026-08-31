@@ -136,3 +136,41 @@ describe('joint_name reaches every alarm surface (2026-08-31)', () => {
     assert.match(row, /a\.joint_id,\s*a\.joint_name \|\| "",\s*a\.zone_name/);
   });
 });
+
+describe('alarm descriptions lead with the joint id (2026-08-31)', () => {
+  // User request. The description is the one field that travels everywhere
+  // intact - e-mail subject lines and bodies, the CSV export, the alarm history,
+  // the cloud snapshot - and several of those show it with no joint column
+  // beside it, so a bare "ΔT 29.48 ≥ 25" did not say which joint.
+  // Safe because nothing keys on the string: dedupe is by instanceId, historian
+  // matching by instanceId + raisedTs, and description is only ever displayed.
+  const mgr = () => JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'))
+    .find((n) => n.id === 'de6fcc55794afd9e').func;
+
+  test('all three joint-scoped builders go through describeJoint', () => {
+    const fn = mgr();
+    assert.match(fn, /description: describeJoint\(S\.description\)/, 'COMMUNICATION / SENSOR_FAULT');
+    assert.match(fn, /description: describeJoint\(`RoR /, 'RoR');
+    assert.match(fn, /description: describeJoint\(`ΔT /, 'deltaT');
+    assert.equal((fn.match(/describeJoint\(/g) || []).length, 4, '3 call sites + the definition');
+  });
+
+  test('the prefix is the id, and falls back cleanly when there is no joint', () => {
+    const fn = mgr();
+    const body = fn.slice(fn.indexOf('function describeJoint'), fn.indexOf('function describeJoint') + 220);
+    assert.match(body, /\$\{d\.joint_id\}: \$\{text\}/, 'leads with the id');
+    assert.match(body, /String\(text\)/, 'unprefixed when there is no joint id');
+  });
+
+  test('panel- and device-scoped alarms are NOT prefixed', () => {
+    // They belong to no joint - "SYSTEM: ..." would be noise, and the blacklist
+    // alarm already names its device and the joints it affects.
+    const fn = mgr();
+    for (const marker of ['No data received from', 'Slave ${b.slave_id} blacklisted', 'Raspberry Pi power fault']) {
+      const i = fn.indexOf(marker);
+      assert.ok(i > 0, `${marker} still present`);
+      const line = fn.slice(fn.lastIndexOf('\n', i) + 1, fn.indexOf('\n', i));
+      assert.ok(!line.includes('describeJoint'), `${marker} must not be prefixed`);
+    }
+  });
+});

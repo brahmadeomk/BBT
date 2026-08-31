@@ -684,6 +684,12 @@ name would be indistinguishable from a real one. Note this is an **added
 optional field**, so `v` stays `1` — exactly the case the version rules
 above say must not bump.
 
+`description` (inside the `alarm` snapshot) leads with the joint id on
+joint-scoped alarms — `"J02: ΔT 29.48 ≥ 25"` — because it is the one
+field that travels intact into e-mail subjects, CSV exports and dashboards that
+have no joint column. Treat it as prose for display, never as an identifier:
+parse `joint_id`. Panel- and device-scoped SYSTEM alarms are unprefixed.
+
 `kpi` is `"deltaT"`/`"ror"`/`null`; `value`/`threshold`/`persistence_min`/
 `absolute_temp_c` appear on PROCESS alarms only. Alarms publish **on state
 transition**, not on a timer: one RAISE, one CLEAR, and at most one ACK per

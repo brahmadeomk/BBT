@@ -4242,9 +4242,12 @@ without a migration.
 
 **The description strings are unchanged.** A description is the *condition*
 (`ΔT 29.48 ≥ 25`); identity belongs in its own field, not concatenated into text
-that the BMS, the cloud and the CSV would each have to parse back out. Adding the
-joint to the description would also have changed strings that alarm dedupe and
-history matching read.
+that the BMS, the cloud and the CSV would each have to parse back out.
+
+> **Superseded the same day** — see the next entry. Asked to put the joint id in
+> the descriptions, and on checking, the second half of my reasoning here was
+> simply wrong: I claimed the change would disturb strings that alarm dedupe and
+> history matching read. Nothing keys on `description` anywhere.
 
 On the wire this is an **added optional field**, so the contract version stays
 `v: 1` — precisely the case Part G's rules say must not bump.
@@ -4255,3 +4258,54 @@ all inside hand-imported flow JSON where a dropped binding fails silently. Six
 tests in `test/flows-integrity.test.js` pin each hop, including that the CSV
 header and the row array agree on column order — getting those out of step would
 shift every later column by one without any error.
+
+## 2026-08-31 — Alarm descriptions lead with the joint id
+
+User request, immediately after the `joint_name` work above: put the joint id in
+every alarm description. Joint-scoped descriptions are now prefixed via
+`describeJoint()` in the Alarm Manager:
+
+| Alarm | Before | After |
+|---|---|---|
+| ΔT | `ΔT 29.48 ≥ 25` | `J02: ΔT 29.48 ≥ 25` |
+| RoR | `RoR 3.10 ≥ 2` | `J02: RoR 3.10 ≥ 2` |
+| Comm fault | `Sensor communication failure` | `J02: Sensor communication failure` |
+| Sensor fault | `Sensor value out of valid range` | `J02: Sensor value out of valid range` |
+
+### Correcting my own objection
+In the previous entry I argued against this on two grounds. The first — that a
+description is the *condition*, and identity belongs in its own field — is a
+matter of taste, and the user's case is stronger than mine: `description` is the
+one field that travels everywhere **intact**. It is the whole content of an
+e-mail subject line, it is a column in the CSV export, and a dashboard built
+from the alarm stream may well render it with no joint column beside it. In
+those places a bare `ΔT 29.48 ≥ 25` genuinely does not say which joint.
+
+The second ground was **factually wrong** and I should have checked before
+saying it: I claimed the change would disturb strings that alarm dedupe and
+history matching read. It would not. Dedupe is keyed on `instanceId`
+(`emailSent[instanceId]`, `isActive(key)`), historian matching on `instanceId` +
+`raisedTs`, the cloud publisher on `instanceId` + status, and the BMS is purely
+register-based. `description` is only ever *displayed*. Verified by grep before
+making the change.
+
+### Scope of the prefix
+The **id**, not the name: it is short, stable, and matches the `instanceId`
+already in the e-mail subject, while the name is separately available as
+`joint_name` and shown in the Location column. A 48-character location string
+would crowd out the reading in a subject line.
+
+Panel- and device-scoped alarms are deliberately **not** prefixed — `SYSTEM: `
+would be noise on an alarm that belongs to no joint, and the blacklist alarm
+already names its device and its affected joints (`Slave 101 (AmbientT)
+blacklisted — ambient reference for joint(s) J01, J02`). `describeJoint` falls
+through to the unprefixed text when there is no `joint_id`, so this is
+structural rather than a list of exceptions to maintain.
+
+Both contract docs now state explicitly that `description` is prose for display
+and never an identifier — parse `joint_id`. That is the property worth pinning:
+the risk of putting an id into a display string is a consumer that starts
+parsing it back out.
+
+Alarms already active when this deploys keep their old description until they
+clear and re-raise; there is nothing to migrate.
