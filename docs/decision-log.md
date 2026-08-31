@@ -4309,3 +4309,18 @@ parsing it back out.
 
 Alarms already active when this deploys keep their old description until they
 clear and re-raise; there is nothing to migrate.
+
+**Both changes live-verified on the Pi (2026-08-31).** Cleared Alarm History
+shows the two states side by side, which is the clearest possible confirmation:
+a 15:53 sensor-fault row reads `Sensor communication failure`, and the 17:00 row
+for the same joint reads `J02: Sensor communication failure`. The Joint column
+renders the operator's name (`Dc/07/Fl_0/Tx/Line_1`) on both, since `joint_name`
+deployed first. The two blacklist rows show `SYSTEM` with unprefixed
+descriptions - the panel/device exclusion working.
+
+One thing that check incidentally settled: the site names joints with slashes
+and underscores (`Dc/07/Fl_0/Tx/Line_1`). That is fine for the MGate export,
+because Tier 3 commands are labelled from `joint_id`, not the label - only ZONE
+names reach `bacnetDescription`, where the 40-character cap and the forbidden
+set `- " ' # * , [ ]` apply. `/` is not forbidden. Worth remembering if zones are
+ever named to the same convention.
