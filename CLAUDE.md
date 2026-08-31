@@ -797,6 +797,30 @@ that polling has resumed and a genuinely dead device has already re-failed its
 that would race the raise path. Any deploy that restarts Node-RED while a
 blacklist alarm is active would otherwise leave it stuck.
 
+**Stale EXCLUDE set after a restart (2026-08-31, second live report).** Two
+sensors read `No Data` with frozen values while the tracker called every device
+`active` and the HMI said *"all responding"*. Same lifetime mismatch as the
+stuck alarm above, but the more dangerous half:
+`global.busduct_blacklist_exclude` — what `Send Nano Job` subtracts from the
+compiled read job — is written to the **default** context store
+(localfilesystem, **survives a restart**), while the tracker does not. The
+Blacklist Engine rewrites that global only when `resendNeeded` is true, and
+after a restart `_finalize` computes
+`prevExcludeKey === undefined ? excludeSlaveIds.length > 0 : …` = **false** on a
+fresh tracker, so a stale list is never corrected. The failure is silent *and* a
+deadlock: an excluded slave is never polled, so it produces neither an `ok` nor
+an `err` for the tracker to count — it can never be re-blacklisted or restored.
+The stuck-alarm fix above made it *less* visible, since the tracker calls the
+slave active and the alarm gets cleared. `reconcileExcludeSet(persistedExclude,
+tracker, doc)` keeps only slaves the tracker actually has `blacklisted`
+(**`probing` is deliberately not excluded** — probing means "back in the scan on
+backoff", and excluding it would stop the very reads that let it recover), and
+returns the buses to resend so a healthy panel is a no-op rather than an
+unnecessary job update. Wired as "Repair Blacklist Exclude"
+(`d9b1ac57e0f10054`–`55`), a boot inject at **10 s — before** the 20 s alarm
+reconcile, so the scan is repaired first and a genuinely dead device has
+re-failed its 3 reads by the time alarms are reconciled.
+
 **Blacklist live-verified on the Pi (2026-07-24):** disconnecting a
 device blacklists it (after the tap was fixed to read the PARSED Nano
 stream, and the tracker moved to a module singleton) and raises its

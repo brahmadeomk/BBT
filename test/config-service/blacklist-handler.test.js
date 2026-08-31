@@ -406,3 +406,71 @@ describe('stale blacklist alarms after a restart (reconcileBlacklistAlarms)', ()
     assert.deepEqual(bh.reconcileBlacklistAlarms(undefined, bh.newTracker(trackerOpts), rdoc), []);
   });
 });
+
+describe('stale exclude set after a restart (reconcileExcludeSet)', () => {
+  // The nastier half of the same lifetime mismatch, seen on the panel
+  // 2026-08-31: two sensors reading "No Data" with frozen values, while the
+  // tracker called every device active and the HMI said "all responding".
+  // busduct_blacklist_exclude is localfilesystem-backed and survives a restart;
+  // the tracker does not. Send Nano Job keeps subtracting the stale list, so the
+  // slaves are never polled - and an unpolled slave can never fail a read, so it
+  // can never be re-blacklisted or restored. It is a deadlock, and it is silent.
+  const xdoc = {
+    modbus: {
+      buses: [{ bus_id: 'bus1' }, { bus_id: 'bus2' }],
+      slaves: [
+        { slave_id: 'sl04', bus_id: 'bus1', unit_address: 4, label: 'Sensor4' },
+        { slave_id: 'sl05', bus_id: 'bus1', unit_address: 5, label: 'Sensor5' },
+        { slave_id: 'sl09', bus_id: 'bus2', unit_address: 9, label: 'Sensor9' },
+      ],
+    },
+    joints: [],
+    zones: [],
+  };
+
+  test('a fresh tracker means the whole persisted list is stale', () => {
+    const tracker = bh.newTracker(trackerOpts);                 // as after a restart
+    const r = bh.reconcileExcludeSet(['sl04', 'sl05'], tracker, xdoc);
+    assert.deepEqual(r.excludeSlaveIds, [], 'nothing stays excluded');
+    assert.deepEqual(r.removed.sort(), ['sl04', 'sl05'], 'both go back into the scan');
+    assert.deepEqual(r.resendBusIds, ['bus1'], 'and bus1 gets the corrected job');
+  });
+
+  test('KEEPS a slave the tracker really has blacklisted', () => {
+    // The risk of this function is putting a known-bad device back in the scan.
+    const tracker = bh.newTracker(trackerOpts);
+    for (let i = 0; i < 3; i++) tracker.recordResult('sl04', false, T0);
+    assert.equal(tracker.status('sl04'), 'blacklisted');
+    const r = bh.reconcileExcludeSet(['sl04', 'sl05'], tracker, xdoc);
+    assert.deepEqual(r.excludeSlaveIds, ['sl04'], 'still excluded');
+    assert.deepEqual(r.removed, ['sl05'], 'only the stale one returns');
+  });
+
+  test('a probing slave is polled, so it must NOT be excluded', () => {
+    // Probing means "back in the scan on backoff" - excluding it would stop the
+    // probe reads that are the only way it can ever recover.
+    const tracker = bh.newTracker(trackerOpts);
+    for (let i = 0; i < 3; i++) tracker.recordResult('sl04', false, T0);
+    tracker.tick(T0 + 60_000);
+    assert.equal(tracker.status('sl04'), 'probing');
+    assert.deepEqual(bh.reconcileExcludeSet(['sl04'], tracker, xdoc).excludeSlaveIds, []);
+  });
+
+  test('resends only the segments that actually changed', () => {
+    const r = bh.reconcileExcludeSet(['sl04', 'sl09'], bh.newTracker(trackerOpts), xdoc);
+    assert.deepEqual(r.resendBusIds.sort(), ['bus1', 'bus2']);
+  });
+
+  test('a healthy panel is a no-op - no resend, no disruption', () => {
+    // Every job update re-inits the Nano's Modbus timeout, so resending on a
+    // panel that needs nothing would briefly disrupt live polling at every boot.
+    const r = bh.reconcileExcludeSet([], bh.newTracker(trackerOpts), xdoc);
+    assert.deepEqual(r, { excludeSlaveIds: [], removed: [], resendBusIds: [] });
+  });
+
+  test('missing or malformed persisted value is not an error', () => {
+    for (const bad of [undefined, null, 'sl04', {}]) {
+      assert.deepEqual(bh.reconcileExcludeSet(bad, bh.newTracker(trackerOpts), xdoc).removed, []);
+    }
+  });
+});

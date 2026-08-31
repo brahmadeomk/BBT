@@ -3996,3 +3996,71 @@ are index-based and unaffected.
 
 **Not changed: `zone_id`**, still `^z[0-9]{1,2}$`. The report was specifically
 about joint ids; widening zones is a separate call.
+
+## 2026-08-31 — Stale blacklist EXCLUDE set: silent, and a deadlock
+
+Second live report the same day. The Diagnostics table showed Sensor4 and
+Sensor5 as **No Data** with their values frozen at 0, while the Device column
+(the tracker) called every device **Active** and the header said *"Devices: all
+responding"*.
+
+Same lifetime mismatch as the stuck alarm earlier today, but the worse half.
+`global.busduct_blacklist_exclude` is what `Send Nano Job` subtracts from the
+compiled read job. It is written with `global.set(...)` and **no store
+argument**, so it lands in the default store — localfilesystem-backed on the Pi,
+therefore **surviving a restart**. The tracker does not survive.
+
+The reason it is never corrected is a specific line in `_finalize`:
+
+```js
+const resendNeeded = prevExcludeKey === undefined
+  ? excludeSlaveIds.length > 0
+  : excludeKey !== prevExcludeKey;
+```
+
+After a restart `prevExcludeKey` is `undefined` and a fresh tracker yields an
+empty `excludeSlaveIds`, so this is `[].length > 0` = **false**. The Blacklist
+Engine writes the global only when `resendNeeded`, so the stale list persists
+indefinitely.
+
+### Why it is invisible
+A slave that is not in the read job produces neither an `ok` nor an `err`, so
+the tracker has nothing to count and reports it `active`; `summarizeBlacklist`
+therefore says "all responding". The only outward sign is the device going quiet
+— Diagnostics ageing it out to "No Data" after 60 s with its last value frozen.
+**And this morning's stuck-alarm fix made it less visible still**: the tracker
+calls the slave active, so `reconcileBlacklistAlarms` clears its blacklist alarm
+— removing the last thing that pointed at it. That is worth recording plainly:
+the alarm fix was right, but it took away a symptom whose cause was still there.
+
+### Why it cannot self-heal
+It is a deadlock. Excluded means never polled; never polled means it can never
+fail a read, so it can never be re-blacklisted, and it can never return a good
+read, so it can never be restored. Nothing inside the blacklist state machine
+can break that cycle — only putting the slave back in the scan can.
+
+### Fix
+`reconcileExcludeSet(persistedExclude, tracker, doc)` — on boot the tracker is
+authoritative: keep only slaves it actually has `blacklisted`, and return the
+buses whose read set changed. Notable detail: a **`probing`** slave is
+deliberately NOT excluded, because probing means "back in the scan on backoff"
+and excluding it would suppress the very reads that let it recover.
+
+Wired as "Repair Blacklist Exclude", a boot inject at **10 s — deliberately
+before** the 20 s alarm reconcile. Repairing the scan first means that by the
+time alarms are reconciled, a genuinely dead device has already re-failed its 3
+reads and been re-blacklisted, so its alarm is correctly preserved. The reverse
+order would clear the alarm of a device that had not yet had a chance to fail.
+
+A healthy panel is a no-op: no rewrite, no resend. That matters because the
+firmware re-inits its Modbus timeout on every job update, so an unconditional
+boot resend would briefly disrupt live polling on every restart.
+
+### Root cause worth fixing separately (not done here)
+The real fault is that `busduct_blacklist_exclude` is *derived* state persisted
+in a store that outlives the thing it is derived from. Both of today's bugs are
+the same shape. A cleaner long-term fix is to stop persisting it at all — write
+it to the `memory` store explicitly — so it cannot outlive the tracker. Left for
+the design chat: it changes restart behaviour for a genuinely-dead device (it
+would be polled once more before being re-blacklisted, which is correct but
+worth agreeing).

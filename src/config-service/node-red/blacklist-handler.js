@@ -345,6 +345,50 @@ function reconcileBlacklistAlarms(activeAlarms, tracker, doc) {
   return clears;
 }
 
+
+/**
+ * Reconcile the PERSISTED exclude set against the tracker's actual state.
+ *
+ * Sibling of reconcileBlacklistAlarms, for the other half of the same lifetime
+ * mismatch - and the more dangerous half.
+ *
+ * `global.busduct_blacklist_exclude` is what `Send Nano Job` subtracts from the
+ * compiled read job. It is written to the DEFAULT context store, which on the
+ * Pi is localfilesystem-backed, so it SURVIVES a restart. The tracker does not.
+ * Worse, the Blacklist Engine only rewrites that global when `resendNeeded` is
+ * true, and after a restart `_finalize` computes
+ *   resendNeeded = prevExcludeKey === undefined ? excludeSlaveIds.length > 0 : ...
+ * which with a fresh tracker is `[] .length > 0` = false. So the stale exclude
+ * list is never rewritten and the affected slaves stay out of the scan forever.
+ *
+ * The symptom is silent: the tracker reports every device `active` and the HMI
+ * says "all responding", because a slave that is not polled produces neither an
+ * ok nor an err for the tracker to count. The device simply goes quiet -
+ * Diagnostics ages it out to "No Data" and its last value freezes. And because
+ * the tracker calls it active, reconcileBlacklistAlarms clears its alarm, which
+ * removes the last visible sign.
+ *
+ * There is also a deadlock here that makes this unrecoverable on its own: an
+ * excluded slave is never polled, so it can never fail a read, so it can never
+ * be re-blacklisted OR restored. Only putting it back in the scan breaks that.
+ *
+ * So on boot the tracker is authoritative: anything it does not consider
+ * blacklisted must not be excluded. Devices that really are dead re-fail their
+ * 3 reads within a few poll cycles and are blacklisted again properly.
+ *
+ * @returns {{excludeSlaveIds: string[], removed: string[], resendBusIds: string[]}}
+ */
+function reconcileExcludeSet(persistedExclude, tracker, doc) {
+  const persisted = Array.isArray(persistedExclude) ? persistedExclude : [];
+  const excludeSlaveIds = persisted.filter((id) => tracker.status(id) === 'blacklisted').sort();
+  const removed = persisted.filter((id) => !excludeSlaveIds.includes(id));
+  // Resend only the segments whose read set actually changes - the firmware
+  // re-inits its Modbus timeout on every job update, so an unnecessary resend
+  // briefly disrupts live polling on a healthy bus.
+  const resendBusIds = [...new Set(removed.map((id) => busForSlave(doc, id)).filter(Boolean))];
+  return { excludeSlaveIds, removed, resendBusIds };
+}
+
 module.exports = {
   newTracker,
   getTracker,
@@ -360,4 +404,5 @@ module.exports = {
   processTick,
   summarizeBlacklist,
   reconcileBlacklistAlarms,
+  reconcileExcludeSet,
 };
