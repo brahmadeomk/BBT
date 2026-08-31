@@ -62,7 +62,14 @@ function sweepDecommissionedAlarms(activeAlarms, doc) {
       if (!slaves) continue;
       const scope = String(key).split('|')[1];
       if (!scope || PANEL_SCOPES.has(scope)) continue;      // COMM, PI POWER, per-bus: not a device
-      if (validSlaveIds.has(scope)) continue;               // still commissioned - leave it alone
+      // The scope of a SYSTEM alarm is NOT always a slave_id. The per-sensor
+      // fault alarms the Alarm Manager raises are keyed
+      // `SYSTEM|{joint_id}|COMMUNICATION` / `|SENSOR_FAULT` - a JOINT id in the
+      // same position. Checking only the slave list swept those the instant they
+      // were raised, producing a raise/clear pair (and a pair of e-mails) on
+      // every blacklist probe cycle. Sweep only when the scope names nothing
+      // that exists in EITHER id space.
+      if (validSlaveIds.has(scope) || validJointIds.has(scope)) continue;
       out.push({
         instanceId: key,
         slave_id: scope,

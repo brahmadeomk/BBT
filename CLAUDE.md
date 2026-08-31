@@ -791,7 +791,15 @@ it: source of truth is the **applied** `cfg/modbus+joints` doc, PROCESS alarms
 clear when their `joint_id` is gone, device-scoped SYSTEM alarms clear when
 their `slave_id` is gone, and **panel-scoped** SYSTEM alarms
 (`MODULE`/`BUS1`/`BUS2`/`PI`) are never swept — "not in the config" is
-meaningless for those. Critically it **refuses to act on absent information**:
+meaningless for those. **The scope segment of a SYSTEM key is not one
+namespace**: `SYSTEM|<slave>|BLACKLIST` carries a slave_id, but the per-sensor
+fault alarms are keyed `SYSTEM|<joint_id>|COMMUNICATION`/`|SENSOR_FAULT`. The
+first cut checked only the slave list and so cleared those the instant they were
+raised — on a panel with a disconnected sensor that produced a raise/auto-clear
+pair, and a pair of e-mails, every 5 minutes (the blacklist tracker's max probe
+backoff). The scope is now matched against **both** id spaces; an unrecognised
+scope is still swept, so a deleted device's blacklist alarm still clears.
+Critically it **refuses to act on absent information**:
 no readable doc, or an empty `joints[]`, sweeps nothing. The old `|| []`
 fallback meant a missing global made every joint look deleted and would have
 auto-cleared every PROCESS alarm on the panel at once. The call sits in a

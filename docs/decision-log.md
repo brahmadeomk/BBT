@@ -4156,3 +4156,47 @@ evaluated at all — and would stop a saved-not-applied joint being monitored,
 which some commissioning workflows may currently rely on. That is a design-chat
 decision, not a unilateral one. Recorded so the asymmetry is deliberate and
 visible rather than discovered again later.
+
+## 2026-08-31 — Regression: the sweep cleared per-sensor comm alarms every probe cycle
+
+Reported from the panel with J02's sensor physically disconnected. The
+`SYSTEM|sl02|BLACKLIST` alarm was correct. But Cleared Alarm History also showed
+`J02 | Zone1 | CRITICAL | Sensor communication failure (Auto-cleared)` raised and
+cleared at 15:05, 15:10, 15:15, 15:20 — every five minutes, which is the
+blacklist tracker's maximum probe backoff (30s → 60s → 120s → **300s**). Each
+cycle also sent a raise e-mail and a clear e-mail.
+
+**My bug, introduced in `cd82de4`** (the config-change sweep from earlier the
+same day). Not a pre-existing condition and not a tracker fault.
+
+### Cause
+`sweepDecommissionedAlarms` treated the second segment of a SYSTEM instanceId as
+a `slave_id`. That is true for `SYSTEM|<slave>|BLACKLIST`, but the Alarm
+Manager's per-sensor fault alarms are keyed off the **joint**:
+
+```js
+const key = `SYSTEM|${d.joint_id}|${S.type}`;   // -> SYSTEM|J02|COMMUNICATION
+```
+
+Category SYSTEM, joint id in the scope position. `validSlaveIds.has('J02')` is
+false, so the sweep declared the alarm decommissioned and cleared it — on the
+very tick it was raised. The probe cadence made it periodic: each probe read
+restored the sensor briefly enough to re-raise, the next sweep cleared it again.
+
+### Fix
+The scope is checked against **both** id spaces: `validSlaveIds.has(scope) ||
+validJointIds.has(scope)`. An unrecognised scope is still swept, so gap 2 (a
+deleted device whose blacklist alarm can never clear) stays closed — the sweep
+acts only when the scope names nothing that exists anywhere in the applied
+document.
+
+Four regression tests in `test/alarms/config-sweep.test.js` pin it, including the
+exact live combination: `sl01` blacklisted while still-configured `J02` holds its
+communication alarm, and neither is swept.
+
+### Why it was not caught
+The original tests built SYSTEM alarms only through a `system_()` helper that
+always passed a slave id. The helper made the wrong assumption look like the
+whole shape of the domain. The instanceId scope is not one namespace — the tests
+now exercise both, and a panel-scoped third case (`MODULE`/`PI`/`BUS1`/`BUS2`)
+that belongs to neither.

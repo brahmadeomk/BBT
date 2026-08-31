@@ -92,6 +92,47 @@ describe('config sweep - SYSTEM alarms', () => {
   });
 });
 
+describe('config sweep - SYSTEM alarms scoped to a JOINT, not a slave', () => {
+  // Regression, found live 2026-08-31. The per-sensor fault alarms the Alarm
+  // Manager raises are keyed `SYSTEM|{joint_id}|COMMUNICATION` and
+  // `SYSTEM|{joint_id}|SENSOR_FAULT` - category SYSTEM, but a JOINT id in the
+  // scope position where a blacklist alarm carries a slave_id. The first cut of
+  // this sweep checked only the slave list, so it cleared these the instant they
+  // were raised: on the reporting panel a removed sensor produced a
+  // raise/auto-clear pair - and a pair of e-mails - on every blacklist probe
+  // cycle (visible as history entries exactly 5 minutes apart, the max backoff).
+  const commAlarm = (jointId) => system_(jointId, 'COMMUNICATION', {
+    joint_id: jointId, description: 'Sensor communication failure',
+  });
+  const faultAlarm = (jointId) => system_(jointId, 'SENSOR_FAULT', {
+    joint_id: jointId, description: 'Sensor fault',
+  });
+
+  test('LEAVES a per-sensor comm/fault alarm for a joint that is still configured', () => {
+    assert.deepEqual(sweepDecommissionedAlarms(byKey([commAlarm('J02'), faultAlarm('J01')]), doc()), []);
+  });
+
+  test('a still-configured joint keeps its comm alarm even while its slave is blacklisted', () => {
+    // The exact live case: sl01 blacklisted (correctly, sensor unplugged) while
+    // J02 - still in the configuration - holds its communication alarm.
+    const alarms = byKey([system_('sl01'), commAlarm('J02')]);
+    assert.deepEqual(sweepDecommissionedAlarms(alarms, doc()), []);
+  });
+
+  test('but DOES sweep one whose joint has been deleted from the configuration', () => {
+    const out = sweepDecommissionedAlarms(byKey([commAlarm('J99'), faultAlarm('J98')]), doc());
+    assert.deepEqual(out.map((o) => o.instanceId).sort(),
+      ['SYSTEM|J98|SENSOR_FAULT', 'SYSTEM|J99|COMMUNICATION']);
+  });
+
+  test('a scope naming neither a slave nor a joint is still swept', () => {
+    // The sweep is not "anything unrecognised is kept" - that would resurrect
+    // gap 2, the deleted device whose blacklist alarm can never clear.
+    const out = sweepDecommissionedAlarms(byKey([system_('sl99'), commAlarm('J99')]), doc());
+    assert.equal(out.length, 2);
+  });
+});
+
 describe('config sweep - refuses to act on absent information', () => {
   // The original code did `global.get(...) || []`, so a missing global made
   // every joint look deleted and would have cleared every PROCESS alarm at once.
