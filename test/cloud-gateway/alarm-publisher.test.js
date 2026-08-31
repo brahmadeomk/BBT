@@ -187,3 +187,40 @@ describe('AlarmPublisher - ACK on status transition', () => {
     assert.deepEqual(events.map((e) => e.payload.action), ['RAISE', 'ACK', 'CLEAR', 'RAISE']);
   });
 });
+
+describe('AlarmPublisher - joint_name (the operator-facing location)', () => {
+  // The alarm object carried joint_id but not the name the operator typed in the
+  // Joint Config table (schema joints[].label, "Riser bend, above ACB-8"), so a
+  // fleet view could only ever say "J02". Zone had both id and name all along.
+  const raise = (a) => {
+    const outbox = freshOutbox();
+    new AlarmPublisher({ outbox, topic: 'alarm' }).ingestActiveAlarms([a]);
+    return Object.values(outbox.queues).flat()[0].payload;
+  };
+
+  test('promotes joint_name beside joint_id so the fleet view need not open the snapshot', () => {
+    const p = raise(alarm({ joint_name: 'Riser bend, above ACB-8' }));
+    assert.equal(p.joint_id, 'J01');
+    assert.equal(p.joint_name, 'Riser bend, above ACB-8');
+  });
+
+  test('omits the field entirely for an unnamed joint rather than echoing the id', () => {
+    // A fabricated name would be indistinguishable from a real one; a consumer
+    // that wants a fallback can apply its own.
+    for (const v of [undefined, null, '']) {
+      assert.ok(!('joint_name' in raise(alarm({ joint_name: v }))), `joint_name=${JSON.stringify(v)}`);
+    }
+  });
+
+  test('absent on panel/device SYSTEM alarms, which belong to no joint', () => {
+    const p = raise(alarm({
+      instanceId: 'SYSTEM|sl02|BLACKLIST', category: 'SYSTEM',
+      joint_id: 'SYSTEM', alarm_type: 'DEVICE_BLACKLIST', joint_name: undefined,
+    }));
+    assert.ok(!('joint_name' in p));
+  });
+
+  test('the full snapshot still carries it, so nothing depends on the promotion', () => {
+    assert.equal(raise(alarm({ joint_name: 'Riser bend' })).alarm.joint_name, 'Riser bend');
+  });
+});

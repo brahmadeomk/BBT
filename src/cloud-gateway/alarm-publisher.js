@@ -83,6 +83,12 @@ class AlarmPublisher {
       timestamp: action === 'CLEAR' ? alarm.clearedTs : action === 'ACK' ? alarm.ackTs ?? alarm.raisedTs : alarm.raisedTs,
       alarm, // full context snapshot
     };
+    // The operator-facing joint name (schema joints[].label - "Riser bend, above
+    // ACB-8"). Promoted to a top-level field beside joint_id so a fleet view can
+    // show where the alarm is without reaching into the snapshot; omitted when
+    // the joint is unnamed, and absent on panel/device SYSTEM alarms that belong
+    // to no joint. An ADDED OPTIONAL field, so `v` does not bump (see Part G).
+    if (alarm.joint_name) event.joint_name = alarm.joint_name;
     if (typeof alarm.value === 'number') event.value = alarm.value;
     if (typeof alarm.threshold === 'number') event.threshold = alarm.threshold;
     if (typeof alarm.persistence_min === 'number') event.persistence_min = alarm.persistence_min;

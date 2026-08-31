@@ -279,7 +279,7 @@ In the **AWS console** (same region):
    default profile's deltaT watch just below a joint's current ΔT) —
    or warm a sensor.
 2. MQTT test client on `dt/c1001/s01/p01/alarm`: an
-   `{action: "RAISE", joint_id, level, kpi, value, threshold,
+   `{action: "RAISE", joint_id, joint_name, level, kpi, value, threshold,
    persistence_min, absolute_temp_c, ...}` message appears when the
    alarm raises locally (after its persistence time).
 3. Restore the threshold; a `{action: "CLEAR", ...}` follows when it
@@ -662,6 +662,32 @@ A positional payload may also be **chunked** if the panel is large enough
 to exceed the 5 KB metering block: several messages share a `timestamp`
 and `interval_min`, each with its own `start_index`/`count`. Key your
 upsert on `(panel, timestamp, joint)`, not on "one message per interval".
+
+**An alarm names its joint twice: by id and by location.**
+
+```jsonc
+{ "type":"alarm", "v":1, "action":"RAISE",          // "RAISE" | "CLEAR" | "ACK"
+  "joint_id":"J02", "joint_name":"Riser bend, above ACB-8",
+  "level":"WARNING", "kpi":"deltaT", "timestamp":"...",
+  "value":29.48, "threshold":25, "persistence_min":15, "absolute_temp_c":55.2,
+  "alarm": { /* full context snapshot: instanceId, category, zone_id, zone_name, ... */ } }
+```
+
+`joint_name` (added 2026-08-31) is the location the operator typed when
+commissioning the joint (schema `joints[].label`). Show it in preference to
+`joint_id` — the id is the panel's key, the name is what a person needs to
+walk to the right joint. It is **absent** when the joint is unnamed and on
+panel- or device-scoped SYSTEM alarms (comm failure, blacklist, Pi power),
+which belong to no joint, so apply your own fallback: `joint_name ||
+joint_id`. It is not echoed from the id when missing, because a fabricated
+name would be indistinguishable from a real one. Note this is an **added
+optional field**, so `v` stays `1` — exactly the case the version rules
+above say must not bump.
+
+`kpi` is `"deltaT"`/`"ror"`/`null`; `value`/`threshold`/`persistence_min`/
+`absolute_temp_c` appear on PROCESS alarms only. Alarms publish **on state
+transition**, not on a timer: one RAISE, one CLEAR, and at most one ACK per
+instance.
 
 **The LWT is on its own topic, and is not telemetry.** It used to share
 the telemetry topic, which was wrong twice over: a disconnect is not a

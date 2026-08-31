@@ -353,6 +353,24 @@ hasn't been provisioned into the applied `cfg/modbus` yet, `apply`
 rejects with a clear error — commissioning slaves happens in the
 Modbus Settings dashboard (above), not here.
 
+**Alarms carry the joint's NAME as well as its id (2026-08-31).** The alarm
+object had `joint_id`, `zone_id` **and** `zone_name` — zone had both halves,
+joint only the key. The operator names every joint in the Joint Config table (a
+mandatory column, schema `joints[].label`, *"Riser bend, above ACB-8"*) and
+ProcessLogic already carried it as `d.joint_name`; the Alarm Manager just never
+copied it, so the Active Alarms column headed **"Location"** rendered `J02`.
+`joint_name` is now derived once and defaulted in `raiseAlarm` (same place
+`zone_name` is), reaches both HMI tables as `{{a.joint_name || a.joint_id}}`
+with the id kept as a tooltip, the history CSV as a `Location` column, all three
+e-mail bodies via `jointLabel()`, and the cloud alarm message as a top-level
+field beside `joint_id`. It is **null when unnamed and absent on panel/device
+SYSTEM alarms** — never echoed from the id, since a fabricated name would be
+indistinguishable from a real one, and the same `joint_name || joint_id`
+fallback covers alarms already in persisted context. **Descriptions are
+unchanged**: a description is the *condition* (`ΔT 29.48 ≥ 25`), and identity
+belongs in its own field rather than in text every consumer must parse back out.
+An added optional field, so the wire contract stays `v: 1`.
+
 **Joint ID format widened to 6 characters (user request 2026-08-31):**
 `joints[].joint_id` was `^J[0-9]{2,3}$` — a literal `J` plus 2-3 digits, so
 4 characters maximum. Sites name joints to their own convention (riser/floor

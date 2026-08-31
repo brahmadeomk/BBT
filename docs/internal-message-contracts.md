@@ -120,6 +120,7 @@ just-this-message deltas).
   "instanceId": "PROCESS|J01|DELTA_T|WARNING",   // "PROCESS|<joint_id>|<alarm_type>|<level>" or "SYSTEM|<joint_id>|<type>"
   "category": "PROCESS",                          // "PROCESS" | "SYSTEM"
   "joint_id": "J01",
+  "joint_name": "Riser bend, above ACB-8",         // operator-facing location (schema joints[].label); null when unnamed, absent on panel/device SYSTEM alarms
   "zone_id": "Z1",
   "zone_name": "Zone1",
   "alarm_type": "DELTA_T",                        // "DELTA_T" | "ROR" | "COMMUNICATION" | "SENSOR_FAULT" | "COMM_MODULE" | "COMM_RESET"
@@ -136,6 +137,19 @@ just-this-message deltas).
   "absolute_temp_c": 55.2                           // PROCESS alarms only - the raw sensor reading (val) at evaluation time, distinct from `value`
 }
 ```
+
+`joint_name` (added 2026-08-31) is the location the operator typed in the
+Joint Config table — a mandatory column, stored as schema
+`joints[].label` ("Riser bend, above ACB-8"). It is `null` when the joint
+is unnamed and **absent** on panel- and device-scoped `SYSTEM` alarms
+(`SYSTEM|MODULE|COMM_FAILURE`, `SYSTEM|<slave>|BLACKLIST`,
+`SYSTEM|PI|POWER`), which belong to no joint. It is deliberately not
+echoed from `joint_id` when missing — a fabricated name would be
+indistinguishable from a real one, so consumers apply their own fallback
+(`joint_name || joint_id`). The `description` string does **not** repeat
+it: the description is the *condition* (`ΔT 29.48 ≥ 25`), and identity
+belongs in its own field rather than in text every consumer has to parse
+back out.
 
 `value`/`threshold`/`persistence_min`/`absolute_temp_c` are only
 present on `PROCESS` alarms (`ROR`/`DELTA_T`). `value`/`threshold`/

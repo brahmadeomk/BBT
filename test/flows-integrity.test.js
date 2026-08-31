@@ -83,3 +83,56 @@ describe('Alarm Manager config sweep (2026-08-31)', () => {
     assert.ok(/__sweep\s*=\s*\[\]/.test(fn), 'and default to an empty sweep');
   });
 });
+
+describe('joint_name reaches every alarm surface (2026-08-31)', () => {
+  // The operator names each joint in the Joint Config table - a mandatory column,
+  // stored as schema joints[].label ("Riser bend, above ACB-8"). ProcessLogic
+  // carried it as d.joint_name, but the Alarm Manager kept only joint_id, so the
+  // Active Alarms column headed "Location" rendered "J02". Zone had both id and
+  // name all along. These pin the whole path, because the flow is hand-imported
+  // JSON where a dropped binding fails silently.
+  const flows = () => JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+  const byId = (id) => flows().find((n) => n.id === id);
+
+  test('ProcessLogic still emits the name the Alarm Manager depends on', () => {
+    assert.match(byId('39dad91df0c15744').func, /joint_name:\s*joint\.joint_name/);
+  });
+
+  test('the Alarm Manager defaults joint_name onto every raised alarm', () => {
+    const fn = byId('de6fcc55794afd9e').func;
+    // Defaulted in raiseAlarm, exactly as zone_name is - one place, all callers.
+    assert.match(fn, /alarm\.joint_name\s*=\s*alarm\.joint_name\s*\?\?\s*joint_name/);
+    assert.match(fn, /const joint_name\s*=/);
+  });
+
+  test('an unnamed joint yields null, never a fabricated name', () => {
+    // A joint_name echoing the id would be indistinguishable from a real one.
+    const fn = byId('de6fcc55794afd9e').func;
+    const decl = fn.slice(fn.indexOf('const joint_name ='));
+    assert.match(decl.slice(0, 160), /:\s*null;/);
+  });
+
+  test('all three e-mail bodies name the joint, not just its id', () => {
+    const fn = byId('de6fcc55794afd9e').func;
+    assert.equal((fn.match(/Joint: \$\{jointLabel\(/g) || []).length, 3,
+      'raise, clear and auto-clear bodies');
+    assert.ok(!/Joint: \$\{a(larm)?\.joint_id\}/.test(fn), 'no body still prints the bare id');
+  });
+
+  test('both alarm tables render the name and keep the id reachable', () => {
+    for (const id of ['24acd52109175c6b', '180eeb72d29409ed']) {
+      const fmt = byId(id).format;
+      assert.ok(fmt.includes('{{a.joint_name || a.joint_id}}'), `${id} must fall back to the id`);
+      assert.ok(fmt.includes('title="{{a.joint_id}}"'), `${id} must keep the id as a tooltip`);
+    }
+  });
+
+  test('the history CSV export gains a Location column, in the right position', () => {
+    const fmt = byId('180eeb72d29409ed').format;
+    const header = fmt.match(/let csv = "([^"]*)/)[1].split(',');
+    assert.deepEqual(header.slice(0, 4), ['Sr', 'Joint', 'Location', 'Zone']);
+    // ...and the row array agrees, or every later column is off by one
+    const row = fmt.slice(fmt.indexOf('const row = ['), fmt.indexOf('const row = [') + 200);
+    assert.match(row, /a\.joint_id,\s*a\.joint_name \|\| "",\s*a\.zone_name/);
+  });
+});

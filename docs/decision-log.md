@@ -4200,3 +4200,58 @@ always passed a slave id. The helper made the wrong assumption look like the
 whole shape of the domain. The instanceId scope is not one namespace — the tests
 now exercise both, and a panel-scoped third case (`MODULE`/`PI`/`BUS1`/`BUS2`)
 that belongs to neither.
+
+## 2026-08-31 — Alarms carry the joint's name, not just its id
+
+Asked whether the joint name was in the alarm object or the description. It was
+in neither. The alarm object carried `joint_id`, `zone_id` **and** `zone_name` —
+zone had both halves all along, joint had only the key.
+
+### What was already there and unused
+The operator names every joint in the Joint Config table. It is a **mandatory**
+column (a blank one fails with "Missing fields"), stored as schema
+`joints[].label`, described in the schema as *"Human location, e.g. 'Riser bend,
+above ACB-8'"*. ProcessLogic carries it through as `d.joint_name` in the very
+message the Alarm Manager reads. The Alarm Manager simply never copied it.
+
+The clearest evidence this was an oversight rather than a decision: the Active
+Alarms table's column is headed **"Location"** and binds `{{a.joint_id}}`.
+Someone intended the location to be there. So on a panel where a joint is called
+"Riser bend, above ACB-8", every alarm surface said `J02` — the HMI, the raise
+and clear e-mails (`Joint: J02`), the history CSV, and the cloud alarm message.
+
+### What changed
+- **Alarm Manager**: `joint_name` derived once from `d.joint_name` and defaulted
+  in `raiseAlarm`, exactly as `zone_name` already was — one place, covering all
+  three joint-scoped builders (ΔT, RoR, per-sensor COMMUNICATION/SENSOR_FAULT).
+- **E-mails**: a `jointLabel()` helper renders `J02 (Riser bend, above ACB-8)`,
+  falling back to the bare id. Used in all three bodies — raise, clear, and the
+  config auto-clear.
+- **HMI**: both tables render `{{a.joint_name || a.joint_id}}` with the id kept
+  as a `title` tooltip, so the key that appears in instanceIds and e-mail
+  subjects is still one hover away. History CSV gains a `Location` column.
+- **Cloud**: `joint_name` promoted to a top-level field beside `joint_id`, so a
+  fleet view need not reach into the `alarm` snapshot.
+
+### Two deliberate non-changes
+**Null, not the id, when a joint is unnamed.** Echoing the id would make a
+fabricated name indistinguishable from a real one; consumers apply
+`joint_name || joint_id` themselves. Old alarms already in the Alarm Manager's
+persisted context have no `joint_name` at all, and the same fallback covers them
+without a migration.
+
+**The description strings are unchanged.** A description is the *condition*
+(`ΔT 29.48 ≥ 25`); identity belongs in its own field, not concatenated into text
+that the BMS, the cloud and the CSV would each have to parse back out. Adding the
+joint to the description would also have changed strings that alarm dedupe and
+history matching read.
+
+On the wire this is an **added optional field**, so the contract version stays
+`v: 1` — precisely the case Part G's rules say must not bump.
+
+### Guarding it
+The path crosses two function nodes, two `ui_template` bodies and a CSV export,
+all inside hand-imported flow JSON where a dropped binding fails silently. Six
+tests in `test/flows-integrity.test.js` pin each hop, including that the CSV
+header and the row array agree on column order — getting those out of step would
+shift every later column by one without any error.
