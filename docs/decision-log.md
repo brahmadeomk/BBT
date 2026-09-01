@@ -4476,3 +4476,27 @@ chat, not something to slip in behind a dashboard tile.
 Renders "not sampled yet" before the first 30 s tick rather than a blank panel,
 and an all-null snapshot (off-Pi, or every probe failed) degrades to "No uplink"
 with no warnings instead of throwing inside the view.
+
+## 2026-09-01 — SSH deploy key documented, not adopted
+
+Asked how to pull on the Pi over SSH securely. §1a of `docs/pi-deployment.md`
+now carries the full procedure: a **read-only deploy key**, one per panel,
+`IdentitiesOnly yes`, host keys pinned from `api.github.com/meta` over TLS
+rather than accepted at the interactive prompt, a push test to prove read-only
+is real, and revocation steps.
+
+**User decision: not deploying it.** The panels keep pulling over HTTPS with a
+Personal Access Token.
+
+The section stays as documentation, retitled *"optional, not yet adopted"*, and
+`docs/pi-deployment.md` §1 was restored to the HTTPS clone — I had switched that
+line to the SSH alias in the same commit, which would have pointed a fresh Pi at
+a host alias that does not exist. `docs/security-hardening.md` §4 now records
+the PAT as a **known, accepted weakness** rather than describing the deploy key
+as current practice: a token in the remote URL is plaintext in `.git/config`,
+visible in `git remote -v`, and in shell history. Written that way deliberately
+— a hardening document that describes an aspiration as if it were the
+configuration is worse than one that names the gap.
+
+Practical mitigation while the PAT stands: scope it to `repo` **read** only, and
+rotate it when anyone leaves the team.

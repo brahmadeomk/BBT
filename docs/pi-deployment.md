@@ -16,21 +16,22 @@ branch), so clone that branch explicitly:
 
 ```bash
 cd ~
-git clone -b claude/code-handoff-strategy-y551k2 github-busduct:brahmadeomk/BBT.git busduct-cloud-edge
+git clone -b claude/code-handoff-strategy-y551k2 https://github.com/brahmadeomk/BBT.git busduct-cloud-edge
 cd busduct-cloud-edge
 ```
 
-`github-busduct:` is the SSH alias set up in **§1a — do that first**, on a
-new Pi, before this clone. (An HTTPS URL works too, but see below.)
+For a private repo this prompts for credentials. A Personal Access Token
+(https://github.com/settings/tokens, `repo` read access) as the password
+works and is what the panels use today.
 
-**Use an SSH deploy key, not a Personal Access Token and not your own
-SSH key.** Full procedure: **§1a** below. In short: a PAT in a remote URL
-is stored in plaintext in `.git/config` and lands in shell history, and
-your personal SSH key would give a panel in a plant room the same GitHub
-access you have. A deploy key is scoped to **one repository**, can be
-**read-only**, and is revoked on its own without touching anything else.
+> **A more secure option, documented but not currently adopted.** A PAT in
+> a remote URL is stored in plaintext in `.git/config`, shows in
+> `git remote -v`, and lands in shell history. A read-only SSH **deploy
+> key** avoids that: it is scoped to one repository, cannot push, and is
+> revoked on its own. **§1a** below is the full procedure if and when you
+> want to move to it — nothing in the rest of this guide depends on it.
 
-## 1a. Secure pull: a read-only SSH deploy key
+## 1a. Secure pull: a read-only SSH deploy key (optional, not yet adopted)
 
 The panel only ever *pulls*. Making the credential read-only enforces the
 standing rule (*"Never modify the production Pi directly - changes flow
