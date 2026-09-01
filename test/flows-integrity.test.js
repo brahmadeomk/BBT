@@ -443,3 +443,48 @@ describe('the Alarm Manager applies blacklist description updates (2026-09-01)',
     assert.match(block, /h\.description = a\.description/);
   });
 });
+
+describe('table headers stay pinned while scrolling (2026-09-01)', () => {
+  // Requested from the panel: on a table with a row per joint or channel the
+  // column titles scroll off first, exactly when you need them.
+  const flows = () => JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+  const byId = (id) => flows().find((n) => n.id === id);
+
+  const TABLES = [
+    ['d58c3f80174c66df', 'JointMasterUI'],
+    ['7f3a1c9e2b5d4a02', 'ModbusSettingsUI'],
+    ['db41c2b5077e83fc', 'Diagnostics'],
+    ['24acd52109175c6b', 'Active Alarms'],
+    ['180eeb72d29409ed', 'Alarm History'],
+    ['b115ac57e0f10013', 'BMS Registers'],
+  ];
+
+  for (const [id, name] of TABLES) {
+    test(`${name} pins its header`, () => {
+      assert.match(byId(id).format, /position:\s*sticky;?\s*top:\s*0/);
+    });
+
+    test(`${name}'s sticky header is OPAQUE`, () => {
+      // A sticky header with a transparent background has the rows scroll
+      // visibly through it - the single most common way this is got wrong.
+      const fmt = byId(id).format;
+      const i = fmt.search(/position:\s*sticky/);
+      const rule = fmt.slice(Math.max(0, i - 400), i + 400);
+      assert.match(rule, /background:\s*#[0-9a-fA-F]{6}/);
+    });
+  }
+
+  test('a pinned header needs a bounded scroll container to move within', () => {
+    // The panels carry overflow-x:auto, which per CSS makes them scroll
+    // containers on BOTH axes - so without a max-height the sticky header binds
+    // to a container that never scrolls and does nothing at all.
+    for (const [id, cls] of [['d58c3f80174c66df', 'jm-wrap'],
+                             ['7f3a1c9e2b5d4a02', 'mbs-wrap'],
+                             ['db41c2b5077e83fc', 'diag-wrap']]) {
+      const fmt = byId(id).format;
+      assert.ok(fmt.includes(`<div class="${cls}">`), `${cls} must wrap the table`);
+      assert.match(fmt, new RegExp(`\\.${cls}\\s*\\{[^}]*max-height`), `${cls} must be bounded`);
+      assert.match(fmt, new RegExp(`\\.${cls}\\s*\\{[^}]*overflow`), `${cls} must scroll`);
+    }
+  });
+});

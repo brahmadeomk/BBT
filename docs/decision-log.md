@@ -5049,3 +5049,48 @@ differ by design. Once an alarm has been updated, the history no longer records
 how many failures triggered the blacklist. The count is still in the tracker and
 could be carried into the update prefix; left alone for now rather than spending
 another deploy cycle on it.
+
+## 2026-09-01 — Sticky column headers on the config and diagnostic tables
+
+Asked from the panel: keep the column titles visible when scrolling. On a table
+with a row per joint or channel the titles leave the screen first, which is
+exactly when they are needed.
+
+**The pattern already existed here.** Alarm History and the BMS Register table
+both do bounded wrapper + `th { position: sticky; top: 0; background: … }`, so
+this follows that rather than inventing a second approach. Applied to:
+
+| Table | What was missing |
+|---|---|
+| JointMasterUI | wrapper + sticky |
+| ModbusSettingsUI (slaves) | wrapper + sticky |
+| Diagnostics "modbus data" | wrapper + sticky |
+| Active Alarms | sticky only — its `.table-wrap` was already bounded at 70vh |
+
+Active Alarms is the interesting one: it had the scrolling wrapper all along but
+its `th` rule set only colour and cursor, so it was the one alarm table whose
+header did not pin while its sibling's did.
+
+### Two details that decide whether this works at all
+**The panel is already a scroll container.** `.bms-panel`/`.mbs-panel` carry
+`overflow-x: auto`, and per CSS an `overflow` of `visible` on one axis computes
+to `auto` when the other is not `visible` — so the panel scrolls on *both* axes.
+A sticky `th` therefore binds to the panel, and if the panel has no bounded
+height it never scrolls vertically and the header does nothing. Hence the inner
+`*-wrap` div with an explicit `max-height`, which is what the alarm tables were
+already doing.
+
+**The background must be opaque.** A sticky header with a transparent
+background has the rows scroll visibly through it. And `box-shadow: inset 0 -1px
+0` replaces `border-bottom`, because under `border-collapse: collapse` the
+collapsed border is painted on the cell edge and does not travel with the sticky
+element.
+
+Heights are `min(50vh, 250px)`-style rather than plain `vh`: the config cards are
+7-8 units tall (~370-420 px), so a bare `60vh` would exceed the card on a normal
+screen and the card, not the wrapper, would end up scrolling — putting us back
+where we started. The `vh` half keeps it sane on a short screen.
+
+**Not verified visually** — this is CSS and there is no way to render it from
+here. Structural checks only: div balance, wrapper present and bounded, sticky
+present with an opaque background, on all six tables.
