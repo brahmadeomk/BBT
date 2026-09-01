@@ -132,7 +132,15 @@ function publishDeviceHealth(gateway, { summary, doc, busSeen, power } = {}, now
     device_health: result.published ? result.reason : 'unchanged',
     counts: payload.counts,
     buses: payload.buses.map((b) => `${b.bus_id}:${b.status}`),
-    outbox: gateway.outbox.counts(),
+    // QUEUE DEPTH - messages waiting to be sent, not a count of anything that is
+    // wrong with the panel. Zero is the healthy reading: everything published
+    // has already drained to the cloud; a growing number means the link is down.
+    // Named `outbox_pending` here (the flush statuses keep the shorter `outbox`,
+    // which soak-verify reads) because in this status it sits directly beneath
+    // `counts`, and an operator reasonably read `alarm: 0` as "no alarms" while
+    // a device was blacklisted. What the panel can no longer measure is in
+    // `counts` - devices_blacklisted / joints_offline.
+    outbox_pending: gateway.outbox.counts(),
   };
 }
 

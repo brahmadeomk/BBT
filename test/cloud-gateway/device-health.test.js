@@ -211,3 +211,38 @@ describe('device_health - publish cadence', () => {
     assert.equal(outbox.queues.telemetry[0].qos, 1);
   });
 });
+
+describe('publishDeviceHealth status is readable by an operator', () => {
+  // A panel with a blacklisted device showed `outbox: { alarm: 0 }` in the debug
+  // pane and it was read as "no alarms". It is the outbox QUEUE DEPTH: zero is
+  // the healthy reading. The panel's actual trouble is in `counts`.
+  const { publishDeviceHealth } = require('../../src/cloud-gateway/node-red/gateway-handler');
+
+  const gateway = () => {
+    const enqueued = [];
+    return {
+      outbox: { enqueue: (...a) => enqueued.push(a), counts: () => ({ alarm: 0, telemetry: 0 }) },
+      deviceHealth: { publish: () => ({ published: true, reason: 'changed' }) },
+      enqueued,
+    };
+  };
+  const summary = {
+    counts: { blacklisted: 1, probing: 0, stale: 0, offline: 1 },
+    slaves: [{ slave_id: 'sl02', status: 'blacklisted', joints: ['J02'] }],
+    staleJoints: [], offlineJoints: ['J02'],
+  };
+  const doc = { modbus: { buses: [], slaves: [] }, joints: [{ joint_id: 'J02' }] };
+
+  test('queue depth is named for what it is, not left as a bare "alarm" count', () => {
+    const st = publishDeviceHealth(gateway(), { summary, doc });
+    assert.deepEqual(st.outbox_pending, { alarm: 0, telemetry: 0 });
+    assert.ok(!('outbox' in st), 'the ambiguous key must not also be present');
+  });
+
+  test('a disconnected device IS reported - in counts, where it belongs', () => {
+    // device_health is a STATE snapshot; alarms are a separate message type.
+    const st = publishDeviceHealth(gateway(), { summary, doc });
+    assert.equal(st.counts.devices_blacklisted, 1);
+    assert.equal(st.counts.joints_offline, 1);
+  });
+});

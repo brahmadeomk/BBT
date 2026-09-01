@@ -4328,3 +4328,39 @@ because Tier 3 commands are labelled from `joint_id`, not the label - only ZONE
 names reach `bacnetDescription`, where the 40-character cap and the forbidden
 set `- " ' # * , [ ]` apply. `/` is not forbidden. Worth remembering if zones are
 ever named to the same convention.
+
+## 2026-08-31 — "outbox alarm: 0" read as "no alarms"
+
+From the panel. The Publish Device Health debug showed, with a device
+disconnected and blacklisted:
+
+```
+device_health: "unchanged"
+counts: { joints_total: 5, joints_live: 4, joints_stale: 0, joints_offline: 1,
+          devices_blacklisted: 1, devices_probing: 0 }
+buses: array[2]
+outbox: { alarm: 0, telemetry: 0 }
+```
+
+Reported as "when there is a disconnection alarm the alarm count still shows
+zero". Not a fault: `outbox.alarm` is the **queue depth** of the alarm priority
+class — messages waiting to be sent. Zero is the healthy reading; it means every
+alarm message published has already drained to the cloud. A *rising* number is
+the bad case (link down, messages held). The disconnection is reported in the
+same message, one block up: `devices_blacklisted: 1`, `joints_offline: 1`,
+`joints_live: 4`.
+
+The misreading is entirely reasonable — `alarm: 0` sits four lines below a
+`counts` block, so it parses as another count. Renamed to **`outbox_pending`**
+in this status only. The flush statuses keep the shorter `outbox` key, which
+`soak-verify.js` reads to detect alarms still queued when a recording stopped;
+renaming that would break verification of existing soak logs for no gain, and
+the flush status has no adjacent `counts` block to be confused with.
+
+**Not changed: device_health does not carry an alarm count.** It is a state
+snapshot answering "can the panel still measure?" — alarms are a separate
+message type and a separate concern (EC-2: an alarm stream reports transitions,
+so a consumer that starts late cannot know the current blacklist from it). The
+information the operator wanted is already present as `devices_blacklisted` and
+`joints_offline`; adding an alarm tally would duplicate the alarm channel inside
+the health channel and give two places to disagree.
