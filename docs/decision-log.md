@@ -4679,3 +4679,52 @@ three joints without an ambient reference. The resolver degrades correctly —
 half the panel is lost. A second ambient on bus2 would remove the dependency and
 would also give the zone/panel median fallback something to fall back to; worth
 raising at commissioning rather than changing here.
+
+## 2026-09-01 — Channel IS recoverable from the frame, and a live defect found
+
+Asked to explore whether `(slave id, start address, data length)` can identify
+the channel and map it to a sensor data object. Written up in
+`docs/channel-decode-proposal.md`. **Not built** — it is the live measurement
+path.
+
+**Yes, and the frame already carries more than enough.** `compileNanoJob` emits
+one contiguous read per slave, so a 4-channel module's four values all arrive in
+one frame; the decode path simply discards them. The mapping is not the triple,
+though — it is an index into `val` computed from the configuration:
+`val[channel_addrs[k-1] - sa]` for the sparse layout, `val[(k-1)*word_count]`
+for the consecutive one, both exact inverses of `readSpan`. **R15 turns out to
+be precisely the invariant that makes this well-defined** (min == base,
+addresses unique and non-overlapping, length == channels), so no schema change
+is needed. `sa`/`len` earn their place as a **consistency check** rather than a
+key: a mismatch means the Nano is still running a previous job, and the frame
+should be discarded rather than decoded against the new configuration.
+
+### The defect
+`function 18`, immediately upstream of ProcessLogic, is
+`validateValue(msg.payload.val / 100)`. `val` is an **array**. Dividing it
+coerces through `toString()`:
+
+- `[2543]/100` → `"2543"/100` → **25.43** — single channel works *by accident*;
+- `[2543,2601]/100` → `"2543,2601"/100` → `NaN` → **0**.
+
+Verified by direct evaluation. **A multi-channel slave reads 0 °C**, and
+`validateValue` turns the NaN into a plausible zero rather than a fault, so it
+would present as a cold joint rather than an error. The panel is unaffected
+today — all six commissioned slaves are single-channel — but multi-channel
+commissioning has been offered in the Modbus Settings dashboard since
+2026-07-14 and the schema allows eight. The first multi-channel module
+commissioned would read zero.
+
+Same line, smaller: `/100` is hardcoded while the schema carries per-slave
+`registers.temp_scale` (1 / 0.1 / 0.01), so any module that is not
+centi-degrees is already mis-scaled.
+
+### Why it is a proposal and not a commit
+The fan-out (one frame → one message per channel) changes message shape for
+everything downstream, and the weight is the **~40 legacy nodes keyed
+`sensorData[<unit_address>]`** feeding Diagnostics, the alert/SMS nodes and the
+legacy dashboards. They all need finding and changing together. The proposal
+sequences it so steps 1–2 (fix the scaling and array bug; build the decoder
+emitting a single channel-1 reading) are byte-identical on this panel and safe
+live, while steps 3–4 (fan-out, then the `(slave, channel)` joint key) want a
+bench run against real multi-channel hardware — which does not exist here yet.
