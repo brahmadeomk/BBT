@@ -4661,3 +4661,21 @@ channel-collision and uncommissioned-slave warnings.
 **Before deploying, check the live panel for draft-only joints.** If any exist,
 they are being monitored today and will stop being monitored after this — the
 banner will name them, but they should be applied first.
+
+**Live-verified on the Pi (2026-09-01).** The Configuration Status banner reads
+*"✓ 5 joint(s) monitored — configuration applied and in sync"*. The count
+reconciles against the Modbus Settings table: six commissioned slaves (Sensor1,
+AmbientT@101, Sensor2 on bus1; Sensor3-5 on bus2) minus the ambient reference,
+which is not a joint. Green also confirms no channel collisions, no joints on
+uncommissioned slaves, and — the migration risk flagged before deploying —
+nothing saved-but-not-applied, so repointing ProcessLogic stopped monitoring
+nothing.
+
+Noted from the same screen, not a fault: the panel's only ambient (unit 101)
+sits on **bus1**, while three joints are on **bus2**. Ambient resolution is by
+unit address and so is bus-agnostic, but a bus1 Nano failure would leave those
+three joints without an ambient reference. The resolver degrades correctly —
+`source:"none"`, ΔT simply not computed, no false alarm — but ΔT monitoring on
+half the panel is lost. A second ambient on bus2 would remove the dependency and
+would also give the zone/panel median fallback something to fall back to; worth
+raising at commissioning rather than changing here.
