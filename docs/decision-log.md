@@ -5091,6 +5091,8 @@ Heights are `min(50vh, 250px)`-style rather than plain `vh`: the config cards ar
 screen and the card, not the wrapper, would end up scrolling — putting us back
 where we started. The `vh` half keeps it sane on a short screen.
 
-**Not verified visually** — this is CSS and there is no way to render it from
-here. Structural checks only: div balance, wrapper present and bounded, sticky
-present with an opaque background, on all six tables.
+**Not verified visually from here** — this is CSS and there is no way to render
+it in this environment. Structural checks only: div balance, wrapper present and
+bounded, sticky present with an opaque background, on all six tables.
+**Confirmed working on the device (2026-09-01)**, so the `min(vh, px)` heights
+sit correctly inside the 7-8 unit cards and no height tuning was needed.
