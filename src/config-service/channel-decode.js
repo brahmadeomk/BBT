@@ -70,8 +70,17 @@ function toCelsius(values, index, slave, useConfigScale = false) {
   const scale = useConfigScale ? (slave.registers?.temp_scale ?? LEGACY_SCALE) : LEGACY_SCALE;
   const offset = slave.registers?.temp_offset ?? 0;
   if (index < 0 || index + wordCount > values.length) return null;
-  const raw = wordCount === 2 ? (values[index] << 16) | (values[index + 1] & 0xffff) : values[index];
-  if (!Number.isFinite(raw)) return null;
+  // SIGN. Modbus registers arrive as UNSIGNED 16-bit words, so a sub-zero
+  // reading comes back near 65535 and would decode as ~+650 degC - straight past
+  // ProcessLogic's 300 limit, turning a cold ambient into a sensor fault. The
+  // legacy `/100` node handled this as ((65535 - ip) / 100) * -1, which is off by
+  // one count; this is the correct two's-complement conversion. `<<`/`>>` yield a
+  // signed int32, so the two-word case is already signed.
+  const rawWord = values[index];
+  if (!Number.isFinite(rawWord)) return null;
+  const raw = wordCount === 2
+    ? (rawWord << 16) | (values[index + 1] & 0xffff)
+    : (((rawWord & 0xffff) << 16) >> 16);
   // Rounded to milli-degrees. `raw * scale` is not exact in binary floating
   // point - 254 * 0.1 is 25.400000000000002 - and that noise would travel into
   // the historian, the BMS registers and every alarm description. Three decimals

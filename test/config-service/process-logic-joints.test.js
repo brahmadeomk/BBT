@@ -58,53 +58,79 @@ describe('buildProcessLogicJoints - the row shape ProcessLogic consumes', () => 
 });
 
 describe('buildProcessLogicJoints - the R14 ambient chain, which the draft never honoured', () => {
+  // Keys are "<unit>:<channel>": a flat unit address cannot distinguish channel 3
+  // of a 4-channel module used as the zone ambient from channel 1.
   test('panel-wide default applies when nothing overrides it', () => {
     const { joints } = buildProcessLogicJoints(doc());
-    assert.deepEqual(joints.map((j) => j.ambientSlaveID), [101, 101]);
+    assert.deepEqual(joints.map((j) => j.ambientKey), ['101:1', '101:1']);
   });
 
   test('a zone override beats the panel default', () => {
     const d = doc();
     d.zones[0].ambient_sensor = 'sl22';
-    assert.equal(buildProcessLogicJoints(d).joints[0].ambientSlaveID, 102);
+    assert.equal(buildProcessLogicJoints(d).joints[0].ambientKey, '102:1');
   });
 
   test('a joint override beats both', () => {
     const d = doc();
     d.zones[0].ambient_sensor = 'sl22';
     d.joints[0].ambient_sensor = 'sl21';
-    assert.equal(buildProcessLogicJoints(d).joints[0].ambientSlaveID, 101);
+    assert.equal(buildProcessLogicJoints(d).joints[0].ambientKey, '101:1');
   });
 
-  test('an object-form reference resolves the same as a bare slave_id', () => {
+  test('an object-form reference carries its channel into the key', () => {
     const d = doc();
-    d.joints[0].ambient_sensor = { slave_id: 'sl22', channel: 1 };
-    assert.equal(buildProcessLogicJoints(d).joints[0].ambientSlaveID, 102);
+    d.joints[0].ambient_sensor = { slave_id: 'sl22', channel: 3 };
+    assert.equal(buildProcessLogicJoints(d).joints[0].ambientKey, '102:3');
+  });
+
+  test('a bare slave_id means channel 1', () => {
+    const d = doc();
+    d.joints[0].ambient_sensor = 'sl22';
+    assert.equal(buildProcessLogicJoints(d).joints[0].ambientKey, '102:1');
   });
 
   test('no ambient anywhere yields null, not a fabricated reference', () => {
     const d = doc();
     delete d.modbus.ambient_sensor;
-    assert.equal(buildProcessLogicJoints(d).joints[0].ambientSlaveID, null);
+    assert.equal(buildProcessLogicJoints(d).joints[0].ambientKey, null);
   });
 });
 
-describe('buildProcessLogicJoints - what it deliberately cannot fix', () => {
-  test('two joints on one unit address: lowest channel wins, and it says so', () => {
-    // The Nano frame carries no channel, so a multi-channel slave cannot be
-    // split here whatever the config says. Lowest channel matches the old
-    // joints.find() behaviour, so nothing changes silently - but the operator
-    // is told, instead of the reading landing on an arbitrary joint.
+describe('buildProcessLogicJoints - multi-channel slaves (steps 3-4)', () => {
+  test('several joints on ONE slave are all monitored, one row per channel', () => {
+    // Before the fan-out only the lowest channel survived, because the frame
+    // carried no channel. It does now, so this is what the schema always meant.
     const d = doc();
+    d.modbus.slaves[0].channels = 3;
     d.joints = [
       { joint_id: 'JB', slave_id: 'sl01', channel: 2, zone_id: 'z1' },
       { joint_id: 'JA', slave_id: 'sl01', channel: 1, zone_id: 'z1' },
+      { joint_id: 'JC', slave_id: 'sl01', channel: 3, zone_id: 'z1' },
+    ];
+    const { joints, warnings } = buildProcessLogicJoints(d);
+    assert.deepEqual(joints.map((j) => `${j.joint_id}@${j.slaveID}:${j.channel}`),
+      ['JA@1:1', 'JB@1:2', 'JC@1:3']);
+    assert.deepEqual(warnings, [], 'no collision - they are different sensors');
+  });
+
+  test('a duplicate (slave, channel) pair is still refused', () => {
+    // R7 rejects this at apply time, so it can only reach here on a document
+    // that bypassed validation - but it must not silently double-count.
+    const d = doc();
+    d.joints = [
+      { joint_id: 'JA', slave_id: 'sl01', channel: 1, zone_id: 'z1' },
+      { joint_id: 'JDUP', slave_id: 'sl01', channel: 1, zone_id: 'z1' },
     ];
     const { joints, warnings } = buildProcessLogicJoints(d);
     assert.deepEqual(joints.map((j) => j.joint_id), ['JA']);
-    assert.equal(warnings.length, 1);
-    assert.match(warnings[0], /JB and JA share unit address 1/);
-    assert.match(warnings[0], /only JA \(channel 1\) is monitored/);
+    assert.match(warnings[0], /both claim unit 1 channel 1/);
+  });
+
+  test('a single-channel joint defaults to channel 1', () => {
+    const d = doc();
+    delete d.joints[0].channel;
+    assert.equal(buildProcessLogicJoints(d).joints[0].channel, 1);
   });
 
   test('a joint on an uncommissioned slave is dropped, with a warning naming it', () => {

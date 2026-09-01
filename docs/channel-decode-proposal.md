@@ -1,6 +1,11 @@
 # Recovering the channel in the decode path — findings
 
-**Status: steps 1-2 BUILT 2026-09-01 (`src/config-service/channel-decode.js`); steps 3-4 still proposed.** The panel is a test environment and a multi-channel sensor can be created, so the fan-out is no longer blocked on hardware - only on migrating the legacy `sensorData` readers (§5). Asked 2026-09-01: can the
+**Status: BUILT 2026-09-01 (steps 1-4).** `src/config-service/channel-decode.js`
+decodes per channel, "Scale Nano Reading" fans out one message per channel, and
+ProcessLogic matches on `(unit address, channel)`. Still to do: a live run
+against a real multi-channel module (§7).
+
+Asked 2026-09-01: can the
 `(slave id, start address, data length)` combination identify the channel,
 and map it to a sensor data object?
 
@@ -164,7 +169,32 @@ compromise and its warning are then deleted.
 
 ---
 
-## 5. Blast radius — the reason this is a proposal
+## 5. Blast radius — much smaller than estimated
+
+**The original estimate in this section was wrong, and the correction is the
+reason steps 3-4 were a day's work rather than a week's.**
+
+`global.sensorData` is **already keyed per channel**. The legacy `/100` node on
+`modbusMaster_V2` writes:
+
+```js
+sensorData[sID][sAddr] = op;        // [unit address][register address]
+```
+
+and its readers do `global.get('sensorData[1][3]')` — unit 1, register 3. Since
+`channel_addrs` *are* register addresses, that structure already distinguishes
+channels. **None of those ~28 nodes needed changing.**
+
+Only ONE path ever lost the channel: `Data Out → json → Scale Nano Reading →
+ProcessLogic`, which collapsed a whole frame into a single coerced number. The
+fan-out is therefore contained to that node and its consumer.
+
+The lesson for next time: measure the blast radius before quoting it. "~40 nodes
+key `sensorData` by unit address" was inferred from a note in CLAUDE.md rather
+than read out of the flow, and the note was describing a different concern
+(per-bus uniqueness).
+
+## 5a. The original blast-radius estimate (superseded)
 
 The decode path is the **live measurement path**, and the fan-out changes
 message shape for everything downstream.
@@ -192,13 +222,36 @@ Suggested sequencing, so nothing is at risk for long:
 Steps 1–2 are safe on a live panel. Steps 3–4 want a bench run against a
 real multi-channel module before they go near one.
 
-## 6. Open questions
+## 6. What was built
 
-1. **Is there a multi-channel module to test against?** Everything above
-   is derived from the firmware source, the compiler and the schema; none
-   of it has been exercised against real multi-channel hardware.
-2. **`sensorData` shape** — nested by channel, or a `"3:2"` composite key?
-   Nested is cleaner; composite is a smaller diff across ~40 nodes.
-3. **Should a shape-mismatched frame (§2) raise an alarm**, or only warn?
+| Piece | Where |
+|---|---|
+| Per-channel decode, sign handling, scale/offset, stale-job check | `src/config-service/channel-decode.js` |
+| Fan-out, one message per channel | flow node `2390b9df3335021b` "Scale Nano Reading" |
+| Joint rows keyed `(unit, channel)`; ambient keyed `"<unit>:<channel>"` | `src/config-service/process-logic-joints.js` |
+| Joint lookup on `(slaveID, channel)`; ambient state keyed the same | ProcessLogic `39dad91df0c15744` |
+
+Two compatibility choices worth knowing:
+
+- **A message with no `channel` is treated as channel 1.** That covers messages
+  in flight across a deploy and the library-missing fallback path. Every slave
+  on this panel is single-channel, so it is also the correct reading.
+- **The channel-1 ambient keeps its original `AMBIENT_<unit>` id**; only
+  channels 2+ get the `AMBIENT_<unit>_<channel>` form. Historian tags and any
+  alarm already raised against an existing ambient survive untouched.
+
+`sensorData` was left exactly as it is — it was already per-channel, so the
+"nested vs composite key" question in the original draft was moot.
+
+## 7. Still open
+
+1. **A live run against a real multi-channel module.** Everything is derived
+   from the firmware source, the compiler and the schema, and verified in
+   simulation end to end (sparse addresses 100/104/108, three joints on one
+   module, including a sub-zero channel). It has never met real hardware.
+   When commissioning a test module, prefer **non-consecutive addresses** — a
+   consecutive layout would still decode correctly even if the indexing were
+   subtly wrong.
+2. **Should a shape-mismatched frame (§2) raise an alarm**, or only warn?
    It means the Nano is running a stale job, which the resend logic is
    supposed to make impossible — so it firing at all is a real signal.

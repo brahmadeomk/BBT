@@ -230,6 +230,36 @@ describe('Panel & Uplink tile on Device Health (2026-09-01)', () => {
   });
 });
 
+describe('ProcessLogic matches on (unit address, channel) (2026-09-01)', () => {
+  const pl = () => JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'))
+    .find((n) => n.id === '39dad91df0c15744').func;
+
+  test('the joint lookup uses the channel, not the unit address alone', () => {
+    assert.match(pl(), /j\.slaveID === sensorID && \(j\.channel \?\? 1\) === sensorChannel/);
+  });
+
+  test('a message with no channel is treated as channel 1', () => {
+    // Pre-fan-out messages, and the library-missing fallback. Every slave on
+    // this panel is single-channel, so this is the correct reading.
+    assert.match(pl(), /Number\.isInteger\(sensor\.channel\) \? sensor\.channel : 1/);
+  });
+
+  test('ambient state is keyed by (unit, channel) too', () => {
+    // A flat unit address cannot tell channel 3 of a 4-channel module used as
+    // the zone ambient from channel 1.
+    const body = pl();
+    assert.match(body, /ambientState\[sensorKeyCh\]/);
+    assert.match(body, /ambientSet\.has\(sensorKeyCh\)/);
+    assert.match(body, /ambKeyOf/, 'and legacy draft rows still resolve');
+  });
+
+  test('the channel-1 ambient keeps its original AMBIENT_<unit> id', () => {
+    // Historian tags and any alarm already raised against an existing ambient
+    // must survive the change.
+    assert.match(pl(), /sensorChannel === 1 \? `AMBIENT_\$\{sensorID\}`/);
+  });
+});
+
 describe('alarms raised against the applied configuration (2026-09-01)', () => {
   // ProcessLogic read the legacy draft while the alarm sweep cleared against the
   // applied document. Two sources of truth for one lifecycle: it let a joint id
@@ -304,7 +334,22 @@ describe('Nano frame scaling goes through the decoder (2026-09-01)', () => {
     // accident, [2543,2601] became NaN -> 0, so a multi-channel slave read 0 degC
     // and looked like a cold joint rather than a fault.
     assert.ok(!/payload\.val\s*\/\s*100/.test(code()), 'must not divide the array again');
-    assert.match(code(), /channelDecode\.decodeFirstChannel\(/);
+    assert.match(code(), /channelDecode\.decodeFrame\(/);
+  });
+
+  test('it fans out one message per channel', () => {
+    // The legacy sensorData chain was ALREADY per-channel
+    // (sensorData[unit][register_addr]); only this path collapsed a frame to a
+    // single value, which is why the fan-out touches nothing else.
+    assert.match(code(), /r\.readings\.map\(/);
+    assert.match(code(), /channel: rd\.channel/);
+    assert.match(code(), /return \[out\]/, 'one output, many messages');
+  });
+
+  test('a channel the frame did not carry is a fault, never a zero', () => {
+    // Reporting 0 would read as a COLD JOINT - the exact failure this whole
+    // change exists to remove.
+    assert.match(code(), /st: Number\.isFinite\(rd\.val\) \? rd\.st : 'err'/);
   });
 
   test('it still scales when the library is missing, rather than going blind', () => {
@@ -321,8 +366,8 @@ describe('Nano frame scaling goes through the decoder (2026-09-01)', () => {
     assert.match(fn(), /decodeDocTs/);
   });
 
-  test('a multi-channel slave says so, rather than silently using channel 1', () => {
-    assert.match(fn(), /only ch1 used/);
+  test('the node status shows every channel it decoded', () => {
+    assert.match(fn(), /payload\.channel\}=\$\{m\.payload\.val\}/);
   });
 });
 

@@ -4825,3 +4825,53 @@ hardware actually does instead of the migration's guess; the warning then stops
 and the status goes green. Safe on a live panel — `compileNanoJob` builds the
 Nano job from `unit_address`, `temp_base_addr` and `readSpan` only, so
 `temp_scale` is not in the compiled job and changing it triggers no resend.
+
+## 2026-09-01 — Channel fan-out built (steps 3-4)
+
+Steps 3 and 4 of `docs/channel-decode-proposal.md`: "Scale Nano Reading" now fans
+a frame out into one message per channel, `buildProcessLogicJoints` keys rows by
+`(unit address, channel)`, and ProcessLogic matches on both. The "lowest channel
+wins" compromise and its warning are deleted.
+
+### My blast-radius estimate was wrong, and that is the headline
+I said this needed ~40 legacy nodes keyed `sensorData[<unit_address>]` migrated
+together. Reading them instead of inferring: **`sensorData` is already keyed per
+channel.** The legacy `/100` node writes `sensorData[sID][sAddr]` — unit address,
+then *register* address — and readers do `global.get('sensorData[1][3]')`. Since
+`channel_addrs` are register addresses, that structure already distinguishes
+channels. **None of those 28 nodes needed changing.**
+
+Exactly one path ever lost the channel: `Data Out → json → Scale Nano Reading →
+ProcessLogic`, which collapsed a frame into a single coerced number. So the
+fan-out is contained to that node and its consumer, and the "nested vs composite
+`sensorData` key" question was moot.
+
+The estimate came from a note in CLAUDE.md that was describing a *different*
+concern (per-bus address uniqueness), taken at face value rather than checked
+against the flow. Measure before quoting.
+
+### A second bug of mine, found the same way
+The legacy node handles sign: `ip < 32767 ? ip/100 : ((65535-ip)/100)*-1`. My
+decoder did not. Modbus registers arrive as **unsigned** 16-bit words, so a
+sub-zero reading comes back near 65535 and decoded as **~+650 °C** — straight
+past ProcessLogic's 300 limit, turning a cold ambient into a sensor fault. Now
+proper two's-complement (`(w & 0xffff) << 16 >> 16`), which also fixes the
+legacy's off-by-one: raw 65136 is −4.00 °C, not −3.99.
+
+### Compatibility
+- A message with **no `channel`** is read as channel 1 — messages in flight
+  across a deploy, and the library-missing fallback path. Every slave on this
+  panel is single-channel, so it is also the correct reading.
+- The **channel-1 ambient keeps its original `AMBIENT_<unit>` id**; only
+  channels 2+ get `AMBIENT_<unit>_<channel>`. Historian tags and any alarm
+  already raised against an existing ambient are untouched.
+- A channel the frame did not carry is emitted as `st:'err'`, **not** as `0` —
+  a zero would read as a cold joint, which is the failure this whole change
+  exists to remove.
+
+### Verified in simulation, not on hardware
+End to end with a 3-channel module at **sparse** addresses 100/104/108: compiled
+span 9 registers, frame of 9 values, three joints matched to their channels, one
+of them sub-zero, no warnings. Sparse deliberately — a consecutive layout would
+decode correctly even if the indexing were subtly wrong. **It has never met a
+real multi-channel module**, which is the remaining gate.

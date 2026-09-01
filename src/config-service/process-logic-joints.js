@@ -17,15 +17,16 @@
  *  - and anything raised from the draft but absent from the applied doc was
  *    immediately swept, producing raise/clear churn.
  *
- * WHAT THIS DOES NOT FIX: channel disambiguation. ProcessLogic's input is the
- * raw Nano frame `{t:'r', id:<unit address>, sa, len, val, st}` — there is no
- * channel in the stream at all. A multi-channel slave therefore cannot be split
- * across joints here no matter what the configuration says, so rows are keyed by
- * **unit address**, exactly as the draft was. Where two joints share a unit
- * address the lowest channel wins (matching the old `joints.find(...)`, so no
- * behaviour changes) and a warning is emitted for the operator rather than the
- * reading being silently attributed to an arbitrary joint. Fixing it properly
- * means carrying the channel through the decode path — a separate change.
+ * CHANNELS (2026-09-01, steps 3-4). "Scale Nano Reading" now fans a frame out
+ * into one message per channel, so rows are keyed by **(unit address, channel)**
+ * — what the schema modelled all along, and what R7 exists to keep unique. The
+ * earlier "lowest channel wins" collapse and its warning are gone.
+ *
+ * Ambient references are keyed the same way, as `"<unit>:<channel>"`. A flat
+ * unit address could not distinguish channel 3 of a 4-channel module used as the
+ * zone ambient, and `resolveAmbient` stringifies its keys anyway, so a composite
+ * costs nothing. Legacy draft rows, which are single-channel by construction,
+ * resolve to `":1"`.
  */
 
 /** Legacy draft rows use unit addresses; the schema uses slave_id. */
@@ -39,14 +40,17 @@ function unitAddressOf(doc, slaveId) {
  * The draft only ever had a flat per-joint `ambientSlaveID`, so reading the
  * applied document also makes the zone and panel levels actually take effect.
  */
-function resolveAmbientUnit(doc, joint) {
+function resolveAmbientKey(doc, joint) {
   const zone = (doc?.zones ?? []).find((z) => z.zone_id === joint.zone_id);
   const ref = joint.ambient_sensor ?? zone?.ambient_sensor ?? doc?.modbus?.ambient_sensor ?? null;
   if (!ref) return null;
-  // The reference may be a bare slave_id or {slave_id, channel}; only the unit
-  // address survives into the reading stream either way.
+  // A reference may be a bare slave_id or {slave_id, channel}. Both halves matter
+  // now that a module can expose several channels - channel 3 of a 4-channel
+  // module is a different sensor from channel 1.
   const slaveId = typeof ref === 'string' ? ref : ref.slave_id;
-  return slaveId ? unitAddressOf(doc, slaveId) : null;
+  const channel = typeof ref === 'string' ? 1 : (ref.channel ?? 1);
+  const unit = slaveId ? unitAddressOf(doc, slaveId) : null;
+  return unit == null ? null : `${unit}:${channel}`;
 }
 
 /**
@@ -65,10 +69,8 @@ function buildProcessLogicJoints(doc) {
   }
 
   const zoneName = new Map((doc?.zones ?? []).map((z) => [z.zone_id, z.name]));
-  const byUnit = new Map();
+  const byChannel = new Map();
 
-  // Lowest channel first, so the winner on a collision is deterministic and
-  // matches what `joints.find()` returned before this change.
   const ordered = joints
     .filter((j) => j.enabled !== false)
     .slice()
@@ -80,27 +82,30 @@ function buildProcessLogicJoints(doc) {
       warnings.push(`${j.joint_id}: slave ${j.slave_id} is not commissioned - not monitored`);
       continue;
     }
-    if (byUnit.has(unit)) {
-      const held = byUnit.get(unit);
+    const channel = j.channel ?? 1;
+    const key = `${unit}:${channel}`;
+    // R7 already rejects a duplicate (slave, channel) pair at apply time, so
+    // this can only fire on a document that bypassed validation.
+    if (byChannel.has(key)) {
       warnings.push(
-        `${j.joint_id} and ${held.joint_id} share unit address ${unit}; ` +
-        `readings carry no channel, so only ${held.joint_id} (channel ${held._channel}) is monitored`
+        `${j.joint_id} and ${byChannel.get(key).joint_id} both claim unit ${unit} channel ${channel}` +
+        ` - only ${byChannel.get(key).joint_id} is monitored`
       );
       continue;
     }
-    byUnit.set(unit, {
+    byChannel.set(key, {
       joint_id: j.joint_id,
       joint_name: j.label ?? j.joint_id,
       slaveID: unit,
+      channel,
       zone_id: j.zone_id ?? null,
       zone_name: zoneName.get(j.zone_id) ?? 'Unknown',
-      ambientSlaveID: resolveAmbientUnit(doc, j),
-      _channel: j.channel ?? 1,
+      ambientKey: resolveAmbientKey(doc, j),
     });
   }
 
   return {
-    joints: [...byUnit.values()],
+    joints: [...byChannel.values()],
     warnings,
     sourceVersion: doc?.config_version ?? doc?.version ?? null,
   };
