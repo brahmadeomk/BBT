@@ -229,3 +229,64 @@ describe('Panel & Uplink tile on Device Health (2026-09-01)', () => {
     }
   });
 });
+
+describe('alarms raised against the applied configuration (2026-09-01)', () => {
+  // ProcessLogic read the legacy draft while the alarm sweep cleared against the
+  // applied document. Two sources of truth for one lifecycle: it let a joint id
+  // the schema would reject raise alarms, and produced raise/clear churn.
+  const flows = () => JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+  const byId = (id) => flows().find((n) => n.id === id);
+
+  test('ProcessLogic reads the applied list first', () => {
+    const fn = byId('39dad91df0c15744').func;
+    assert.match(fn, /APPLIED_JOINTS_KEY = "busduct_applied_joints"/);
+    assert.match(fn, /joints = global\.get\(APPLIED_JOINTS_KEY, "default"\)/);
+  });
+
+  test('...but falls back to the draft rather than monitoring nothing', () => {
+    // Fire-safety monitor: it must never stop watching joints because a global
+    // has not been populated yet (at boot, or if the library failed to load).
+    const fn = byId('39dad91df0c15744').func;
+    const block = fn.slice(fn.indexOf('APPLIED_JOINTS_KEY, "default"'));
+    assert.match(block.slice(0, 300), /global\.get\(JOINT_MASTER_KEY\)/,
+      'the draft must remain a fallback');
+  });
+
+  test('ProcessLogic never reads the config store itself', () => {
+    // It runs on every reading; a file read per sample would be a real
+    // regression. The publisher node does the read on a slow tick.
+    const fn = byId('39dad91df0c15744').func;
+    assert.ok(!/readDomain|createStore/.test(fn), 'the hot path must stay in memory');
+  });
+
+  test('the publisher polls, so no apply route can bypass it', () => {
+    // Local joint apply, local Modbus apply, a remote push and a hand-edited
+    // file all have to converge; hooking apply sites can miss one.
+    const inj = byId('c0nf1gd21ft00001');
+    assert.equal(inj.type, 'inject');
+    assert.equal(inj.repeat, '10');
+    assert.equal(inj.once, true, 'and publishes at boot');
+    const fn = byId('c0nf1gd21ft00002').func;
+    assert.match(fn, /readDomain\('modbus_joints'\)/);
+    assert.match(fn, /global\.set\('busduct_applied_joints'/);
+  });
+
+  test('an unreadable config keeps the previous list rather than blanking it', () => {
+    const fn = byId('c0nf1gd21ft00002').func;
+    assert.match(fn, /if \(built\.joints\) \{[\s\S]*?global\.set\('busduct_applied_joints'/,
+      'the publish must be guarded');
+  });
+
+  test('the unapplied-joints banner exists and is fed by the same tick', () => {
+    // The behaviour change - an unapplied row is no longer monitored - must
+    // announce itself rather than being discovered when a joint turns out to
+    // have been unwatched.
+    assert.deepEqual(byId('c0nf1gd21ft00002').wires, [['c0nf1gd21ft00011']]);
+    const group = byId('c0nf1gd21ft00010');
+    assert.equal(group.tab, 'tab_cfg', 'on Joint Config, where the operator edits');
+    const fmt = byId('c0nf1gd21ft00011').format;
+    assert.match(fmt, /NOT APPLIED/);
+    assert.match(fmt, /not being monitored/);
+    assert.match(fmt, /msg\.payload\.warnings/, 'channel collisions surface here too');
+  });
+});

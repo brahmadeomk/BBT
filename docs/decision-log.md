@@ -4598,3 +4598,66 @@ the wire does (`edge_utc`); a timezone belongs at the display edge and nowhere
 else. `summarizeSystemHealth` stays timezone-free and so stays portable — a site
 outside IST needs one string changed in one template, not a change to the
 library.
+
+## 2026-09-01 — ProcessLogic repointed to the applied configuration
+
+User decision, after the asymmetry surfaced twice on 2026-08-31: alarms are now
+raised against the same document they are swept against. ProcessLogic reads
+`global.busduct_applied_joints` instead of the legacy `joint_master_zone_A`
+draft.
+
+### Why the draft was wrong to raise from
+- It is **not schema-validated**. `J1_2143124` — ten characters against a
+  six-character pattern — was raising alarms on the live panel.
+- A row **saved but never applied** was monitored anyway, silently, with nothing
+  telling the operator their edit was not in service.
+- Anything raised from the draft but absent from the applied doc was immediately
+  swept, producing raise/clear churn.
+- It carries a flat per-joint `ambientSlaveID`, so the **R14 override chain**
+  (joint → zone → panel) never took effect. Reading the applied document fixes
+  that as a side effect — a panel with per-zone ambients now behaves as
+  configured.
+
+### Three implementation decisions
+**Polling, not apply-hooks.** A 10 s inject reads the store and republishes.
+Local joint apply, local Modbus apply, a remote config push and a hand-edited
+file all have to converge, and hooking each apply site can miss one — this
+cannot. The read is the same one the Device Health tab already does every 5 s,
+so the cost is established. **ProcessLogic itself never touches the store**: it
+runs on every reading (~0.5 s per device), and a file read per sample would have
+been a real regression. It still reads a plain global, just a different one.
+
+**The draft stays as a fail-safe fallback.** If the applied list has not been
+published yet — at boot, or if the library failed to load — ProcessLogic uses
+the draft rather than monitoring nothing. This is a fire-safety monitor; it must
+never stop watching joints because a global is unpopulated. The fallback is
+visible on the banner rather than silent.
+
+**Refuses to publish an empty list.** `buildProcessLogicJoints` returns
+`joints: null` for an unreadable or empty document and the publisher keeps
+whatever was there. Publishing `[]` would have stopped monitoring the whole
+panel — the same rule the alarm sweep already follows.
+
+### What this does NOT fix
+**Channel disambiguation.** ProcessLogic's input is the raw Nano frame
+`{t:'r', id:<unit address>, sa, len, val, st}` — there is no channel in the
+stream at all, so a multi-channel slave cannot be split across joints here
+whatever the configuration says. Rows stay keyed by unit address, exactly as the
+draft was. Where two joints share a unit address the **lowest channel wins**
+(matching the old `joints.find()`, so nothing changes silently) and a warning is
+surfaced to the operator rather than the reading landing on an arbitrary joint.
+Fixing it properly means carrying the channel through the decode path — a
+separate change, and one that touches the ~40 legacy nodes keyed by
+`sensorData[<unit_address>]`.
+
+### The safeguard
+A **"Configuration Status"** banner at the top of the Joint Config tab. The
+behaviour change is that a saved-but-not-applied joint is no longer monitored;
+before this it was, accidentally. That must announce itself — *"2 joint(s) saved
+but NOT APPLIED — these are not being monitored: J07, J08"* — rather than being
+discovered when a joint turns out to have been unwatched. It also carries the
+channel-collision and uncommissioned-slave warnings.
+
+**Before deploying, check the live panel for draft-only joints.** If any exist,
+they are being monitored today and will stop being monitored after this — the
+banner will name them, but they should be applied first.
