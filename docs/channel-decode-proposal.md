@@ -1,6 +1,6 @@
 # Recovering the channel in the decode path — findings
 
-**Status: EXPLORATION + PROPOSAL, not built.** Asked 2026-09-01: can the
+**Status: steps 1-2 BUILT 2026-09-01 (`src/config-service/channel-decode.js`); steps 3-4 still proposed.** The panel is a test environment and a multi-channel sensor can be created, so the fan-out is no longer blocked on hardware - only on migrating the legacy `sensorData` readers (§5). Asked 2026-09-01: can the
 `(slave id, start address, data length)` combination identify the channel,
 and map it to a sensor data object?
 

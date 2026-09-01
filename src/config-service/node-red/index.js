@@ -17,6 +17,7 @@ const { planRecovery } = require('../bus-recovery');
 const alarmEmail = require('../../alarms/email-subject');
 const alarmSweep = require('../../alarms/config-sweep');
 const processLogicJoints = require('../process-logic-joints');
+const channelDecode = require('../channel-decode');
 // Wi-Fi selection for the touchscreen. Exposed on THIS existing global rather
 // than a new functionGlobalContext entry so enabling it needs no settings.js
 // edit on deployed panels - same reasoning as power-health on the gateway.
@@ -43,4 +44,4 @@ function createStore(root = DEFAULT_ROOT) {
   return new ConfigStore({ root, validators: { modbus_joints: validateModbusJoints, alarms: validateAlarms, integration: validateIntegration } });
 }
 
-module.exports = { createStore, handleConfigManagerMessage, handleJointMasterMessage, handleModbusSettingsMessage, writeLegacyModbusGlobals, deriveLegacyBridge, appendLegacyAudit, processRemoteConfig, buildLegacyDrafts, buildNanoJobMessage, blacklist, resolveAmbient, planRecovery, alarmEmail, alarmSweep, processLogicJoints, wifi };
+module.exports = { createStore, handleConfigManagerMessage, handleJointMasterMessage, handleModbusSettingsMessage, writeLegacyModbusGlobals, deriveLegacyBridge, appendLegacyAudit, processRemoteConfig, buildLegacyDrafts, buildNanoJobMessage, blacklist, resolveAmbient, planRecovery, alarmEmail, alarmSweep, processLogicJoints, channelDecode, wifi };

@@ -290,3 +290,38 @@ describe('alarms raised against the applied configuration (2026-09-01)', () => {
     assert.match(fmt, /msg\.payload\.warnings/, 'channel collisions surface here too');
   });
 });
+
+describe('Nano frame scaling goes through the decoder (2026-09-01)', () => {
+  const fn = () => JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'))
+    .find((n) => n.id === '2390b9df3335021b').func;
+
+  // Check CODE, not mentions - the node's comment explains the old expression,
+  // and matching that instead of the call is a mistake already made twice today.
+  const code = () => fn().split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+
+  test('the array-coercion expression is gone', () => {
+    // `msg.payload.val / 100` where val is an array: [2543] coerced to 25.43 by
+    // accident, [2543,2601] became NaN -> 0, so a multi-channel slave read 0 degC
+    // and looked like a cold joint rather than a fault.
+    assert.ok(!/payload\.val\s*\/\s*100/.test(code()), 'must not divide the array again');
+    assert.match(code(), /channelDecode\.decodeFirstChannel\(/);
+  });
+
+  test('it still scales when the library is missing, rather than going blind', () => {
+    const body = code();
+    const guard = body.slice(0, body.indexOf('const joints'));
+    assert.match(guard, /val\[0\]/, 'legacy fallback takes the first element, not the array');
+    assert.match(guard, /\/ 100/, 'on the legacy scale');
+  });
+
+  test('the applied doc is cached, not read per frame', () => {
+    // This node runs on every Nano frame; a store read per frame would be a
+    // real regression on a 110-device panel.
+    assert.match(fn(), /flow\.get\('decodeDoc'\)/);
+    assert.match(fn(), /decodeDocTs/);
+  });
+
+  test('a multi-channel slave says so, rather than silently using channel 1', () => {
+    assert.match(fn(), /only ch1 used/);
+  });
+});

@@ -4728,3 +4728,45 @@ sequences it so steps 1–2 (fix the scaling and array bug; build the decoder
 emitting a single channel-1 reading) are byte-identical on this panel and safe
 live, while steps 3–4 (fan-out, then the `(slave, channel)` joint key) want a
 bench run against real multi-channel hardware — which does not exist here yet.
+
+## 2026-09-01 — Channel decoder built (steps 1-2); fan-out still pending
+
+Panel confirmed to be a **test environment**, with a multi-channel sensor
+creatable on request — so the fan-out is no longer blocked on hardware, only on
+migrating the legacy `sensorData` readers. Steps 1-2 of the proposal are built
+now because they need no hardware and close the 0 °C trap.
+
+`src/config-service/channel-decode.js` (`decodeFrame`, on
+`busductConfigService.channelDecode`) decodes a Nano read frame into per-channel
+readings: slave looked up by unit address in the applied document, channel
+recovered as an index into `val` (`channel_addrs[k-1] - sa`, or
+`(k-1)*word_count`), scaled by that slave's own `temp_scale`/`temp_offset`.
+`function 18` — now **"Scale Nano Reading"** — is thin over it and still emits a
+single channel-1 reading, so behaviour on this all-single-channel panel is
+unchanged except that the scale is no longer hardcoded.
+
+### Three things worth recording
+**Rounded to milli-degrees.** `raw * scale` is not exact in binary floating
+point: `254 * 0.1` is `25.400000000000002`. The old `/100` happened to avoid it
+because dividing by an integer is clean. That noise would have travelled into
+the historian, the BMS registers (×10 int16) and every alarm description, so the
+result is rounded to three decimals — far finer than any sensor here resolves.
+
+**Stale-job detection.** A frame whose `sa`/`len` disagree with the applied
+config was produced by a *previous* job — the window between an apply and the
+resend landing. It now warns rather than being silently decoded against the new
+configuration. This is what the `(id, sa, len)` triple is actually good for; the
+channel itself comes from the config, not the triple.
+
+**Fail-safe twice over.** An uncommissioned unit still yields its first value on
+the legacy scale rather than being dropped, and the flow node falls back to
+`val[0] / 100` if the library fails to load. A monitoring panel must not go
+blind because a config has not converged or a `require` failed.
+
+A multi-channel slave now shows *"unit N: 4 channels, only ch1 used"* on the
+node status — the other channels are decoded correctly by the library but not
+yet delivered anywhere. That stays visible until step 3.
+
+**Test note:** the first flow assertion matched the node's own explanatory
+comment rather than its code — the third time that mistake has been made today.
+The check now strips comment lines first.
