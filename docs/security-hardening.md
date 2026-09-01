@@ -147,6 +147,14 @@ it with `httpNodeMiddleware`/dashboard auth if the LAN is untrusted.
 - **Operational certs/keys** (`/etc/busduct/certs/*`) are written on-device
   by provisioning with the private key `0600`; `*.pem`/`*.key`/`*.crt`
   are git-ignored.
+- **Repo access on the Pi** is a **read-only SSH deploy key**, scoped to
+  this one repository, one key per panel — never a Personal Access Token
+  in the remote URL (plaintext in `.git/config` and in shell history) and
+  never a copy of someone's personal SSH key (which would give a panel in
+  a plant room that person's full GitHub access). Read-only also enforces
+  *"never modify the production Pi directly"* at the credential layer: the
+  panel cannot push even by accident. Setup, host-key pinning and
+  revocation: **`docs/pi-deployment.md` §1a**.
 - **Verify before every commit** that no secret slipped in:
   ```bash
   git grep -nE 'password|passwd|secret|token|BEGIN (RSA |EC )?PRIVATE KEY' -- flows/ src/ | grep -v env.get
@@ -160,3 +168,4 @@ it with `httpNodeMiddleware`/dashboard auth if the LAN is untrusted.
 - [ ] `/usr/local/sbin/busduct-wifi` is installed root-owned `0755`; the Wi-Fi screen scans and joins; the passphrase appears in no log.
 - [ ] Editor at `:1880` prompts for login (or is loopback-bound/firewalled).
 - [ ] `flows_*_cred.json`, `settings.js`, `*.key`/`*.pem`, `/etc/busduct/nodered.env` are all untracked.
+- [ ] `git remote -v` on the Pi shows the SSH alias, not an HTTPS URL with a token in it; `ssh -T github-busduct` greets the **repository** (deploy key), not a username; `git push` from the Pi is refused as read-only.

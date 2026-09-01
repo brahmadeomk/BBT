@@ -16,16 +16,163 @@ branch), so clone that branch explicitly:
 
 ```bash
 cd ~
-git clone -b claude/code-handoff-strategy-y551k2 https://github.com/brahmadeomk/BBT.git busduct-cloud-edge
+git clone -b claude/code-handoff-strategy-y551k2 github-busduct:brahmadeomk/BBT.git busduct-cloud-edge
 cd busduct-cloud-edge
 ```
 
-If the repo is private, `git clone` over HTTPS will prompt for
-credentials - use a GitHub Personal Access Token as the password (GitHub
-no longer accepts account passwords for this). Generate one at
-https://github.com/settings/tokens with at least `repo` read access, or
-set up an SSH deploy key instead if you prefer `git@github.com:...`
-URLs.
+`github-busduct:` is the SSH alias set up in **§1a — do that first**, on a
+new Pi, before this clone. (An HTTPS URL works too, but see below.)
+
+**Use an SSH deploy key, not a Personal Access Token and not your own
+SSH key.** Full procedure: **§1a** below. In short: a PAT in a remote URL
+is stored in plaintext in `.git/config` and lands in shell history, and
+your personal SSH key would give a panel in a plant room the same GitHub
+access you have. A deploy key is scoped to **one repository**, can be
+**read-only**, and is revoked on its own without touching anything else.
+
+## 1a. Secure pull: a read-only SSH deploy key
+
+The panel only ever *pulls*. Making the credential read-only enforces the
+standing rule (*"Never modify the production Pi directly - changes flow
+repo → tested → deployed"*) at the credential layer: the Pi **cannot**
+push, even by accident, even if someone commits on it.
+
+Do all of this on the Pi, as the user that owns the clone (`pi`).
+
+### 1. Generate a key for THIS panel
+
+```bash
+ssh-keygen -t ed25519 -N "" -C "busduct deploy - panel p01" -f ~/.ssh/busduct_deploy
+chmod 700 ~/.ssh && chmod 600 ~/.ssh/busduct_deploy
+```
+
+**One key per panel**, never a shared fleet key — a stolen or
+decommissioned panel is then revoked on its own, without a site visit to
+every other panel to re-key them.
+
+**No passphrase** (`-N ""`) is deliberate: the pull is run by a
+technician over SSH and there is nobody to type a passphrase at boot. The
+protection is that the key is read-only, scoped to one repo, and `0600`
+on a device that already holds AWS operational certificates under the
+same filesystem permissions. A passphrase you have to store on the same
+disk to be usable is not protection.
+
+### 2. Register it on the repository (not on your account)
+
+```bash
+cat ~/.ssh/busduct_deploy.pub
+```
+
+GitHub → the **repository** → **Settings → Deploy keys → Add deploy key**.
+Title it after the panel (`panel-p01-pi`), paste the public key, and
+**leave "Allow write access" UNCHECKED**.
+
+> Deploy keys are **Settings → Deploy keys on the repo**, not
+> **Settings → SSH keys on your account**. The account page is the one
+> that grants everything you can reach; that is the mistake to avoid.
+>
+> A given key can be a deploy key on **only one repository** in all of
+> GitHub. If you ever add a second repo, generate a second key.
+
+### 3. Pin GitHub's host key before the first connection
+
+Otherwise the first `git pull` asks *"Are you sure you want to continue
+connecting?"* and whoever is at the keyboard says yes to whatever
+answered — which is exactly the moment a man-in-the-middle wants. Fetch
+the real host keys over TLS instead of trusting the prompt:
+
+```bash
+curl -sS https://api.github.com/meta \
+  | python3 -c "import json,sys; [print('github.com', k) for k in json.load(sys.stdin)['ssh_keys']]" \
+  >> ~/.ssh/known_hosts
+sort -u -o ~/.ssh/known_hosts ~/.ssh/known_hosts
+chmod 644 ~/.ssh/known_hosts
+```
+
+`api.github.com` is authenticated by TLS, so this is a trustworthy
+channel for the keys — unlike the interactive prompt, which is trust-on-
+first-use.
+
+### 4. Tell SSH to use that key for GitHub
+
+```bash
+cat >> ~/.ssh/config <<'EOF'
+
+Host github-busduct
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/busduct_deploy
+  IdentitiesOnly yes
+EOF
+chmod 600 ~/.ssh/config
+```
+
+**`IdentitiesOnly yes` is not optional.** Without it SSH offers every key
+it can find, GitHub authenticates as whichever one it recognises first,
+and you silently end up connected as something other than the deploy key
+— including, on a machine that has one, your personal key with write
+access. That is the failure that quietly undoes this whole section.
+
+### 5. Verify, then switch the remote
+
+```bash
+ssh -T github-busduct
+```
+
+Expect: `Hi brahmadeomk/BBT! You've successfully authenticated, but
+GitHub does not provide shell access.` The repo name in that greeting
+confirms you are on the **deploy key**; a greeting with your *username*
+means SSH picked your personal key and step 4 is wrong.
+
+```bash
+cd ~/busduct-cloud-edge
+git remote set-url origin github-busduct:brahmadeomk/BBT.git
+git remote -v          # both lines must show github-busduct:
+git pull
+```
+
+For a fresh clone, use the same alias:
+
+```bash
+git clone -b claude/code-handoff-strategy-y551k2 \
+    github-busduct:brahmadeomk/BBT.git busduct-cloud-edge
+```
+
+### 6. Confirm it is genuinely read-only
+
+Worth doing once, so you know the guarantee is real rather than assumed:
+
+```bash
+git push origin HEAD          # must fail
+```
+
+Expect `ERROR: The key you've loaded ... has read-only access`. If it
+*succeeds*, the "Allow write access" box was ticked — remove the key on
+GitHub and add it again unticked.
+
+### Revoking a panel
+
+GitHub → repo → **Settings → Deploy keys → Delete** the panel's key. That
+takes effect immediately and affects nothing else. Do this when a panel is
+decommissioned, when an SD card is replaced or discarded, or if anyone
+outside the team has had physical access to the Pi — the private key is
+readable to anyone who can mount that card.
+
+### What not to do
+
+- **Don't** put a PAT in the remote URL
+  (`https://ghp_xxx@github.com/...`). It is stored in plaintext in
+  `.git/config`, appears in `git remote -v` output, and lands in shell
+  history and any screenshot of the terminal.
+- **Don't** copy your own `~/.ssh/id_ed25519` to the Pi. A panel in a
+  plant room would then hold a credential for every repository you can
+  reach, and revoking it locks *you* out too.
+- **Don't** reuse one deploy key across panels. Revocation stops being
+  possible without re-keying the fleet.
+- **Don't** run `git pull` as root. The clone is owned by `pi`; a
+  root-owned object dropped into `.git/` breaks later pulls in ways that
+  are annoying to unpick.
+
 
 Install the Node.js dependencies (`ajv`/`ajv-formats` - pure JS, no
 native builds needed, so this works fine on the Pi's ARM CPU):
@@ -41,7 +188,7 @@ machine before wiring it into Node-RED:
 npm run ci
 ```
 
-You should see all tests pass (123 at last count) and the
+You should see all tests pass (711 at last count) and the
 cloud-agnostic check print OK.
 
 ## 2. Create the config store directory
