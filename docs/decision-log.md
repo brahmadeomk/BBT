@@ -4434,3 +4434,45 @@ AP the panel associated with — but noted in both the module docblock and Part 
 as site information deserving the same care as the rest of the telemetry.
 
 Added optional fields throughout, so the wire contract stays `v: 1`.
+
+## 2026-09-01 — "Panel & Uplink" tile on the Device Health dashboard
+
+Follow-up to the health work above. The heartbeat carries uplink identity and Pi
+health, but hourly *and only when the link is up* — which is exactly the wrong
+availability for the question it answers. A technician standing at the panel
+wondering why the uplink is marginal cannot wait an hour, and if the link is
+already down the message never leaves at all.
+
+`summarizeSystemHealth()` (pure, in `pi-health.js`, exposed on
+`busductCloudGateway`) turns a snapshot into a display object: SSID or operator
+as the headline, a colour-coded good/fair/poor band, then CPU / RAM / disk /
+uptime / load, then a warning list. Thresholds are named constants with their
+reasoning attached — Wi-Fi ≥ −67 good and < −75 poor (below that retries
+dominate), cellular ≥ 50 % / 25 %, disk ≥ 85 % warn and ≥ 92 % critical (InfluxDB
+compaction needs headroom), CPU ≥ 70 °C (a Pi throttles at 80).
+
+### The design decision that mattered
+**No new collector.** The obvious implementation is a new 30 s tick calling
+`collectPiHealth()`, but the Device Health tab *already* runs a 30 s "Pi Power
+Health" node that calls exactly that. A second one would have re-spawned `df`,
+`iw`, `mmcli` and `timedatectl` every 30 seconds to recompute numbers the panel
+already had. The existing node now also writes `global.busduct_system_health`
+from the snapshot it collected anyway, and the existing 5 s view refresh fans out
+to both tiles. A test asserts `collectPiHealth()` still appears exactly once in
+that node, because the cheap mistake here is someone later "fixing" the coupling
+by adding the second collector back.
+
+The tile is its own `ui_group` rather than more rows in the blacklist table: the
+two answer different questions (can the panel still measure? vs is the box that
+runs it healthy?) and the blacklist table is already 8 units tall.
+
+`warnings` deliberately does **not** raise alarms. Every condition here is
+either already alarmed (`SYSTEM|PI|POWER`) or is a slow-moving housekeeping
+matter — a disk filling over weeks, a clock drifting — where an alarm that
+cannot be cleared by acknowledging it would train operators to ignore the alarm
+list. If disk-full should alarm, that is a threshold decision for the design
+chat, not something to slip in behind a dashboard tile.
+
+Renders "not sampled yet" before the first 30 s tick rather than a blank panel,
+and an all-null snapshot (off-Pi, or every probe failed) degrades to "No uplink"
+with no warnings instead of throwing inside the view.

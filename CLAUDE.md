@@ -1014,6 +1014,18 @@ place: CPU frequency (throttle flags cover the actionable part), SD-wear counter
 (not portable), per-core temps (a Pi has one thermal zone), throughput counters
 (needs cross-sample state; the outbox backlog already answers it).
 
+**Also on the HMI: a "Panel & Uplink" tile** (Device Health tab, `ui_group`
+`d9b1ac57e0f10060` + tile `…61`). The heartbeat carries the same data but
+*hourly and only when the link is up* — exactly wrong for a technician standing
+at the panel wondering why the uplink is marginal. `summarizeSystemHealth`
+(pure, on `busductCloudGateway`) renders SSID/operator as the headline with a
+colour-coded good/fair/poor band (Wi-Fi ≥ −67/−75 dBm, cellular ≥ 50/25 %),
+plus CPU, RAM, disk, uptime, load, and a warning list (disk ≥ 85/92 %, clock
+unsynced, CPU ≥ 70 °C, load > cores, poor signal). **No extra collection cost**:
+the existing 30 s "Pi Power Health" node already calls `collectPiHealth()`, so it
+just summarises the snapshot it has — a second collector would have re-spawned
+`df`/`iw`/`mmcli`/`timedatectl` every 30 s for the same numbers.
+
 ## Device → cloud message contract (2026-08-27)
 
 **Every published message carries a `type` field as its first

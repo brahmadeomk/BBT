@@ -373,3 +373,98 @@ describe('additional Pi health parameters', () => {
     assert.equal(partial.load.cpus, 4);
   });
 });
+
+describe('summarizeSystemHealth - the Device Health tile', () => {
+  const { summarizeSystemHealth } = require('../../src/cloud-gateway/pi-health');
+  const base = {
+    cpu_temp_c: 52.6, ram_available_mb: 2771, ram_total_mb: 3794,
+    uptime_sec: 867543, load: { avg1: 0.5, avg5: 0.4, avg15: 0.3, cpus: 4 },
+    disk: [{ path: '/', free_mb: 17146, total_mb: 29510, used_pct: 41.9 }],
+    clock_synced: true, network: null,
+  };
+  const wifi = (over = {}) => ({
+    interface: 'wlan0', type: 'wifi',
+    wifi: { ssid: 'Plant Floor 2', bssid: 'aa:bb:cc:dd:ee:ff', signal_dbm: -58,
+            link_quality: 61, freq_mhz: 5180, band: '5GHz', tx_bitrate_mbps: 234, ...over },
+  });
+
+  test('the SSID is the headline - the whole point of the tile', () => {
+    // "-58 dBm" does not tell a technician whether the panel is on the right AP.
+    const s = summarizeSystemHealth({ ...base, network: wifi() });
+    assert.match(s.uplink.label, /Wi-Fi.*Plant Floor 2/);
+    assert.match(s.uplink.detail, /-58 dBm/);
+    assert.match(s.uplink.detail, /5GHz/);
+    assert.match(s.uplink.detail, /234 Mbps/);
+    assert.equal(s.uplink.quality, 'good');
+  });
+
+  test('Wi-Fi signal grades into good / fair / poor, and only poor warns', () => {
+    for (const [dbm, quality] of [[-55, 'good'], [-70, 'fair'], [-82, 'poor']]) {
+      const s = summarizeSystemHealth({ ...base, network: wifi({ signal_dbm: dbm }) });
+      assert.equal(s.uplink.quality, quality, `${dbm} dBm`);
+      assert.equal(s.warnings.some((w) => /Weak Wi-Fi/.test(w)), quality === 'poor', `${dbm} dBm warning`);
+    }
+  });
+
+  test('a cellular dongle leads with the operator and flags roaming', () => {
+    const s = summarizeSystemHealth({
+      ...base,
+      network: { interface: 'wwan0', type: 'cellular',
+        cellular: { signal_percent: 68, signal_dbm: -69, csq: 22, operator: 'Airtel',
+                    access_tech: 'lte', registration: 'roaming', modem_state: 'connected' } },
+    });
+    assert.match(s.uplink.label, /Cellular.*Airtel/);
+    assert.match(s.uplink.detail, /68%/);
+    assert.match(s.uplink.detail, /LTE/);
+    assert.match(s.uplink.detail, /ROAMING/, 'roaming is a billing surprise, so it is shown');
+    assert.equal(s.uplink.quality, 'good');
+  });
+
+  test('ethernet has no signal concept and is never graded down', () => {
+    const s = summarizeSystemHealth({ ...base, network: { interface: 'eth0', type: 'ethernet' } });
+    assert.equal(s.uplink.label, 'Ethernet');
+    assert.equal(s.uplink.quality, 'good');
+  });
+
+  test('no default route reads as "No uplink", not as a healthy panel', () => {
+    const s = summarizeSystemHealth(base);
+    assert.equal(s.uplink.label, 'No uplink');
+    assert.equal(s.uplink.quality, 'unknown');
+  });
+
+  test('a healthy panel raises no warnings', () => {
+    const s = summarizeSystemHealth({ ...base, network: wifi() });
+    assert.deepEqual(s.warnings, []);
+    assert.equal(s.ok, true);
+  });
+
+  test('a nearly-full disk warns, and names the stake', () => {
+    // The SD card holds the historian AND the outbox; this is not a nag.
+    const s = summarizeSystemHealth({ ...base, network: wifi(), disk: [{ path: '/', free_mb: 900, total_mb: 29510, used_pct: 96.9 }] });
+    assert.match(s.warnings[0], /96\.9% full/);
+    assert.match(s.warnings[0], /historian and outbox/);
+    assert.equal(s.ok, false);
+  });
+
+  test('an unsynchronised clock warns - nothing else would show it', () => {
+    const s = summarizeSystemHealth({ ...base, network: wifi(), clock_synced: false });
+    assert.ok(s.warnings.some((w) => /Clock not synchronised/.test(w)));
+  });
+
+  test('load only warns against the core count, not an absolute number', () => {
+    const quiet = summarizeSystemHealth({ ...base, network: wifi(), load: { avg1: 3, avg5: 3, avg15: 3, cpus: 4 } });
+    assert.deepEqual(quiet.warnings, [], 'load 3 on 4 cores is fine');
+    const busy = summarizeSystemHealth({ ...base, network: wifi(), load: { avg1: 3, avg5: 3, avg15: 3, cpus: 1 } });
+    assert.ok(busy.warnings.some((w) => /Load 3 on 1 cores/.test(w)));
+  });
+
+  test('an all-null snapshot renders without throwing', () => {
+    // Off-Pi, or every probe failed. The tile must degrade, not crash the view.
+    const s = summarizeSystemHealth({});
+    assert.equal(s.uplink.label, 'No uplink');
+    assert.equal(s.cpu_temp, null);
+    assert.equal(s.disk, null);
+    assert.deepEqual(s.warnings, []);
+    assert.doesNotThrow(() => summarizeSystemHealth(null));
+  });
+});

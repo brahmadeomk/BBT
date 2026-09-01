@@ -196,6 +196,6 @@ function getGatewayInfo() {
 // enabling it needs no settings.js change on deployed panels - it lives here
 // because collectPiHealth() (its only input) already does.
 const { derivePowerAlarm, summarizePower, initialState: initialPowerState, POWER_KEY } = require('../power-health');
-const { collectPiHealth } = require('../pi-health');
+const { collectPiHealth, summarizeSystemHealth } = require('../pi-health');
 
-module.exports = { createGateway, buildDeviceHealth, createGatewayFromEdgeConfig, getGateway, getGatewayInfo, resolveTopic, setupRemoteConfig, drainRemoteConfig, setupCertRotation, drainCertRotation, collectPiHealth, derivePowerAlarm, summarizePower, initialPowerState, POWER_KEY, ...handlers };
+module.exports = { createGateway, buildDeviceHealth, createGatewayFromEdgeConfig, getGateway, getGatewayInfo, resolveTopic, setupRemoteConfig, drainRemoteConfig, setupCertRotation, drainCertRotation, collectPiHealth, summarizeSystemHealth, derivePowerAlarm, summarizePower, initialPowerState, POWER_KEY, ...handlers };

@@ -174,3 +174,44 @@ describe('alarm descriptions lead with the joint id (2026-08-31)', () => {
     }
   });
 });
+
+describe('Panel & Uplink tile on Device Health (2026-09-01)', () => {
+  // The heartbeat already carries uplink and Pi health, but hourly and only when
+  // the link is up - exactly wrong for a technician at the panel wondering why
+  // the uplink is marginal. This renders it locally every 30 s, offline.
+  const flows = () => JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+  const byId = (id) => flows().find((n) => n.id === id);
+
+  test('reuses the snapshot Pi Power Health already collects, at no extra cost', () => {
+    // A second collector would have meant a second round of process spawns
+    // (df, iw, mmcli, timedatectl) every 30 s for the same numbers.
+    const fn = byId('d9b1ac57e0f10042').func;
+    assert.equal((fn.match(/collectPiHealth\(\)/g) || []).length, 1, 'still exactly one collection');
+    assert.match(fn, /summarizeSystemHealth\(health\)/, 'and it summarises THAT snapshot');
+    assert.match(fn, /global\.set\('busduct_system_health'/);
+  });
+
+  test('the tile is fed from the same 5 s view refresh as the blacklist table', () => {
+    const view = byId('d9b1ac57e0f10024');
+    assert.deepEqual(view.wires, [['d9b1ac57e0f10022', 'd9b1ac57e0f10061']]);
+    assert.match(view.func, /msg\.payload\.system = global\.get\('busduct_system_health'/);
+  });
+
+  test('the tile lives in its own dashboard group, not crowded into the blacklist table', () => {
+    const group = byId('d9b1ac57e0f10060');
+    assert.equal(group.type, 'ui_group');
+    assert.equal(group.tab, 'd9b1ac57e0f10020', 'on the Device Health tab');
+    const tile = byId('d9b1ac57e0f10061');
+    assert.equal(tile.group, 'd9b1ac57e0f10060');
+  });
+
+  test('the tile renders SSID and signal, and degrades before the first sample', () => {
+    const fmt = byId('d9b1ac57e0f10061').format;
+    assert.match(fmt, /s\.uplink\.label/);
+    assert.match(fmt, /s\.uplink\.detail/);
+    assert.match(fmt, /not sampled yet/, 'must not render blank on a cold start');
+    for (const f of ['s.cpu_temp', 's.ram', 's.disk', 's.uptime', 's.load', 's.warnings']) {
+      assert.ok(fmt.includes(f), `${f} must be shown`);
+    }
+  });
+});

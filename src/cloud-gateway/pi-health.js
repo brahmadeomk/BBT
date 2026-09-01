@@ -424,4 +424,126 @@ function collectNetwork({ fs, execFileSync, env }) {
   return network;
 }
 
-module.exports = { collectPiHealth };
+/**
+ * Display summary of collectPiHealth(), for the Device Health dashboard.
+ *
+ * The heartbeat already carries all of this, but hourly and only when the link
+ * is up - which is exactly wrong for the technician standing at the panel
+ * wondering why the uplink is marginal. This renders the same snapshot locally,
+ * every 30 s, with no internet involved.
+ *
+ * Pure formatting plus threshold judgement: no I/O, so it is unit-testable and
+ * the Node-RED function node calling it stays thin.
+ */
+
+/** SD card. InfluxDB compaction needs headroom, so "nearly full" is a real fault, not a nag. */
+const DISK_WARN_PCT = 85;
+const DISK_CRIT_PCT = 92;
+/** Wi-Fi RSSI. Above -67 is a solid link; below -75 retries start dominating. */
+const WIFI_GOOD_DBM = -67;
+const WIFI_POOR_DBM = -75;
+/** Modem signal quality percent, as ModemManager reports it. */
+const CELL_GOOD_PCT = 50;
+const CELL_POOR_PCT = 25;
+/** A Pi throttles at 80 C; 70 is the point at which it is worth looking at. */
+const CPU_WARN_C = 70;
+
+function formatUptime(sec) {
+  if (!Number.isFinite(sec)) return null;
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+const gb = (mb) => (mb >= 1024 ? `${Math.round(mb / 102.4) / 10} GB` : `${mb} MB`);
+
+/** Wi-Fi/cellular headline + detail + a three-step quality judgement. */
+function describeUplink(network) {
+  if (!network) return { type: null, label: 'No uplink', detail: 'no default route', quality: 'unknown' };
+
+  const { type, interface: iface, wifi, cellular } = network;
+
+  if (type === 'wifi' && wifi) {
+    const dbm = wifi.signal_dbm;
+    const bits = [];
+    if (dbm != null) bits.push(`${dbm} dBm`);
+    if (wifi.band) bits.push(wifi.band);
+    if (wifi.tx_bitrate_mbps != null) bits.push(`${wifi.tx_bitrate_mbps} Mbps`);
+    return {
+      type,
+      // The SSID is the point of this whole tile: "-58 dBm" does not tell a
+      // technician whether the panel is on the right AP.
+      label: `Wi-Fi${wifi.ssid ? ` \u00b7 ${wifi.ssid}` : ''}`,
+      detail: bits.join(' \u00b7 ') || iface,
+      quality: dbm == null ? 'unknown' : dbm >= WIFI_GOOD_DBM ? 'good' : dbm >= WIFI_POOR_DBM ? 'fair' : 'poor',
+      ssid: wifi.ssid ?? null,
+      signal_dbm: dbm ?? null,
+    };
+  }
+
+  if (type === 'cellular' && cellular) {
+    const pct = cellular.signal_percent;
+    const bits = [];
+    if (pct != null) bits.push(`${pct}%`);
+    if (cellular.signal_dbm != null) bits.push(`${cellular.signal_dbm} dBm`);
+    if (cellular.access_tech) bits.push(String(cellular.access_tech).toUpperCase());
+    if (cellular.registration === 'roaming') bits.push('ROAMING');
+    return {
+      type,
+      label: `Cellular${cellular.operator ? ` \u00b7 ${cellular.operator}` : ''}`,
+      detail: bits.join(' \u00b7 ') || iface,
+      quality: pct == null ? 'unknown' : pct >= CELL_GOOD_PCT ? 'good' : pct >= CELL_POOR_PCT ? 'fair' : 'poor',
+      operator: cellular.operator ?? null,
+      signal_percent: pct ?? null,
+    };
+  }
+
+  if (type === 'ethernet') {
+    // No signal concept - a wired link is up or it is not, and if it were not
+    // there would be no default route to have found.
+    return { type, label: 'Ethernet', detail: iface, quality: 'good' };
+  }
+
+  return { type: type ?? null, label: iface || 'Unknown uplink', detail: '', quality: 'unknown' };
+}
+
+function summarizeSystemHealth(health, nowIso = new Date().toISOString()) {
+  const h = health || {};
+  const uplink = describeUplink(h.network);
+  const warnings = [];
+
+  const rootDisk = Array.isArray(h.disk) ? h.disk.find((d) => d.path === '/') || h.disk[0] : null;
+  if (rootDisk) {
+    if (rootDisk.used_pct >= DISK_CRIT_PCT) {
+      // Both the historian and the outbox live here; this is not cosmetic.
+      warnings.push(`Disk ${rootDisk.used_pct}% full - historian and outbox at risk`);
+    } else if (rootDisk.used_pct >= DISK_WARN_PCT) {
+      warnings.push(`Disk ${rootDisk.used_pct}% full`);
+    }
+  }
+  if (h.clock_synced === false) warnings.push('Clock not synchronised - timestamps unreliable');
+  if (h.cpu_temp_c != null && h.cpu_temp_c >= CPU_WARN_C) warnings.push(`CPU ${h.cpu_temp_c} \u00b0C`);
+  if (h.load && h.load.cpus && h.load.avg5 > h.load.cpus) {
+    warnings.push(`Load ${h.load.avg5} on ${h.load.cpus} cores`);
+  }
+  if (uplink.quality === 'poor') warnings.push(`Weak ${uplink.type === 'wifi' ? 'Wi-Fi' : 'signal'} - ${uplink.detail}`);
+
+  return {
+    uplink,
+    cpu_temp: h.cpu_temp_c != null ? `${h.cpu_temp_c} \u00b0C` : null,
+    ram: h.ram_available_mb != null && h.ram_total_mb != null
+      ? `${gb(h.ram_available_mb)} free of ${gb(h.ram_total_mb)}`
+      : null,
+    disk: rootDisk ? `${gb(rootDisk.free_mb)} free \u00b7 ${rootDisk.used_pct}% used` : null,
+    uptime: formatUptime(h.uptime_sec),
+    load: h.load ? `${h.load.avg1} / ${h.load.avg5} / ${h.load.avg15}${h.load.cpus ? ` (${h.load.cpus} cores)` : ''}` : null,
+    warnings,
+    ok: warnings.length === 0,
+    updatedTs: nowIso,
+  };
+}
+
+module.exports = { collectPiHealth, summarizeSystemHealth, describeUplink };
