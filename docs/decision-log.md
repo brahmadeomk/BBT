@@ -4520,3 +4520,54 @@ The Device Health dashboard tab keeps the blacklist table. Worth revisiting
 whether that one should move too, but it was not what was asked and the blacklist
 state is also surfaced in Active Alarms, so it is less stranded than the uplink
 tile was.
+
+## 2026-09-01 — Licence management: proposal written, not built
+
+Asked for licence management — a 1-month licence entered remotely from the
+cloud or typed on the device, edge screens and BMS data sharing disabled after
+expiry, days-remaining shown on the panel.
+
+Written up as `docs/licence-management-proposal.md` and **not implemented**.
+This is a new cross-cutting subsystem — cryptography, a new state store, HMI
+gating, a BMS register-map addition and a cloud channel domain — which the
+working agreement puts in the companion design chat rather than here.
+
+### The one that needs a human decision, not a technical one
+The requirement as stated blinds both ways of noticing an overheating joint at
+the same moment: the HMI goes dark *and* the BMS stops receiving temperatures.
+On a system whose purpose is spotting a hot busduct joint before it becomes a
+fire, a licence lapsing on a Friday would then mean nobody sees anything until
+Monday. There is also a liability question (disabling a safety-related function
+for a commercial reason), a sales one (BMS integrators avoid devices that can
+stop answering), and a support one (a silent panel is indistinguishable from a
+dead one).
+
+The proposal recommends gating **commercial value** — trends, configuration,
+diagnostics, cloud publishing, BMS *values* — while the alarm path, the alarm
+relay/e-mail, Active Alarms and a minimal live temperature view keep running at
+any licence state. That preserves real commercial leverage without the failure
+mode being an unseen joint. Flagged explicitly as a business decision: if the
+design chat wants a full blackout, it will be built that way.
+
+### Technical positions taken, for review
+- **24-character Crockford base32 key**, 48-bit payload + 72-bit truncated
+  Ed25519 signature. Asymmetric deliberately: no verification secret on the
+  device, so a stolen panel forges nothing. 20 bits bind the key to the panel's
+  `thing_name`, so one key cannot license a site.
+- **Monotonic time watermark** against clock tampering, advanced only while
+  `clock_synced` is true — the health field added earlier the same day turns out
+  to be load-bearing here. Winding the clock back does nothing; winding it
+  forward only expires the licence early.
+- **BMS keeps answering** on expiry, serving the existing `NO_DATA` sentinel
+  plus a new Tier 1 licence-status register (append-only, needs a
+  `point_map_version` bump). Closing the socket looks exactly like a dead panel
+  and turns every lapse into a fault call.
+- **Licence state is not a config domain.** The other domains are
+  operator-editable, backed up and restorable, and a restorable licence is an
+  unlimited licence.
+- **14-day grace** with an escalating banner, rather than a midnight cutoff.
+
+Six open decisions are listed in §9, including one that needs answering before
+the first key is ever issued: who holds the signing key, and what the escrow and
+rotation story is if it is lost — every issued licence becomes unverifiable, and
+the public key is baked into shipped images.

@@ -115,6 +115,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | BACnet gateway integration (Moxa MGate 5217I-1200-T) | `docs/bms-mgate5217-integration.md` | present (2026-08-19) |
 | Existing Node-RED flow | `flows/flows_BBT.json` | present |
 | Arduino Nano firmware | `firmware/Nano_IOT.ino` | present |
+| Licence management (remote + typed key, expiry gating) | `docs/licence-management-proposal.md` | **PROPOSAL, not built** (2026-09-01) |
 | Edge device user manual (operator/technician HMI guide) | `docs/edge-user-manual.md` | present |
 | Nano 33 IoT field-replacement runbook | `docs/nano-replacement.md` | present |
 
