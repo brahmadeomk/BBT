@@ -4875,3 +4875,21 @@ span 9 registers, frame of 9 values, three joints matched to their channels, one
 of them sub-zero, no warnings. Sparse deliberately — a consecutive layout would
 decode correctly even if the indexing were subtly wrong. **It has never met a
 real multi-channel module**, which is the remaining gate.
+
+**Live-verified on the Pi (2026-09-01), single-channel only.** Steps 3-4 deployed
+with no abnormalities: readings unchanged, no new alarms, Diagnostics unaffected
+(it feeds off the legacy `sensorData` chain, which the fan-out did not touch),
+Configuration Status still green at 5 joints, ΔT unbroken across the ambient
+key change from `101` to `"101:1"`.
+
+That confirms the change is **transparent on single-channel hardware**, which is
+what this panel has. It does **not** confirm the multi-channel path — every slave
+here has one channel, so the fan-out emitted exactly one message per frame
+throughout and the indexing was never exercised. The multi-channel behaviour
+remains verified in simulation only (sparse addresses 100/104/108, three joints,
+one sub-zero) and still needs a real module.
+
+Left in place deliberately: the pre-change `latest_ambient_state` entry under the
+bare key `101`. It can never be written again and the 60 s freshness check
+rejects it permanently, so it is inert; pruning it would have meant a third
+change to the live measurement path in one day for tidiness alone.
