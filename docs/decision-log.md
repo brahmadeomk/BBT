@@ -4812,3 +4812,16 @@ hardcoded behaviour and report the difference, rather than assume the stored
 value is right. Other fields in the same position worth suspecting before
 anything starts reading them: `temp_offset`, `temp_word_count`, `function_code`,
 and `poll_interval_s`.
+
+**Live-verified on the Pi (2026-09-01).** The SENSOR_FAULT storm cleared on
+deploy and no new alarms appeared. "Scale Nano Reading" shows yellow with the
+unit address, the correct temperature to two decimals, and `(1 warn)` — the
+scale mismatch being reported rather than applied, which is the designed
+behaviour, not a residual fault.
+
+**Remaining action, on the panel not in code:** set the **Scale** column to
+`0.01` on all six rows in Modbus Settings and Apply. That records what the
+hardware actually does instead of the migration's guess; the warning then stops
+and the status goes green. Safe on a live panel — `compileNanoJob` builds the
+Nano job from `unit_address`, `temp_base_addr` and `readSpan` only, so
+`temp_scale` is not in the compiled job and changing it triggers no resend.
