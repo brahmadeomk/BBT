@@ -4930,3 +4930,29 @@ the config self-heals on the next joint-table apply.
 with `getaddrinfo ENOTFOUND relay.go…`. The alarm pipeline is producing the mail
 correctly; the panel cannot resolve the relay hostname. That is DNS or the mail
 host setting, not the alarm path.
+
+## 2026-09-01 — Panel & Uplink tile froze on its first snapshot
+
+Reported from the panel: the tile's timestamp only advanced when the browser page
+was reloaded. My bug, and not a cosmetic one.
+
+The template did `<div ng-init="s = msg.payload.system">` and then bound `s.*`
+throughout. **`ng-init` evaluates once, when the element is created, and never
+again** — so `s` held the first snapshot forever. Reloading the page
+re-initialises the template, which is exactly the symptom described.
+
+On a HEALTH display that is worse than a cosmetic freeze: the tile would have
+kept showing *"✔ Panel healthy"* with a strong Wi-Fi reading long after the link
+degraded, the disk filled or the clock lost sync. The one thing it exists to do
+is tell a technician the CURRENT state, and it was showing a photograph.
+
+Replaced with `scope.$watch('msg', …)` in the template's script block — the same
+pattern the alarm tables already use. The Config Drift Banner was unaffected: it
+binds `msg.payload.*` directly, which Angular re-evaluates on every digest.
+
+**Test-writing note, worth recording because it happened four times today:** the
+first guard asserted `!/ng-init/` against the template, which failed on the
+replacement's own explanatory comment ("MUST be a `$watch`, not `ng-init`"). The
+check is now for the ATTRIBUTE `ng-init=`. Matching prose instead of code has
+now produced a false failure in the config sweep, the decode node, the joint-name
+guard and here — when pinning "X is gone", assert on the syntax, not the word.

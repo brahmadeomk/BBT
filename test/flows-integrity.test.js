@@ -212,6 +212,18 @@ describe('Panel & Uplink tile on Device Health (2026-09-01)', () => {
     assert.deepEqual(byId('d9b1ac57e0f10024').wires, [['d9b1ac57e0f10022', 'd9b1ac57e0f10061']]);
   });
 
+  test('the tile updates live, not only on a browser reload', () => {
+    // ng-init evaluates ONCE when the element is created, so the tile froze on
+    // its first snapshot and only refreshed when the page was reloaded. On a
+    // HEALTH display that is worse than useless: it would keep showing "Panel
+    // healthy" and a strong signal long after either stopped being true.
+    const fmt = byId('d9b1ac57e0f10061').format;
+    // The ATTRIBUTE, not the word - the fix's own comment names it on purpose.
+    assert.ok(!/ng-init=/.test(fmt), 'ng-init cannot track a changing msg');
+    assert.match(fmt, /scope\.\$watch\('msg'/, 'must watch msg');
+    assert.match(fmt, /scope\.s = /);
+  });
+
   test('the tile renders SSID and signal, and degrades before the first sample', () => {
     const fmt = byId('d9b1ac57e0f10061').format;
     assert.match(fmt, /s\.uplink\.label/);
