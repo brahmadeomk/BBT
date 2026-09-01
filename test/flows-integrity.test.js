@@ -217,6 +217,13 @@ describe('Panel & Uplink tile on Device Health (2026-09-01)', () => {
     assert.match(fmt, /s\.uplink\.label/);
     assert.match(fmt, /s\.uplink\.detail/);
     assert.match(fmt, /not sampled yet/, 'must not render blank on a cold start');
+    // Timestamps render in site local time like every other HMI table. The
+    // collector stamps UTC (edge_utc, as the wire contract does); rendering is
+    // the only place a timezone belongs, and raw "...Z" on an operator screen
+    // makes "is this current?" a mental arithmetic problem.
+    assert.match(fmt, /\{\{toIST\(s\.updatedTs\)\}\}/, 'the timestamp must go through toIST');
+    assert.match(fmt, /scope\.toIST\s*=/, 'and the tile must define it - scope is per-template');
+    assert.match(fmt, /Asia\/Kolkata/);
     for (const f of ['s.cpu_temp', 's.ram', 's.disk', 's.uptime', 's.load', 's.warnings']) {
       assert.ok(fmt.includes(f), `${f} must be shown`);
     }

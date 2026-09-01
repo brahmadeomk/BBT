@@ -4571,3 +4571,30 @@ Six open decisions are listed in §9, including one that needs answering before
 the first key is ever issued: who holds the signing key, and what the escrow and
 rotation story is if it is lost — every issued licence becomes unverifiable, and
 the public key is baked into shipped images.
+
+## 2026-09-01 — Panel & Uplink tile live, and its timestamp moved to site time
+
+Live on the Diagnostics tab beside BMS Registers: `Wi-Fi · TLD_SC_5G`,
+`-53 dBm · 5GHz · 325 Mbps` on the green band, CPU 55.5 °C, RAM 5.7 of 7.6 GB,
+disk 35.1 % used, uptime 1d 1h, load `2.43 / 1.71 / 1.61 (4 cores)`,
+"✔ Panel healthy". The load line is the threshold behaving correctly — avg5
+(1.71) is compared against the core count, not against an absolute number, so a
+1-minute spike of 2.43 on a 4-core Pi raises nothing.
+
+The tile printed `updated 2026-09-01T06:39:14.532Z` — raw UTC, while every other
+HMI table renders IST through a `toIST` helper. On an operator screen that turns
+"is this current?" into mental arithmetic. Now rendered with the same helper and
+the same `Asia/Kolkata` string the alarm tables use, so the whole HMI reads one
+clock.
+
+**The helper is per-template, not shared.** `ui_template` scopes are isolated,
+so each template that formats a time defines its own copy — that is the existing
+pattern in this flow, not something introduced here, and the test asserts the
+tile defines one rather than only calling it (a template calling an undefined
+`toIST` renders an empty string silently, with no console error to notice).
+
+**Only the rendering changed.** The collector still stamps UTC, as everything on
+the wire does (`edge_utc`); a timezone belongs at the display edge and nowhere
+else. `summarizeSystemHealth` stays timezone-free and so stays portable — a site
+outside IST needs one string changed in one template, not a change to the
+library.
