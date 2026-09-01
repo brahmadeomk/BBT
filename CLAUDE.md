@@ -1014,8 +1014,10 @@ place: CPU frequency (throttle flags cover the actionable part), SD-wear counter
 (not portable), per-core temps (a Pi has one thermal zone), throughput counters
 (needs cross-sample state; the outbox backlog already answers it).
 
-**Also on the HMI: a "Panel & Uplink" tile** (Device Health tab, `ui_group`
-`d9b1ac57e0f10060` + tile `…61`). The heartbeat carries the same data but
+**Also on the HMI: a "Panel & Uplink" tile** (`ui_group` `d9b1ac57e0f10060` +
+tile `…61`, on the **Diagnostics** dashboard tab beside BMS Registers — moved
+there 2026-09-01 because the Device Health dashboard tab is not one operators
+navigate to; it is fed from the Device Health *flow* tab either way). The heartbeat carries the same data but
 *hourly and only when the link is up* — exactly wrong for a technician standing
 at the panel wondering why the uplink is marginal. `summarizeSystemHealth`
 (pure, on `busductCloudGateway`) renders SSID/operator as the headline with a

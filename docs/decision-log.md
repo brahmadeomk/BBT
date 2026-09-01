@@ -4500,3 +4500,23 @@ configuration is worse than one that names the gap.
 
 Practical mitigation while the PAT stands: scope it to `repo` **read** only, and
 rotate it when anyone leaves the team.
+
+## 2026-09-01 — Panel & Uplink tile moved to Diagnostics
+
+Deployed and rendering correctly, but reported as *"not on the HMI connected
+pages"* — the Device Health **dashboard** tab is not one the operators navigate
+to. Moved beside **BMS Registers** on the **Diagnostics** tab, at the same
+width (12) so the two sit side by side, ordered immediately after it.
+
+Only the `ui_group`'s `tab`/`order`/`width` changed. The tile is still fed by
+the 5 s "refresh view" → "Blacklist View" chain on the Device Health **flow**
+tab — the flow tab and the dashboard tab are unrelated, and nothing about the
+wiring or the collection path moved. The regression test now asserts the tile
+shares a tab and width with BMS Registers *and* that the feed wire is unchanged,
+since the easy mistake when relocating a dashboard group is to leave it visually
+in place but detached from its data.
+
+The Device Health dashboard tab keeps the blacklist table. Worth revisiting
+whether that one should move too, but it was not what was asked and the blacklist
+state is also surfaced in Active Alarms, so it is less stranded than the uplink
+tile was.

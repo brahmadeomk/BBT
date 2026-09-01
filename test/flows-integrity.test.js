@@ -197,12 +197,19 @@ describe('Panel & Uplink tile on Device Health (2026-09-01)', () => {
     assert.match(view.func, /msg\.payload\.system = global\.get\('busduct_system_health'/);
   });
 
-  test('the tile lives in its own dashboard group, not crowded into the blacklist table', () => {
+  test('the tile sits beside BMS Registers on Diagnostics, the page operators actually open', () => {
+    // Moved off the Device Health dashboard tab 2026-09-01: it rendered
+    // correctly there, but that tab is not one the HMI operators navigate to.
+    const bms = byId('b115ac57e0f10010');
     const group = byId('d9b1ac57e0f10060');
     assert.equal(group.type, 'ui_group');
-    assert.equal(group.tab, 'd9b1ac57e0f10020', 'on the Device Health tab');
+    assert.equal(group.tab, bms.tab, 'same dashboard tab as BMS Registers');
+    assert.ok(Number(group.order) > Number(bms.order), 'ordered after it');
+    assert.equal(String(group.width), String(bms.width), 'same width, so the two sit side by side');
     const tile = byId('d9b1ac57e0f10061');
     assert.equal(tile.group, 'd9b1ac57e0f10060');
+    // The feed is unchanged - the dashboard group moved, the wiring did not.
+    assert.deepEqual(byId('d9b1ac57e0f10024').wires, [['d9b1ac57e0f10022', 'd9b1ac57e0f10061']]);
   });
 
   test('the tile renders SSID and signal, and degrades before the first sample', () => {
