@@ -1,9 +1,11 @@
 # Recovering the channel in the decode path — findings
 
-**Status: BUILT 2026-09-01 (steps 1-4).** `src/config-service/channel-decode.js`
-decodes per channel, "Scale Nano Reading" fans out one message per channel, and
-ProcessLogic matches on `(unit address, channel)`. Still to do: a live run
-against a real multi-channel module (§7).
+**Status: BUILT AND LIVE-VERIFIED 2026-09-01 (steps 1-4).**
+`src/config-service/channel-decode.js` decodes per channel, "Scale Nano Reading"
+fans out one message per channel, and ProcessLogic matches on `(unit address,
+channel)`. Confirmed on the panel against a real 4-channel module (§7).
+Remaining gap: only the **consecutive** register layout has met hardware; the
+sparse `channel_addrs` path is still simulation-only.
 
 Asked 2026-09-01: can the
 `(slave id, start address, data length)` combination identify the channel,
@@ -243,15 +245,34 @@ Two compatibility choices worth knowing:
 `sensorData` was left exactly as it is — it was already per-channel, so the
 "nested vs composite key" question in the original draft was moot.
 
-## 7. Still open
+## 7. Live verification (2026-09-01)
 
-1. **A live run against a real multi-channel module.** Everything is derived
-   from the firmware source, the compiler and the schema, and verified in
-   simulation end to end (sparse addresses 100/104/108, three joints on one
-   module, including a sub-zero channel). It has never met real hardware.
-   When commissioning a test module, prefer **non-consecutive addresses** — a
-   consecutive layout would still decode correctly even if the indexing were
-   subtly wrong.
+A `LEGACY-4CH` module was commissioned at unit address **6**, carrying four
+joints on registers 3/4/5/6, alongside eight single-channel slaves and the
+ambient at 101. Nine joints monitored, configuration in sync.
+
+Diagnostics showed all four channels distinctly — 31.06 / 36.06 / 41.06 /
+46.06 — and the KPI stream for the second channel read:
+
+```jsonc
+{ "joint_name": "multich_1", "joint_id": "J07",
+  "zone_id": "z1", "zone_name": "Zone1",
+  "slaveID": 6, "channel": 2, "val": 36.12, "emaTemp": 36.09, "ror": 0.187,
+  "ambient": { "slaveID": "101:1", "val": 31.72, "age_sec": 0, "source": "configured" },
+  "deltaT": { "raw": 4.4, "ema": 4.18 },
+  "sensor_status": "ok" }
+```
+
+That single message confirms every part at once: the fan-out (channel 2 arriving
+as its own reading), the `(unit, channel)` joint match, the composite ambient key
+`"101:1"` resolving through R14, ΔT computed per channel, and `joint_name`
+persisted by the joint-table apply.
+
+**Still simulation-only: the sparse layout.** This module's channels are
+*consecutive* from the base address, which is the branch that would still decode
+correctly even if the `channel_addrs` indexing were subtly wrong. A module with
+non-consecutive addresses (100/104/108) remains the one case never exercised
+against hardware.
 2. **Should a shape-mismatched frame (§2) raise an alarm**, or only warn?
    It means the Nano is running a stale job, which the resend logic is
    supposed to make impossible — so it firing at all is a real signal.

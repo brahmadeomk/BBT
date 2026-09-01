@@ -4956,3 +4956,35 @@ replacement's own explanatory comment ("MUST be a `$watch`, not `ng-init`"). The
 check is now for the ATTRIBUTE `ng-init=`. Matching prose instead of code has
 now produced a false failure in the config sweep, the decode node, the joint-name
 guard and here — when pinning "X is gone", assert on the syntax, not the word.
+
+## 2026-09-01 — Multi-channel live-verified on the panel
+
+A `LEGACY-4CH` module commissioned at unit address 6, four joints on registers
+3/4/5/6, alongside eight single-channel slaves and the ambient at 101. Banner:
+*"✓ 9 joint(s) monitored — configuration applied and in sync"*. Diagnostics
+showed all four channels distinctly (31.06 / 36.06 / 41.06 / 46.06), and the KPI
+stream for channel 2 read:
+
+```jsonc
+{ "joint_name": "multich_1", "joint_id": "J07", "zone_name": "Zone1",
+  "slaveID": 6, "channel": 2, "val": 36.12, "emaTemp": 36.09, "ror": 0.187,
+  "ambient": { "slaveID": "101:1", "val": 31.72, "age_sec": 0, "source": "configured" },
+  "deltaT": { "raw": 4.4, "ema": 4.18 }, "sensor_status": "ok" }
+```
+
+One message confirming everything at once: the fan-out delivering channel 2 as
+its own reading, the `(unit, channel)` joint match, the composite ambient key
+`"101:1"` resolving through the R14 chain, ΔT computed per channel, and
+`joint_name` persisted by the joint-table apply — so the label fix from earlier
+today is confirmed by the same capture.
+
+**What is still NOT proven: the sparse layout.** This module's channels are
+*consecutive* from the base address, which is precisely the branch that would
+decode correctly even if the `channel_addrs` indexing were wrong. A module with
+non-consecutive addresses (e.g. 100/104/108) remains simulation-only. Worth
+saying plainly rather than letting a successful 4-channel run read as "the whole
+feature is proven".
+
+Checked while reviewing the capture, and fine: `sensor_status` arrives lowercase
+`"ok"`, and `influx-points.js` already compares case-insensitively with a comment
+explaining exactly this, so the historian is not silently dropping readings.
