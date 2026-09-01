@@ -66,18 +66,50 @@ describe('channel indexing - both layouts invert readSpan', () => {
   });
 });
 
-describe('scale comes from the slave, not a hardcoded divisor', () => {
-  test('temp_scale 0.1 is honoured', () => {
-    const s = slave({ registers: { function_code: 3, temp_base_addr: 100, temp_scale: 0.1 } });
-    assert.equal(decodeFrame(frame({ val: [254] }), doc([s])).readings[0].val, 25.4);
+describe('configured temp_scale is OFF by default - it is a migration GUESS', () => {
+  // Live regression 2026-09-01. tools/migrate-legacy-config.js writes
+  // temp_scale: 0.1 with the warning "legacy data does not record scaling,
+  // verify against the sensor datasheet", because the legacy pipeline hardcoded
+  // the divisor and never recorded it. Nothing read the field until the decoder
+  // did, so nobody had found out it was wrong. Honouring it turned a 31 degC
+  // joint (raw 3100) into 310 degC, past ProcessLogic's 300 limit, and raised
+  // "Sensor value out of valid range" on EVERY joint at once.
+  const guessed = () => slave({ registers: { function_code: 3, temp_base_addr: 100, temp_scale: 0.1 } });
+
+  test('the migration guess does not reach the reading', () => {
+    const r = decodeFrame(frame({ val: [3100] }), doc([guessed()]));
+    assert.equal(r.readings[0].val, 31, '31 degC, not the 310 that broke the panel');
+    assert.equal(r.readings[0].scale_source, 'legacy');
   });
 
-  test('temp_scale 1 is honoured - a module reporting whole degrees', () => {
-    const s = slave({ registers: { function_code: 3, temp_base_addr: 100, temp_scale: 1 } });
-    assert.equal(decodeFrame(frame({ val: [25] }), doc([s])).readings[0].val, 25);
+  test('...but the mismatch is reported, not silently swallowed', () => {
+    // One of the two is wrong, and which one is a question about the hardware.
+    const { warnings } = decodeFrame(frame({ val: [3100] }), doc([guessed()]));
+    assert.ok(warnings.some((w) => /configured temp_scale 0\.1 is NOT being used/.test(w)));
+    assert.ok(warnings.some((w) => /Verify the Scale column/.test(w)));
   });
 
-  test('temp_offset is applied after scaling', () => {
+  test('a scale matching the legacy divisor raises no warning', () => {
+    // The overwhelmingly common case once a panel's Scale column is corrected.
+    const { warnings } = decodeFrame(frame(), doc([slave()]));
+    assert.deepEqual(warnings, []);
+  });
+
+  test('opting in honours the configured scale', () => {
+    // What a panel switches on once its Scale column has been checked against
+    // the datasheets. The mechanism is built and tested; it is just not trusted
+    // by default.
+    for (const [scale, raw, expected] of [[0.1, 254, 25.4], [1, 25, 25], [0.01, 2543, 25.43]]) {
+      const s = slave({ registers: { function_code: 3, temp_base_addr: 100, temp_scale: scale } });
+      const r = decodeFrame(frame({ val: [raw] }), doc([s]), { useConfigScale: true });
+      assert.equal(r.reading?.val ?? r.readings[0].val, expected, `scale ${scale}`);
+      assert.equal(r.readings[0].scale_source, 'config');
+    }
+  });
+
+  test('temp_offset is applied regardless - it is not a guess', () => {
+    // The migration does not invent an offset; an offset present in the config
+    // was put there deliberately.
     const s = slave({ registers: { function_code: 3, temp_base_addr: 100, temp_scale: 0.01, temp_offset: -1.5 } });
     assert.equal(decodeFrame(frame(), doc([s])).readings[0].val, 23.93);
   });

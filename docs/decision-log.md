@@ -4770,3 +4770,45 @@ yet delivered anywhere. That stays visible until step 3.
 **Test note:** the first flow assertion matched the node's own explanatory
 comment rather than its code — the third time that mistake has been made today.
 The check now strips comment lines first.
+
+## 2026-09-01 — Honouring `temp_scale` broke the panel; reverted to report-only
+
+Reported minutes after deploying the decoder: **"Sensor value out of valid
+range" on every joint**. My regression, and an instructive one.
+
+`tools/migrate-legacy-config.js:60` writes `temp_scale: 0.1`, with its own
+warning attached: *"legacy data does not record scaling, verify against the
+sensor datasheet"*. The legacy pipeline hardcoded `/100` and never recorded the
+divisor, so the migration had to guess — and guessed wrong for this hardware,
+which is centi-degrees. A joint at 31 °C (raw 3100) decoded as **310 °C**, past
+ProcessLogic's 300 limit, so every joint raised `SENSOR_FAULT` simultaneously.
+
+**Nothing had ever read that field.** The wrong value sat in the applied
+configuration from migration onwards, undetected, until the decoder became its
+first consumer. The migration tool's warning was correct and had simply never
+been acted on.
+
+### Fix
+`useConfigScale` is now **off by default**. Readings decode on the legacy `0.01`
+exactly as before; a configured scale that disagrees is **reported, not
+applied**. The opt-in path is built and tested, so a panel whose Scale column
+has been checked against the datasheets can switch it on — but no panel gets
+that behaviour by inheriting a guess.
+
+The array-indexing fix, which was the actual find, is unaffected and stays.
+
+### A second bug the fix created
+The mismatch warning is true of *every frame from that unit, forever* — about
+12 log lines per second on a six-slave panel, into the SD card that the
+historian and the outbox share, which we had added disk monitoring for hours
+earlier. Throttled to once per unit per five minutes, and pinned by a test that
+also asserts the flow never opts into the configured scale.
+
+### The general lesson, recorded because it will recur
+**A config field that nothing reads is not "unused" — it is unverified.**
+Migrating a value nobody consumes records a guess with the authority of a
+measurement. The first consumer of any such field should default to the previous
+hardcoded behaviour and report the difference, rather than assume the stored
+value is right. Other fields in the same position worth suspecting before
+anything starts reading them: `temp_offset`, `temp_word_count`, `function_code`,
+and `poll_interval_s`.

@@ -99,6 +99,34 @@ A second, smaller issue in the same line: `/100` is hardcoded, while the
 schema carries `registers.temp_scale` (1 / 0.1 / 0.01) per slave. Any
 module that is not centi-degrees is already mis-scaled.
 
+### 3a. …and honouring `temp_scale` turned out to be the wrong fix
+
+Fixing that second issue **broke the panel**, and the reason is worth
+recording. `tools/migrate-legacy-config.js:60` writes `temp_scale: 0.1`
+with its own warning attached:
+
+> *"slaves[].registers.temp_scale assumed 0.1 (raw/10 = degC) — legacy
+> data does not record scaling, verify against the sensor datasheet"*
+
+The legacy pipeline hardcoded the divisor and never recorded it, so the
+migration had to guess — and guessed wrong for this hardware, which is
+centi-degrees. **Nothing had ever read the field**, so the wrong guess sat
+in the applied config undetected from migration until the decoder trusted
+it. A joint at 31 °C (raw 3100) decoded as 310 °C, past ProcessLogic's 300
+limit, raising *"Sensor value out of valid range"* on every joint at once.
+
+So `useConfigScale` is **off by default**. Readings decode on the legacy
+`0.01`, and a configured scale that disagrees is **reported, not applied** —
+throttled to once per unit per five minutes, because the condition is true
+of every frame and unthrottled it would fill the SD card the historian and
+outbox share.
+
+**The general lesson:** a config field that nothing reads is not "unused",
+it is *unverified*. Migrating a value nobody consumes records a guess with
+the authority of a measurement. The first consumer of any such field should
+default to the previous hardcoded behaviour and report the difference,
+rather than assume the stored value is right.
+
 ---
 
 ## 4. Proposed decoder

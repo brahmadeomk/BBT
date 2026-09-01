@@ -325,3 +325,24 @@ describe('Nano frame scaling goes through the decoder (2026-09-01)', () => {
     assert.match(fn(), /only ch1 used/);
   });
 });
+
+describe('the decode node cannot spam the log (2026-09-01)', () => {
+  // A scale mismatch is true of EVERY frame from that unit, forever. Unthrottled
+  // that is ~12 lines/second on a 6-slave panel, filling the SD card the
+  // historian and the outbox share.
+  const fn = () => JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'))
+    .find((n) => n.id === '2390b9df3335021b').func;
+
+  test('warnings are throttled per unit', () => {
+    const body = fn();
+    assert.match(body, /decodeWarnAt/);
+    assert.match(body, /300000/, 'once per unit per 5 minutes');
+    assert.ok(!/^\s*if \(r\.warnings\.length\) node\.warn/m.test(body), 'never warn unconditionally');
+  });
+
+  test('the configured temp_scale is not opted into', () => {
+    // It is a migration guess; honouring it raised "value out of valid range"
+    // on every joint at once.
+    assert.ok(!/useConfigScale/.test(fn()), 'the flow must not opt in');
+  });
+});

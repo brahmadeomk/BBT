@@ -50,10 +50,24 @@ function channelIndex(slave, channel, sa) {
   return (channel - 1) * wordCount;
 }
 
-/** Raw registers -> degC. Two words are big-endian, matching the Modbus wire order. */
-function toCelsius(values, index, slave) {
+/**
+ * Raw registers -> degC. Two words are big-endian, matching the Modbus wire order.
+ *
+ * `useConfigScale` is OFF by default, and that is not timidity - `temp_scale` in
+ * the applied document is a GUESS. `tools/migrate-legacy-config.js` writes 0.1
+ * with the warning "legacy data does not record scaling, verify against the
+ * sensor datasheet", because the legacy pipeline hardcoded the divisor and never
+ * recorded it. Nothing read the field until 2026-09-01, so nobody had ever found
+ * out it was wrong.
+ *
+ * Honouring it on this panel turned a 31 degC joint (raw 3100) into 310 degC,
+ * past ProcessLogic's 300 limit, and raised "Sensor value out of valid range" on
+ * every joint at once. Turn this on per-panel only after the Scale column in
+ * Modbus Settings has been checked against the datasheets.
+ */
+function toCelsius(values, index, slave, useConfigScale = false) {
   const wordCount = slave.registers?.temp_word_count ?? DEFAULT_WORD_COUNT;
-  const scale = slave.registers?.temp_scale ?? LEGACY_SCALE;
+  const scale = useConfigScale ? (slave.registers?.temp_scale ?? LEGACY_SCALE) : LEGACY_SCALE;
   const offset = slave.registers?.temp_offset ?? 0;
   if (index < 0 || index + wordCount > values.length) return null;
   const raw = wordCount === 2 ? (values[index] << 16) | (values[index + 1] & 0xffff) : values[index];
@@ -73,7 +87,7 @@ function toCelsius(values, index, slave) {
  *   is only used to disambiguate a document that somehow repeats one
  * @returns {{readings: Array, warnings: string[]}}
  */
-function decodeFrame(frame, doc, { busId } = {}) {
+function decodeFrame(frame, doc, { busId, useConfigScale = false } = {}) {
   const warnings = [];
   if (!frame || frame.t !== 'r' || typeof frame.id !== 'number') {
     return { readings: [], warnings: [] }; // not a read frame; not our business
@@ -108,11 +122,21 @@ function decodeFrame(frame, doc, { busId } = {}) {
     );
   }
 
+  // Surface the mismatch rather than silently ignoring the configured value:
+  // one of the two is wrong, and which one is a question about the hardware.
+  const configScale = slave.registers?.temp_scale;
+  if (!useConfigScale && configScale != null && configScale !== LEGACY_SCALE) {
+    warnings.push(
+      `unit ${frame.id}: configured temp_scale ${configScale} is NOT being used - ` +
+      `decoding on the legacy scale ${LEGACY_SCALE}. Verify the Scale column against the datasheet.`
+    );
+  }
+
   const channels = Math.max(1, slave.channels ?? 1);
   const readings = [];
   for (let k = 1; k <= channels; k += 1) {
     const idx = channelIndex(slave, k, frame.sa);
-    const val = idx == null ? null : toCelsius(values, idx, slave);
+    const val = idx == null ? null : toCelsius(values, idx, slave, useConfigScale);
     if (val == null && frame.st === 'ok') {
       warnings.push(`unit ${frame.id} channel ${k}: no value at index ${idx} of ${values.length}`);
     }
@@ -121,7 +145,7 @@ function decodeFrame(frame, doc, { busId } = {}) {
       channel: k,
       val,
       st: frame.st,
-      scale_source: 'config',
+      scale_source: useConfigScale ? 'config' : 'legacy',
     });
   }
   return { readings, warnings };
