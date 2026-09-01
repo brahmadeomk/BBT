@@ -105,23 +105,37 @@ function slaveDisplayName(doc, slaveId) {
  * slave carries no joints, so the old text read "(none mapped) not measurable",
  * which understated a fault that actually disables ΔT panel-wide.
  */
+/**
+ * The two ways a dead device hurts: joints it CARRIES stop being measurable, and
+ * joints that merely REFERENCE it as their ambient lose ΔT. Shared by the raise
+ * path and the refresh below so the two can never word it differently - and so
+ * the refresh can compare IMPACT rather than the full description, whose
+ * prefixes deliberately differ.
+ */
+function impactFor(doc, slaveId) {
+  const joints = jointsForSlave(doc, slaveId);
+  const ambientFor = jointsUsingAmbientSlave(doc, slaveId).filter((j) => !joints.includes(j));
+  const parts = [];
+  if (joints.length) parts.push(`joint(s) ${joints.join(', ')} not measurable`);
+  if (ambientFor.length) parts.push(`ambient reference for joint(s) ${ambientFor.join(', ')} - ΔT unavailable`);
+  if (!parts.length) parts.push('no joints affected');
+  return { joints, ambientFor, text: parts.join('; ') };
+}
+
 function blacklistAlarmCommand(event, doc) {
-  const joints = jointsForSlave(doc, event.slaveId);
-  const ambientFor = jointsUsingAmbientSlave(doc, event.slaveId).filter((j) => !joints.includes(j));
+  const { joints, ambientFor, text: impactText } = impactFor(doc, event.slaveId);
   if (event.type === 'blacklisted') {
-    const impact = [];
-    if (joints.length) impact.push(`joint(s) ${joints.join(', ')} not measurable`);
-    if (ambientFor.length) impact.push(`ambient reference for joint(s) ${ambientFor.join(', ')} - ΔT unavailable`);
-    if (!impact.length) impact.push('no joints affected');
     return {
       action: 'raise',
       slave_id: event.slaveId,
       unit_address: (doc?.modbus?.slaves || []).find((x) => x.slave_id === event.slaveId)?.unit_address ?? null,
       joints,
       ambient_for_joints: ambientFor,
+      impact_text: impactText,       // seeds the refresh memo, so a raise is not
+                                     // immediately followed by an identical update
       description:
         `Slave ${slaveDisplayName(doc, event.slaveId)} blacklisted after ${event.failures} consecutive read failures; ` +
-        impact.join('; '),
+        impactText,
     };
   }
   if (event.type === 'restored') {
@@ -189,6 +203,15 @@ function _finalize(tracker, events, { doc, prevExcludeKey, activeAlarmJointIds, 
     : [];
   const resendBusIds = [...new Set(changedSlaveIds.map((id) => busForSlave(doc, id)))];
   const alarms = events.map((e) => blacklistAlarmCommand(e, doc)).filter(Boolean);
+  // A raised alarm's description is a SNAPSHOT of the joint mapping at the
+  // moment it was written, and it was never revisited. Commissioning joints onto
+  // a device that is already blacklisted - exactly what a test panel does - left
+  // the alarm permanently understating the impact: a 4-channel module blacklisted
+  // while only channel 1 was mapped kept reading "joint(s) J06 not measurable"
+  // after J07-J09 were added (reported 2026-09-01). Re-derive it while the
+  // device stays blacklisted, and emit an update only when the text changes.
+  const _raisedNow = alarms.filter((a) => a.action === 'raise').map((a) => a.slave_id);
+  for (const cmd of refreshBlacklistDescriptions(tracker, doc, _raisedNow)) alarms.push(cmd);
   // Step 6: on restore, the joints whose ProcessLogic EMA/deltaT baseline
   // must be reset so RoR starts from 0 (no spurious rate after a blackout).
   // Both the joints carried by the restored slave AND the joints that merely
@@ -238,6 +261,49 @@ function processReadResult(tracker, payload, ctx = {}) {
 function processTick(tracker, ctx = {}) {
   const events = tracker.tick(ctx.nowMs ?? Date.now());
   return _finalize(tracker, events, ctx);
+}
+
+/**
+ * Re-derive the impact text for slaves that are still blacklisted, so an alarm
+ * raised before a joint was mapped picks the joint up.
+ *
+ * Emits `action:'update'` rather than a fresh raise: the alarm instance, its
+ * raisedTs, its ACK state and its place in history all stay put. Only the
+ * description and the affected-joint lists change, and only when they actually
+ * differ - otherwise every 10 s tick would rewrite the alarm and the HMI would
+ * repaint continuously.
+ *
+ * Deliberately NOT applied to `probing` slaves: probing means the device is back
+ * in the scan and may recover within seconds, and its alarm is about to clear.
+ */
+function refreshBlacklistDescriptions(tracker, doc, raisedNow = []) {
+  if (!doc) return [];                       // no config read - nothing to re-derive from
+  const out = [];
+  tracker._lastImpact = tracker._lastImpact || {};
+  const blacklisted = tracker.blacklistedSlaveIds();
+
+  for (const slaveId of blacklisted) {
+    const { joints, ambientFor, text } = impactFor(doc, slaveId);
+    // A slave raised on this very pass already carries the current impact in its
+    // raise command; emitting an identical update behind it is pure noise.
+    if (raisedNow.includes(slaveId)) { tracker._lastImpact[slaveId] = text; continue; }
+    if (tracker._lastImpact[slaveId] === text) continue;
+    tracker._lastImpact[slaveId] = text;
+    out.push({
+      action: 'update',
+      slave_id: slaveId,
+      joints,
+      ambient_for_joints: ambientFor,
+      description: `Slave ${slaveDisplayName(doc, slaveId)} blacklisted; ${text}`,
+    });
+  }
+
+  // Forget slaves no longer blacklisted, so a later re-blacklist is not
+  // suppressed by an impact this remembered from last time.
+  for (const slaveId of Object.keys(tracker._lastImpact)) {
+    if (!blacklisted.includes(slaveId)) delete tracker._lastImpact[slaveId];
+  }
+  return out;
 }
 
 /**

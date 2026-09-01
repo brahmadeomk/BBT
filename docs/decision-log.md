@@ -4988,3 +4988,51 @@ feature is proven".
 Checked while reviewing the capture, and fine: `sensor_status` arrives lowercase
 `"ok"`, and `influx-points.js` already compares case-insensitively with a comment
 explaining exactly this, so the historian is not silently dropping readings.
+
+## 2026-09-01 — Blacklist description now follows the joint mapping
+
+Reported from the panel: slave 6 carries four joints since the multi-channel
+commissioning, but its blacklist alarm read *"joint(s) J06 not measurable"*.
+
+**The lookup was never wrong.** `jointsForSlave` already filters, and a fresh
+blacklist with four joints mapped produces
+*"Slave 6 (Sensor6) blacklisted after 3 consecutive read failures; joint(s) J06,
+J07, J08, J09 not measurable"* — verified directly. The history entry was a
+**snapshot artifact**: it was raised at 16:54:55 when only J06 was mapped (its
+text says "Slave 6" with no "(Sensor6)" label, so the slave row was mid-edit),
+and the multiCh_1/2/3 comm alarms first appear at 16:58:54, when J07–J09 were
+applied. The description was correct when written and never revisited.
+
+That is still a real gap: commissioning channels onto a device that is *currently*
+blacklisted is exactly what a test panel does, and the alarm then understates the
+impact permanently.
+
+### Fix
+`refreshBlacklistDescriptions` re-derives the impact on every tick for slaves
+still `blacklisted`, emitting `action:'update'` only when it changes. The Alarm
+Manager rewrites the text in place — same instance, same `raisedTs`, same ACK
+state, same history entry, **no e-mail**. A re-raise would have reset the
+acknowledgement and mailed everyone again for a device that never changed state.
+
+`probing` slaves are deliberately excluded: probing means the device is back in
+the scan and may recover within seconds, and its alarm is about to clear anyway.
+
+### Two details that took a second pass
+**Memoise the impact, not the description.** The raise text says "blacklisted
+after N consecutive read failures" and the refresh says "blacklisted", so
+comparing full strings never matched and every tick would have emitted an
+update. Both paths now share one `impactFor()` helper, and the memo keys on its
+output.
+
+**Skip a slave raised on the same pass.** The refresh runs inside the same
+`_finalize` as the raise, so without a guard every blacklist emitted a raise
+immediately followed by an identical update. Caught by an existing test
+asserting `alarms.length === 1`.
+
+### Test-fixture note
+My first regression test for the restore-then-re-blacklist case never actually
+restored the device — the ticks never reached the 30 s probe backoff, so it
+stayed blacklisted and the test proved nothing while passing its own premise.
+It now asserts `status === 'active'` before re-blacklisting. Same class as the
+device-health fixture that held `busSeen` fixed while advancing the clock: a
+fixture that does not reach the state under test is worse than no test.

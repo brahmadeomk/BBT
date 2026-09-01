@@ -881,6 +881,8 @@ unnecessary job update. Wired as "Repair Blacklist Exclude"
 reconcile, so the scan is repaired first and a genuinely dead device has
 re-failed its 3 reads by the time alarms are reconciled.
 
+**Blacklist impact text follows the joint mapping (2026-09-01).** The raise description is a snapshot, and it was never revisited — so commissioning channels onto an already-blacklisted module (what a test panel does constantly) left a 4-channel device reading *"joint(s) J06 not measurable"* after J07–J09 were added. `refreshBlacklistDescriptions` re-derives it on each tick for slaves still `blacklisted` (never `probing` — that alarm is about to clear) and emits `action:'update'` **only when the impact changes**; the Alarm Manager rewrites the text in place, keeping the instance, `raisedTs`, ACK state and history entry, with no new e-mail. Memoised on the **impact**, not the full description, because the raise and refresh prefixes differ on purpose; a slave raised on the same pass is skipped so a raise is not shadowed by an identical update.
+
 **Blacklist live-verified on the Pi (2026-07-24):** disconnecting a
 device blacklists it (after the tap was fixed to read the PARSED Nano
 stream, and the tracker moved to a module singleton) and raises its

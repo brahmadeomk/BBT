@@ -415,3 +415,31 @@ describe('the joint name survives the applied-config repoint (2026-09-01)', () =
     assert.match(fn, /r\.joint_id && r\.joint_name/, 'built from the draft rows');
   });
 });
+
+describe('the Alarm Manager applies blacklist description updates (2026-09-01)', () => {
+  const fn = () => JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'))
+    .find((n) => n.id === 'de6fcc55794afd9e').func;
+
+  test('an update refreshes the text in place, not by re-raising', () => {
+    // Same alarm instance, same raisedTs, same ACK state - only what it SAYS
+    // changes. A re-raise would reset the ACK and send another e-mail.
+    const body = fn();
+    const i = body.indexOf('b.action === "update"');
+    assert.ok(i > 0, 'the update action must be handled');
+    // Bound to THIS block. A fixed-size window spilled into the neighbouring
+    // clear branch, whose historian.push then failed the assertion below.
+    const block = body.slice(i, body.indexOf('b.action === "clear"', i));
+    assert.match(block, /a\.description = b\.description/);
+    assert.ok(!/emails\.push/.test(block), 'an update must not send an e-mail');
+    assert.ok(!/raisedTs: nowISO/.test(block), 'nor restamp the raise');
+    assert.ok(!/historian\.push/.test(block), 'nor add a history entry');
+  });
+
+  test('the historian copy of that raise is kept in step', () => {
+    // Otherwise Cleared Alarm History keeps showing text the alarm no longer has.
+    const body = fn();
+    const i = body.indexOf('b.action === "update"');
+    const block = body.slice(i, body.indexOf('b.action === "clear"', i));
+    assert.match(block, /h\.description = a\.description/);
+  });
+});

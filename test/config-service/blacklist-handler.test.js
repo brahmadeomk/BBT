@@ -474,3 +474,99 @@ describe('stale exclude set after a restart (reconcileExcludeSet)', () => {
     }
   });
 });
+
+describe('blacklist description follows the joint mapping (2026-09-01)', () => {
+  // Reported from the panel: a 4-channel module blacklisted while only channel 1
+  // was mapped kept reading "joint(s) J06 not measurable" after J07-J09 were
+  // commissioned onto it. The description is a snapshot taken at raise time and
+  // was never revisited - and commissioning channels onto a faulty module is
+  // exactly what a test panel does.
+  const doc = (joints) => ({
+    modbus: { slaves: [{ slave_id: 'sl06', unit_address: 6, label: 'Sensor6', channels: 4 }] },
+    zones: [],
+    joints,
+  });
+  const ONE = [{ joint_id: 'J06', slave_id: 'sl06', channel: 1 }];
+  const FOUR = [
+    ...ONE,
+    { joint_id: 'J07', slave_id: 'sl06', channel: 2 },
+    { joint_id: 'J08', slave_id: 'sl06', channel: 3 },
+    { joint_id: 'J09', slave_id: 'sl06', channel: 4 },
+  ];
+
+  const blacklist = (tracker, d, t0) => {
+    let last = [];
+    for (let i = 0; i < 3; i += 1) {
+      last = bh.processReadResult(tracker, { t: 'r', id: 6, st: 'err' }, { doc: d, nowMs: t0 + i * 1000 }).alarms;
+    }
+    return last;
+  };
+
+  test('a fresh blacklist names every joint on the device', () => {
+    const t = bh.newTracker(trackerOpts);
+    const [raise] = blacklist(t, doc(FOUR), 1000);
+    assert.deepEqual(raise.joints, ['J06', 'J07', 'J08', 'J09']);
+    assert.match(raise.description, /J06, J07, J08, J09 not measurable/);
+  });
+
+  test('joints commissioned onto an already-blacklisted device update the text', () => {
+    const t = bh.newTracker(trackerOpts);
+    blacklist(t, doc(ONE), 1000);
+    const { alarms } = bh.processTick(t, { doc: doc(FOUR), nowMs: 10000 });
+    assert.equal(alarms.length, 1);
+    assert.equal(alarms[0].action, 'update', 'not a re-raise - the alarm instance must survive');
+    assert.deepEqual(alarms[0].joints, ['J06', 'J07', 'J08', 'J09']);
+    assert.match(alarms[0].description, /J06, J07, J08, J09 not measurable/);
+  });
+
+  test('an unchanged mapping produces NO update, tick after tick', () => {
+    // Every 10 s otherwise, which would repaint the HMI continuously and bury
+    // real events in the alarm output.
+    const t = bh.newTracker(trackerOpts);
+    blacklist(t, doc(FOUR), 1000);
+    for (const now of [10000, 20000, 30000]) {
+      assert.deepEqual(bh.processTick(t, { doc: doc(FOUR), nowMs: now }).alarms, [], `tick @${now}`);
+    }
+  });
+
+  test('the raise is not shadowed by an identical update on the same pass', () => {
+    // The refresh runs in the same _finalize as the raise; without the guard it
+    // emitted a duplicate carrying the same impact.
+    const t = bh.newTracker(trackerOpts);
+    const alarms = blacklist(t, doc(FOUR), 1000);
+    assert.deepEqual(alarms.map((a) => a.action), ['raise']);
+  });
+
+  test('removing joints narrows the text too', () => {
+    const t = bh.newTracker(trackerOpts);
+    blacklist(t, doc(FOUR), 1000);
+    const { alarms } = bh.processTick(t, { doc: doc(ONE), nowMs: 10000 });
+    assert.match(alarms[0].description, /joint\(s\) J06 not measurable/);
+    assert.ok(!/J07/.test(alarms[0].description));
+  });
+
+  test('with no readable config it re-derives nothing rather than guessing', () => {
+    const t = bh.newTracker(trackerOpts);
+    blacklist(t, doc(FOUR), 1000);
+    assert.deepEqual(bh.processTick(t, { doc: null, nowMs: 10000 }).alarms, []);
+  });
+
+  test('a restored-then-reblacklisted device is not silenced by the old memo', () => {
+    const t = bh.newTracker(trackerOpts);
+    blacklist(t, doc(FOUR), 1000);
+
+    // Past the 30 s probe backoff so the device is actually probed, then three
+    // good reads to restore it. Without clearing that first the memo would never
+    // be dropped and this would prove nothing.
+    let now = 40000;
+    bh.processTick(t, { doc: doc(FOUR), nowMs: now });
+    for (let i = 0; i < 3; i += 1) {
+      bh.processReadResult(t, { t: 'r', id: 6, st: 'ok', val: [1] }, { doc: doc(FOUR), nowMs: (now += 1000) });
+    }
+    assert.equal(t.snapshot().sl06.status, 'active', 'must genuinely restore first');
+
+    const [raise] = blacklist(t, doc(FOUR), 100000);
+    assert.equal(raise.action, 'raise');
+    assert.match(raise.description, /J06, J07, J08, J09/);
+  });
+});
