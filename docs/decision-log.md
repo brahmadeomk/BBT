@@ -4893,3 +4893,40 @@ Left in place deliberately: the pre-change `latest_ambient_state` entry under th
 bare key `101`. It can never be written again and the 60 s freshness check
 rejects it permanently, so it is inert; pruning it would have meant a third
 change to the live measurement path in one day for tidiness alone.
+
+## 2026-09-01 — Repoint lost the joint name from alarm e-mails
+
+Reported from the panel: the e-mail body read `Joint: J02` again, having shown
+`J02 (Dc/07/Fl_0/Tx/Line_1)` before the pull. My regression, from repointing
+ProcessLogic at the applied document.
+
+**The joint-table apply never persisted the name.** `joint-master-handler.js`
+built each applied joint as `{joint_id, slave_id, channel, zone_id, enabled,
+threshold_profile}` — no `label`, despite the schema having the field and the
+dashboard making the name a **mandatory** column. So the operator's name existed
+only in the legacy draft. Reading the draft, ProcessLogic picked it up; reading
+the applied doc, there was nothing to pick up, `buildProcessLogicJoints` fell
+back to the joint id, and `jointLabel()` correctly rendered just `J02` because
+name and id were equal.
+
+Exactly the same shape as the `temp_scale` break earlier today, inverted: there,
+a field nothing read held a wrong value; here, a field nothing wrote held
+nothing at all. Both were invisible until something started reading them.
+
+### Fix, in two parts
+1. **`applyJoints` now writes `label: j.joint_name`.** The name belongs in the
+   applied configuration like everything else the panel runs on.
+2. **`buildProcessLogicJoints(doc, { labelFallback })`** recovers the name from
+   the draft for documents applied *before* this fix — otherwise the name would
+   stay missing until every operator happened to re-apply. A persisted `label`
+   always wins; the fallback is a stopgap, not a second source of truth. This is
+   the same recovery the Modbus Settings handler already does for slave labels
+   on panels migrated before that field existed.
+
+So the e-mails are correct again on the next deploy with no operator action, and
+the config self-heals on the next joint-table apply.
+
+**Also visible in the same debug capture, and unrelated:** the SMTP send failed
+with `getaddrinfo ENOTFOUND relay.go…`. The alarm pipeline is producing the mail
+correctly; the panel cannot resolve the relay hostname. That is DNS or the mail
+host setting, not the alarm path.

@@ -220,6 +220,12 @@ function applyJoints(msg, joints, zones, slaveList, store, user) {
 
   const newJoints = joints.map((j) => ({
     joint_id: j.joint_id,
+    // The operator-facing location, a MANDATORY column in the joint table. It
+    // used to live only in the legacy draft, so repointing ProcessLogic at the
+    // applied document (2026-09-01) silently lost it from every alarm - the
+    // e-mail body went back to "Joint: J02". The name belongs in the applied
+    // config like everything else the panel runs on.
+    label: j.joint_name,
     slave_id: slavesByAddress.get(Number(j.slaveID)).slave_id,
     channel: rowChannel(j),
     zone_id: j.zone_id.toLowerCase(),

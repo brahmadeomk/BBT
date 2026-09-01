@@ -191,3 +191,39 @@ describe('diffDraftVsApplied - making the new gap visible', () => {
     }
   });
 });
+
+describe('joint name survives the move to the applied document', () => {
+  // Live regression 2026-09-01: repointing ProcessLogic at the applied doc sent
+  // the alarm e-mails back to "Joint: J02". The operator types the name into a
+  // MANDATORY column, but the joint-table apply never persisted it as
+  // `joints[].label`, so it existed only in the legacy draft.
+  const noLabel = () => ({
+    modbus: { slaves: [{ slave_id: 'sl02', unit_address: 2 }] },
+    zones: [{ zone_id: 'z1', name: 'Zone1' }],
+    joints: [{ joint_id: 'J02', slave_id: 'sl02', channel: 1, zone_id: 'z1' }],
+  });
+  const fallback = new Map([['J02', 'Dc/07/Fl_0/Tx/Line_1']]);
+
+  test('a document applied before the fix recovers the name from the draft', () => {
+    assert.equal(buildProcessLogicJoints(noLabel(), { labelFallback: fallback }).joints[0].joint_name,
+      'Dc/07/Fl_0/Tx/Line_1');
+  });
+
+  test('a persisted label always wins over the draft', () => {
+    // The applied config is the source of truth; the draft is only a stopgap
+    // for documents that predate the field.
+    const d = noLabel();
+    d.joints[0].label = 'Riser bend';
+    assert.equal(buildProcessLogicJoints(d, { labelFallback: fallback }).joints[0].joint_name, 'Riser bend');
+  });
+
+  test('with neither, it falls back to the id rather than inventing one', () => {
+    assert.equal(buildProcessLogicJoints(noLabel()).joints[0].joint_name, 'J02');
+  });
+
+  test('a malformed fallback is not an error', () => {
+    for (const bad of [undefined, null, {}, new Map()]) {
+      assert.doesNotThrow(() => buildProcessLogicJoints(noLabel(), { labelFallback: bad }));
+    }
+  });
+});

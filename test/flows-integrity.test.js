@@ -391,3 +391,15 @@ describe('the decode node cannot spam the log (2026-09-01)', () => {
     assert.ok(!/useConfigScale/.test(fn()), 'the flow must not opt in');
   });
 });
+
+describe('the joint name survives the applied-config repoint (2026-09-01)', () => {
+  const flows = () => JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+
+  test('the publisher passes the draft as a label fallback', () => {
+    // A document applied before `label` was persisted carries no joint name, so
+    // the alarm e-mails would fall back to the bare id.
+    const fn = flows().find((n) => n.id === 'c0nf1gd21ft00002').func;
+    assert.match(fn, /labelFallback/);
+    assert.match(fn, /r\.joint_id && r\.joint_name/, 'built from the draft rows');
+  });
+});

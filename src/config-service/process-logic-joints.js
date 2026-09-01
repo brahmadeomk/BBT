@@ -55,9 +55,12 @@ function resolveAmbientKey(doc, joint) {
 
 /**
  * @param {object} doc - the APPLIED cfg/modbus+joints document
+ * @param {object} [opts]
+ * @param {Map<string,string>} [opts.labelFallback] - joint_id -> operator name,
+ *   for documents applied before `label` was persisted
  * @returns {{joints: Array, warnings: string[], sourceVersion: number|null}}
  */
-function buildProcessLogicJoints(doc) {
+function buildProcessLogicJoints(doc, { labelFallback } = {}) {
   const warnings = [];
   const joints = Array.isArray(doc?.joints) ? doc.joints : null;
 
@@ -95,7 +98,12 @@ function buildProcessLogicJoints(doc) {
     }
     byChannel.set(key, {
       joint_id: j.joint_id,
-      joint_name: j.label ?? j.joint_id,
+      // `label` was not persisted by the joint-table apply until 2026-09-01, so
+      // a document applied before then has none and the alarm e-mails would fall
+      // back to the bare id. Recover it from the draft until the operator's next
+      // apply writes it properly - the same recovery the Modbus Settings handler
+      // does for slave labels on panels migrated before that field existed.
+      joint_name: j.label ?? labelFallback?.get?.(j.joint_id) ?? j.joint_id,
       slaveID: unit,
       channel,
       zone_id: j.zone_id ?? null,
