@@ -5036,3 +5036,16 @@ stayed blacklisted and the test proved nothing while passing its own premise.
 It now asserts `status === 'active'` before re-blacklisting. Same class as the
 device-health fixture that held `busSeen` fixed while advancing the clock: a
 fixture that does not reach the state under test is worse than no test.
+
+**Live-verified on the Pi (2026-09-01).** Cleared Alarm History shows the
+refreshed text — *"Slave 6 blacklisted; joint(s) J06, J07, J08, J09 not
+measurable"* — on the alarm that was raised when only J06 was mapped, with the
+historian copy rewritten in step. The earlier 16:54:55 entry keeps its original
+single-joint text, correctly: that was a different alarm instance.
+
+**Small information loss, noted not fixed:** the update text drops the *"after N
+consecutive read failures"* clause the raise carries, because the two prefixes
+differ by design. Once an alarm has been updated, the history no longer records
+how many failures triggered the blacklist. The count is still in the tracker and
+could be carried into the update prefix; left alone for now rather than spending
+another deploy cycle on it.
