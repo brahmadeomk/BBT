@@ -990,6 +990,30 @@ ram_available_mb, low_voltage incl. Pi under-voltage/throttling flags
 from `vcgencmd get_throttled`; all fields null off-Pi, probe failures
 never break the heartbeat).
 
+**Uplink + Pi health extended (user request 2026-09-01).** The `system` block
+now also carries **`disk[]`** (`df -P -k`; the highest-value addition — the SD
+card holds the InfluxDB historian *and* the cloud outbox, and a full disk breaks
+both silently), **`uptime_sec`** (a value that decreases between heartbeats is a
+reboot — the brown-out signature), **`load`** with `cpus`, **`ram_total_mb`**,
+**`clock_synced`** (`timedatectl`; edge_utc timestamps depend on it),
+**`process_rss_mb`** (Node-RED's own RSS, the only slow-leak signal), and full
+**uplink identity**: Wi-Fi `ssid`/`bssid`/`freq_mhz`/`band`/`tx_bitrate_mbps`
+from one `iw dev <if> link` call (fallback `iwgetid -r` + `/proc/net/wireless`,
+since wireless-tools is absent by default on Bookworm), and cellular
+`operator`/`access_tech`/`registration`/`modem_state` from `mmcli -m any -K`
+(fallback: the human output). Cellular still sends only **one** AT command
+(`+CSQ`) on `BUSDUCT_MODEM_AT_PORT` — each exchange on a modem carrying a live
+data session is a risk; **CSQ 99 = "unknown"** and is now rejected rather than
+decoded as +85 dBm. Extra filesystems via `BUSDUCT_HEALTH_DISK_PATHS`
+(colon-separated). Every probe nulls **only its own field**, and all spawns use
+`stdio: ['ignore','pipe','ignore']` — `timedatectl` on a non-systemd box
+otherwise writes to Node-RED's log every hour. `wifi.ssid`/`bssid` name the
+customer's network and are published: deliberate (remote diagnosis of a marginal
+link needs the AP identity) but site information. Rejected as not earning their
+place: CPU frequency (throttle flags cover the actionable part), SD-wear counters
+(not portable), per-core temps (a Pi has one thermal zone), throughput counters
+(needs cross-sample state; the outbox backlog already answers it).
+
 ## Device → cloud message contract (2026-08-27)
 
 **Every published message carries a `type` field as its first

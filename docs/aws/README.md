@@ -663,6 +663,58 @@ to exceed the 5 KB metering block: several messages share a `timestamp`
 and `interval_min`, each with its own `start_index`/`count`. Key your
 upsert on `(panel, timestamp, joint)`, not on "one message per interval".
 
+**The heartbeat carries the panel's own hardware health** in a `system` block.
+It answers "is the box that runs all this still healthy?", which nothing else
+does — device_health covers the sensors, this covers the Pi and its uplink:
+
+```jsonc
+{ "type":"heartbeat", "v":1, "timestamp":"...", "fwVersion":"...",
+  "configVersions": { "modbus_joints":7, "alarms":3 },
+  "system": {
+    "cpu_temp_c":52.6, "mac_id":"dc:a6:32:ab:cd:ef",
+    "ram_free_mb":209, "ram_available_mb":2771, "ram_total_mb":3794,
+    "low_voltage": { "now":false, "since_boot":true, "throttled_now":false,
+                     "throttled_since_boot":false, "raw":"0x50000" },
+    "uptime_sec":867543,
+    "load": { "avg1":0.52, "avg5":0.48, "avg15":0.44, "cpus":4 },
+    "disk": [ { "path":"/", "mount":"/", "free_mb":17146,
+                "total_mb":29510, "used_pct":41.9 } ],
+    "clock_synced":true, "process_rss_mb":186,
+    "network": {
+      "interface":"wlan0", "type":"wifi",           // wifi | ethernet | cellular | unknown
+      "wifi": { "ssid":"Plant Floor 2", "bssid":"dc:a6:32:11:22:33",
+                "signal_dbm":-58, "link_quality":61,
+                "freq_mhz":5180, "band":"5GHz", "tx_bitrate_mbps":234 }
+      // when type is "cellular", a `cellular` block appears instead:
+      // { "signal_percent":68, "signal_dbm":-69, "csq":22, "operator":"Airtel",
+      //   "access_tech":"lte", "registration":"home", "modem_state":"connected" }
+    } } }
+```
+
+**Every field here can be `null`**, independently. They come from separate
+probes (sysfs, /proc, `vcgencmd`, `df`, `iw`, `mmcli`) and a probe that is
+absent — a non-Pi box, no radio, no modem — nulls only its own field. Never
+treat a null as a fault; treat it as "not measured here".
+
+Four of these are worth alerting on, and are not represented anywhere else:
+
+| Field | Why it matters |
+|---|---|
+| `disk[].used_pct` | The SD card holds the InfluxDB historian *and* the cloud outbox. A full disk stops trend recording and stops the outbox holding messages through an outage — the two things that make an offline panel harmless. |
+| `uptime_sec` | If it *decreases* between two heartbeats the Pi rebooted. An unexplained reboot is how an intermittent brown-out announces itself; that symptom once cost a week of misdiagnosis. |
+| `clock_synced` | Timestamps are edge UTC. An unsynchronised clock corrupts historian and cloud correlation silently, and no other signal shows it. |
+| `low_voltage.since_boot` | Stays true after recovery — the forensic bit that catches a brown-out that has already passed. |
+
+`process_rss_mb` is Node-RED's own resident memory: the only field that catches
+a slow leak across a multi-week run, since `ram_available_mb` looks healthy right
+up until the OOM killer arrives. `load` is reported with `cpus` because "load
+3.5" is meaningless until you know whether the Pi has four cores or one.
+
+`wifi.ssid`/`bssid` name the customer's own network. Publishing them is
+deliberate — diagnosing a marginal link remotely means knowing which AP the
+panel associated with — but treat them as site information with the same care as
+the rest of the telemetry.
+
 **An alarm names its joint twice: by id and by location.**
 
 ```jsonc

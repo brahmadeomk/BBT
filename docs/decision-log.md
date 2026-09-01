@@ -4364,3 +4364,73 @@ so a consumer that starts late cannot know the current blacklist from it). The
 information the operator wanted is already present as `devices_blacklisted` and
 `joints_offline`; adding an alarm tally would duplicate the alarm channel inside
 the health channel and give two places to disagree.
+
+## 2026-09-01 — Uplink detail and additional Pi health parameters
+
+User request: report which network the panel is on — SSID and signal for Wi-Fi,
+signal and "other relevant fields" for a USB telecom dongle — and review what
+other Pi health parameters are worth carrying.
+
+### What already existed
+`pi-health.js` (heartbeat `system` block) already classified the default-route
+interface as wifi/ethernet/cellular and read a Wi-Fi dBm from
+`/proc/net/wireless` and a cellular percent from `mmcli`. What it did **not**
+have was the identifying half — no SSID, no BSSID, no band, no operator, no
+access technology. Signal strength without SSID cannot answer the question that
+actually gets asked remotely: *which* access point is it on, and did it roam?
+
+### Uplink detail added
+Wi-Fi comes from a single `iw dev <iface> link` call — SSID, BSSID, frequency,
+signal and negotiated bitrate all arrive together, and `iw` ships on Raspberry
+Pi OS. `iwgetid -r` plus `/proc/net/wireless` remains the fallback, because
+wireless-tools is *not* installed by default on Bookworm and neither source can
+be the only one. `link_quality` is still read from `/proc` even when `iw`
+succeeds: it is the driver's own 0–70 figure and `iw link` has no equivalent.
+Band is derived from frequency rather than guessed.
+
+Cellular uses `mmcli -m any -K`, whose key-value output is stable across
+versions, falling back to parsing the human output for older builds. That adds
+operator name, access technology, registration state (home/roaming) and modem
+state. **Deliberately still only one AT command** (`+CSQ`) on the spare port:
+every exchange on a modem carrying a live data session is a small risk, and
+everything else worth knowing is already in ModemManager.
+
+One real bug fixed while writing the CSQ path: **CSQ 99 means "not known or not
+detectable"**, and the existing formula would have decoded it as +85 dBm — an
+impossibly strong signal, which is the worst possible way to be wrong about a
+link that is actually dead.
+
+### Pi parameters added, and why each earns its place
+| Field | Reason |
+|---|---|
+| `disk[]` | The highest-value addition. The SD card holds the InfluxDB historian (7d raw + 90d + ~5y rollups) **and** the cloud outbox. A full disk stops trend recording and stops the outbox holding messages through a link outage — the two things that make an offline panel harmless — and *nothing* monitored it. |
+| `uptime_sec` | A value that decreases between heartbeats is a reboot. An unexplained reboot is exactly how an intermittent brown-out announces itself; that symptom cost a week of misdiagnosis in 2026-07. |
+| `clock_synced` | Timestamps are `edge_utc`; the historian and the cloud both correlate on them. An unsynchronised clock corrupts trends silently and is invisible from every other signal. |
+| `load` + `cpus` | Node-RED and InfluxDB share the Pi. Sustained load above the core count is when Modbus polls start slipping — and "load 3.5" is meaningless without the denominator. |
+| `ram_total_mb` | Same argument: free/available cannot be read as healthy or desperate across a fleet mixing 1/2/4/8 GB Pis. |
+| `process_rss_mb` | Node-RED's own RSS. The only field that catches a slow leak across a multi-week run; `ram_available_mb` looks fine right up until the OOM killer arrives. |
+
+**Considered and rejected:** CPU frequency (the throttle flags already say when
+it is being clamped, which is the actionable part); SD-card wear counters (not
+readable portably); per-core temperatures (a Pi has one thermal zone); network
+throughput counters (needs cross-sample deltas and state, and the outbox backlog
+already answers "is the link keeping up").
+
+### Two properties that had to hold
+**Every probe nulls only its own field.** They are separate reads of sysfs,
+/proc, `vcgencmd`, `df`, `iw` and `mmcli`, and a health snapshot must never
+break the heartbeat carrying it. A test asserts that killing `df` and
+`timedatectl` leaves `uptime_sec` and `load` intact.
+
+**Probes swallow stderr.** Found on a smoke run: `timedatectl` on a non-systemd
+box prints *"System has not been booted with systemd"* to stderr, which would
+have landed in Node-RED's log every hour. All eight spawns now use
+`stdio: ['ignore','pipe','ignore']`. Every command here is expected to be absent
+on some machine, so a noisy probe is worse than useless.
+
+`wifi.ssid`/`bssid` name the customer's own network and are published in the
+heartbeat. Deliberate — remote diagnosis of a marginal link needs to know which
+AP the panel associated with — but noted in both the module docblock and Part G
+as site information deserving the same care as the rest of the telemetry.
+
+Added optional fields throughout, so the wire contract stays `v: 1`.
