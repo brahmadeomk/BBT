@@ -119,6 +119,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | Channel recovery in the decode path (incl. why `temp_scale` is report-only) | `docs/channel-decode-proposal.md` | steps 1-2 **built**, fan-out proposed (2026-09-01) |
 | Edge device user manual (operator/technician HMI guide) | `docs/edge-user-manual.md` | present |
 | Nano 33 IoT field-replacement runbook | `docs/nano-replacement.md` | present |
+| HIRA — sensor installation on busducts | `docs/hira-live-sensor-installation.md` | **DRAFT, needs competent-person sign-off** (2026-09-01) |
 
 The **Edge Cloud Readiness Workplan** (now present) is the higher-level
 phase/acceptance document. Its §6 Exit Checklist is Slice 8's acceptance
