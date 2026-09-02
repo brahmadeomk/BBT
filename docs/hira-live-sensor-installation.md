@@ -1,7 +1,9 @@
 # Hazard Identification & Risk Assessment — installing BusductTherMo joint sensors
 
 **DRAFT FOR COMPETENT-PERSON REVIEW. NOT AN APPROVED DOCUMENT.**
-Prepared 2026-09-01. **Rev 6, same day** — first field data folded in: installed
+Prepared 2026-09-01. **Rev 7, same day** — gap corrected to **0.25 mm** (Rev 4-6
+assumed 1 mm). Force and demagnetisation concerns substantially reduced; coating
+sensitivity raised. **Rev 6** — first field data folded in: installed
 commercial site, 2000 A, cover 60 °C, 2 months (§1.3-INSTALLED). **Rev 5** — sensing element confirmed in the plate
 touching the cover; §1.3b resolved. **Rev 4** — as-built clamp geometry (5 mm plate,
 1 mm gap) assessed in §1.3a/§1.3b. **Rev 3** — magnetic clamp confirmed; see §1.3,
@@ -98,15 +100,17 @@ judgements from estimates into measurements.
 At 60 °C a standard N-grade NdFeB magnet has lost roughly 4–5 % of its flux
 reversibly (≈0.11 %/K over a 40 K rise). That is recoverable and unremarkable.
 
-The counterintuitive part is the interaction with §1.3a: **an open magnetic
-circuit demagnetises at a LOWER temperature than a closed one.** A large air gap
-gives a low permeance coefficient, which moves the magnet's operating point down
-its demagnetisation curve and towards the knee — so the 1 mm gap that was
-intended to protect the magnet thermally makes it *more* susceptible to
-irreversible loss at whatever temperature it does reach. The gap helps and hurts
-at the same time, and which dominates is a question for the magnet supplier
-given this geometry. **[VERIFY — ask the supplier for the working point at 1 mm
-gap and 60–90 °C, not just the catalogue max working temperature.]**
+**Correction to Rev 6, which assumed a 1 mm gap.** Rev 6 argued that the gap
+made the magnet *more* vulnerable to irreversible demagnetisation, because an
+open magnetic circuit has a low permeance coefficient and sits nearer the knee of
+the demagnetisation curve. **That effect is real but it is small at 0.25 mm.**
+The circuit is close to closed at this spacing, the operating point stays well
+away from the knee, and the concern is largely withdrawn.
+
+The residual check is unchanged in form but much less pressing: ask the supplier
+for the working point at **0.25 mm plus coating** and 60–90 °C, rather than the
+catalogue maximum working temperature, which assumes a closed circuit.
+**[VERIFY]**
 
 **b) Two months of no abnormalities evidences less than it appears.**
 It is real and welcome, but note precisely what it covers:
@@ -134,7 +138,7 @@ load, which is enough to set thresholds empirically rather than by guess.
 ### 1.3a The 5 mm plate and 1 mm gap — what it does and does not do
 
 **Design as built (confirmed 2026-09-01): the magnet is carried in a 5 mm metal
-plate, with a 1 mm gap between the busduct surface and the magnet face.**
+plate, with a **0.25 mm** gap between the busduct surface and the magnet face.**
 
 That is clearly aimed at the problem above, and the intent is right. Three
 things need checking before it can be credited as the control.
@@ -145,11 +149,12 @@ enclosed by the plate, the metal is that path:
 
 | Path | Approx. thermal resistance |
 |---|---|
-| 1 mm air across the gap | `0.001 / 0.026` ≈ **0.038** K·m²/W |
+| 0.25 mm air across the gap | `0.00025 / 0.026` ≈ **0.0096** K·m²/W |
 | 5 mm steel through the plate wall | `0.005 / 45` ≈ **0.0001** K·m²/W |
 
-The metal route is on the order of **hundreds of times** less resistive, so heat
-flows *around* the gap rather than across it. Unless the magnet is isolated from
+The metal route is roughly **90×** less resistive, so heat flows *around* the gap
+rather than across it. (A thinner gap makes this *more* true, not less — the
+conclusion is unchanged in direction and slightly stronger.) Unless the magnet is isolated from
 the plate on **all** faces — insulating spacers, not just an air gap on the
 working face — it will sit at essentially plate temperature, and the plate sits
 at essentially cover temperature. The gap then limits transient peaks, not the
@@ -160,20 +165,33 @@ body during the thermal survey (§E6) and read it alongside the cover. If the
 magnet tracks the cover, the gap is not protecting it and the grade question in
 §1.3 stands unchanged. **[VERIFY]**
 
-**b) A 1 mm gap costs a large fraction of the holding force.**
-Magnetic holding force falls off steeply with air gap — for a typical clamp,
-1 mm commonly leaves only a fraction of the zero-gap figure, and the curve is
-steepest in exactly this range. The design has traded grip for thermal
-protection, which is a legitimate trade but must be quantified:
+**b) At 0.25 mm the force penalty is modest — but coating sensitivity is now
+the sharp edge.**
 
-- Obtain the **force-versus-gap curve** for this clamp from the supplier and
-  read the figure at 1 mm, not the headline zero-gap force. **[VERIFY]**
-- **Paint or powder coating on the cover adds to the effective gap.** A
-  150 µm coating on top of a 1 mm design gap is a further 15 % of gap, on the
-  steep part of the curve. The working gap is the design gap **plus** the
-  coating. **[SITE]**
-- Confirm the remaining force at temperature, since both effects apply at once:
-  reduced flux from heat **and** reduced coupling from the gap.
+0.25 mm is a small working gap and a typical clamp retains most of its holding
+force there. The grip concern that would have applied at 1 mm is largely
+answered by the geometry.
+
+**What replaces it is proportional sensitivity to the cover finish.** At a
+0.25 mm design gap, a paint or powder coating is comparable in thickness to the
+gap itself:
+
+| Cover coating | Working gap | Increase over design |
+|---|---|---|
+| 60 µm | 0.31 mm | +24 % |
+| 100 µm | 0.35 mm | +40 % |
+| 150 µm | 0.40 mm | +60 % |
+| 200 µm | 0.45 mm | +80 % |
+
+The same 150 µm that would have been a 15 % perturbation on a 1 mm gap is a
+**60 %** perturbation here, and it lands on the steep part of the force curve.
+
+- Measure the **actual coating thickness** on the covers in service — a coating
+  gauge reading takes seconds and settles it. **[SITE]**
+- Read the **force-versus-gap curve** at design gap **plus measured coating**,
+  not at the headline zero-gap figure. **[VERIFY]**
+- Confirm the remaining force at 60–90 °C, since reduced flux from heat and
+  reduced coupling from the total gap apply together.
 
 **c) A ferrous plate in the enclosure's AC field can heat on its own account.**
 Hysteresis and eddy losses in a 5 mm steel plate sitting against a busduct
@@ -358,7 +376,7 @@ broken.**
 | B9 | **Finger pinch or crush** as a strong magnet snaps onto the cover | Installer | 3×4 = **12** | Gloves. Controlled approach technique, sliding onto the surface rather than dropping on. Two-handed placement where the magnet is strong enough to require it | |
 | B10 | Strong magnet attracts loose ferrous debris, tools or swarf and carries it into the work | Installer, plant | 2×3 = **6** | Clean the clamp face and the cover position before placement. Keep the clamp bagged until the moment of fitting | |
 | B11 | **Hysteresis and eddy heating in the 5 mm ferrous plate.** The sensing element is INSIDE this plate, so any self-heating is read directly as joint temperature — a positive bias opposite in sign to the thermal lag, and the two do not cancel predictably | Measurement integrity, operators | 4×3 = **12** | Measure plate, cover and magnet temperatures together in the E6 survey **[VERIFY]**. OEM confirmation that an added ferrous plate on the enclosure is acceptable **[SITE]** | |
-| B12 | **Holding force at the as-built 1 mm gap, plus cover coating, is below what the position needs** — especially once the magnet is hot | Installer, third parties below, plant | 4×3 = **12** | Force-versus-gap curve read at the **actual** working gap (design gap + coating thickness), at temperature, not the zero-gap headline figure **[VERIFY]**. Secondary retention regardless | |
+| B12 | **Cover coating raises the working gap disproportionately.** At a 0.25 mm design gap a 150 µm coating is a 60 % increase, on the steep part of the force curve — where the same coating on a 1 mm gap would be 15 % | Installer, third parties below, plant | 3×3 = **9** | Measure coating thickness on covers in service with a gauge **[SITE]**. Read the force curve at design gap **plus** measured coating, at temperature **[VERIFY]**. Secondary retention regardless | |
 | B6 | Sensor or cable obstructs cover removal for future maintenance, or is damaged when a cover is next removed | Maintainers | 2×4 = **8** | Position clear of cover fixings and joint access. Cable with enough slack to allow cover removal without disconnection. Record the position per joint | |
 | B7 | Cover surface preparation (cleaning, abrading for adhesive) generates dust or damages the finish/corrosion protection | Installer, plant | 2×3 = **6** | Minimum preparation consistent with the fixing. Reinstate any coating disturbed | |
 
@@ -427,8 +445,10 @@ it. What remains is not optional.
 - [ ] **[VERIFY]** Magnet body temperature measured against cover temperature on
       the as-built assembly — does the 1 mm gap actually keep the magnet cool,
       or does heat bypass it through the plate? (§1.3a)
-- [ ] **[VERIFY]** Force-versus-gap curve, read at 1 mm **plus cover coating
-      thickness**, at operating temperature
+- [ ] **[SITE]** Coating thickness measured on covers in service (a gauge reading;
+      at a 0.25 mm gap this is the dominant variable)
+- [ ] **[VERIFY]** Force-versus-gap curve read at 0.25 mm **plus measured
+      coating**, at operating temperature
 - [ ] **[SITE]** Plate-to-cover contact verified on a **curved or ribbed** cover,
       not only on a flat test piece (§1.3b a)
 - [ ] **[VERIFY]** Plate material and thickness, for the thermal-mass and
