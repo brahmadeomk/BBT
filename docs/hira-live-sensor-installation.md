@@ -1,7 +1,9 @@
 # Hazard Identification & Risk Assessment — installing BusductTherMo joint sensors
 
 **DRAFT FOR COMPETENT-PERSON REVIEW. NOT AN APPROVED DOCUMENT.**
-Prepared 2026-09-01. **Rev 8, same day** — insulating the magnet assessed (§1.3c);
+Prepared 2026-09-01. **Rev 9** — WATCH on 1-2 of 35 joints: first discrimination
+evidence, and the thermography opportunity it creates (§1.3-INSTALLED b2/c).
+**Rev 8** — insulating the magnet assessed (§1.3c);
 higher magnet grade recommended in preference. **Rev 7** — gap corrected to **0.25 mm** (Rev 4-6
 assumed 1 mm). Force and demagnetisation concerns substantially reduced; coating
 sensitivity raised. **Rev 6** — first field data folded in: installed
@@ -127,7 +129,59 @@ The last row is the one to hold on to. **Absence of alarms during a period with
 no known fault is not evidence of detection capability.** That is E3/E7, and two
 quiet months is exactly the evidence that tends to get mistaken for validation.
 
-**c) 60 °C is a touch-burn temperature.** Metal at 60 °C causes burns on
+**b2) UPDATE — WATCH raised on 1–2 joints of 35, ΔT and RoR plausible, no false
+alarms.** Reported after the two-month window, and it is the most informative
+result so far.
+
+**What it evidences: discrimination.** 33 of 35 joints below threshold and 1–2
+above is the pattern you want. A threshold set too low flags everything; too
+high, or a measurement too damped to separate joints, flags nothing. Neither
+happened. **This partly answers §1.5 and E6** — the cover-mounted measurement
+retains enough signal to tell joints apart, which was the open question about
+whether thermal damping would wash the difference out. It does not answer the
+absolute-accuracy half.
+
+**What it does not evidence: that these are faults, or that they are not.**
+WATCH firing on the top few percent of a population is expected behaviour for
+the lowest rung of the ladder — it means "keep an eye on these", and a normal
+spread of joint temperatures will always have a tail. Benign explanations are at
+least as likely as a degrading joint:
+
+| Benign | Concerning |
+|---|---|
+| Position — near a tee, elbow, riser or tap-off | Higher-resistance joint (loose, oxidised) — the fault the system exists for |
+| Local load asymmetry or phase imbalance | |
+| Less ventilation on that section | |
+| Higher local ambient (near plant, in a shaft) | |
+
+**Three questions turn this from an observation into knowledge**, and two are
+answerable from the historian without leaving a desk:
+
+1. **Are they the same 1–2 joints every time, or does it move?** Consistent =
+   a real physical difference worth explaining. Moving = load-driven, and the
+   WATCH threshold is marginally low.
+2. **Is their ΔT trending up over the two months, or flat?** Flat elevated = a
+   positional characteristic. Rising = a degrading joint, and this is the system
+   doing exactly its job.
+3. **Thermography on those specific joints against their neighbours.** This is
+   the recommendation — see below.
+
+**c) The thermography opportunity — take it now.** A survey of the 1–2 flagged
+joints and a few of their neighbours delivers three things at once, and this is
+the cheapest chance to get them:
+
+- **Validates the flag.** Is the joint itself hotter, or only its cover?
+- **Gives the E6 transfer function at two points** — a normal joint and a warm
+  one — which is far more useful than a single-point calibration, because it
+  gives the *slope*, not just an offset.
+- **Is the closest thing to a detection-capability test available** without
+  waiting for a real fault. If the flagged joints are measurably hotter on the
+  thermal camera, the system has demonstrated it discriminates against an
+  independent reference.
+
+Do it while the flags are live. Once they clear, the opportunity goes with them.
+
+**c2) 60 °C is a touch-burn temperature.** Metal at 60 °C causes burns on
 prolonged contact. Relevant to C1 for anyone handling covers or clamps in
 service, and to the maintenance task of checking clamp grip.
 
