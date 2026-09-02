@@ -1,7 +1,12 @@
 # Hazard Identification & Risk Assessment — installing BusductTherMo joint sensors
 
 **DRAFT FOR COMPETENT-PERSON REVIEW. NOT AN APPROVED DOCUMENT.**
-Prepared 2026-09-01. This is a starting structure with the hazards that are
+Prepared 2026-09-01. **Rev 2, same day** — revised throughout after the mounting
+method was confirmed as *external, on the busduct cover, cover isolated from the
+conductors*. Rev 1 assumed the joint had to be opened and concluded the work
+should be eliminated; that conclusion no longer stands. Superseded items are
+marked rather than deleted, because they all return if the enclosure is opened
+or penetrated (§1). This is a starting structure with the hazards that are
 foreseeable from the system design. It is **not** site-specific, it has not been
 prepared by a competent person under any electrical safety regime, and it must
 not be used to authorise work. It must be completed, verified against the actual
@@ -16,41 +21,59 @@ confirmed.
 
 ## 1. The primary finding, stated first
 
-**The task as described — "live installation" — is very likely the wrong
-starting point, and the assessment below concludes that most of this work should
-be eliminated rather than controlled.**
+**Revised 2026-09-01 following confirmation of the mounting method: the sensor
+is fixed to the busduct COVER, and the cover is isolated from the conductors.**
 
-Three reasons specific to this installation:
+That changes the assessment materially. The earlier draft assumed the joint had
+to be opened, and concluded the work should be eliminated. It does not, so:
 
-1. **Mounting a joint temperature sensor requires access to the joint.** On a
-   busduct that means removing or opening the joint cover, which is the barrier
-   that makes the enclosure safe. Once it is off, exposed live conductors at full
-   fault level are present.
+**Live installation is credible for this arrangement**, because the work stays
+entirely outside an intact enclosure. No live conductor is exposed, no
+current-carrying connection is disturbed, and the barrier that makes the busduct
+safe is never removed. The severe electrical hazards of the previous draft
+(A1–A3, B1) do not arise **provided the two conditions below hold**.
 
-2. **If the sensor is secured under a joint bolt** — a common arrangement for
-   getting a thermal path to the conductor — then fitting it means slackening a
-   live current-carrying connection. That is not "work near live parts"; it is
-   deliberately loosening a joint carrying load current, with the risk of arcing,
-   local overheating and a subsequent joint failure. **[VERIFY — the mounting
-   method is not documented in this repository and must be established before
-   this assessment can be completed.]**
+### The two conditions everything now rests on
 
-3. **Busduct joints sit close to the source.** Prospective fault current and
-   therefore incident energy are typically at their highest here. **[SITE — an
-   arc flash study giving the incident energy and boundaries at each work
-   position is a prerequisite, not an optional extra.]**
+**1. The cover must not be removed, opened or penetrated.**
+The whole basis of this assessment is an intact enclosure. Three ways that gets
+lost in practice, each of which returns the work to the previous draft's risk
+level and requires a shutdown:
 
-**Recommendation: plan the installation into a shutdown.** The monitoring system
-is a long-term asset; there is rarely a business case that justifies energised
-work to install it. If a shutdown is genuinely unavailable for some positions,
-those positions need an *energised work permit* justified individually — not a
-blanket decision for the whole installation.
+- **Drilling or self-tapping into the cover.** Swarf falls inside, onto or
+  between live conductors, and the IP rating is broken. **Fixing must be
+  non-penetrating** — magnetic, strap, clamp or adhesive.
+- **Removing the cover "just to see"** or to route the cable more neatly.
+- **Cover already ill-fitting, corroded or previously disturbed** on the run in
+  question, so that working on it displaces it.
 
-If site management decides after review that specific positions must be done
-live, this document is structured to support that, but the justification and the
-residual risk acceptance belong to the duty holder, not to this document.
+**2. The cover must be verified as bonded and at earth potential at each work
+position** — not assumed from the design. An isolated-from-conductors cover is
+not a live part in normal operation, but on most busduct systems the housing is
+part of the earth path: under an earth fault it carries fault current and rises
+in potential while someone is touching it. That is a low-likelihood,
+high-severity hazard which stays in the register (A7) rather than disappearing.
 
----
+### The concern that now matters more than the installation risk
+
+**A sensor on the cover measures the COVER, not the joint.** There is thermal
+resistance and thermal mass between the conductor and the cover, so:
+
+- absolute temperature is **substantially lower** than the joint itself;
+- rate of rise is **damped and delayed** — the RoR signal this system alarms on
+  (A2 rules) is exactly the signal a thermal mass attenuates most;
+- ΔT against ambient still works, but the numbers are not conductor ΔT.
+
+**This does not make the approach wrong** — cover-mounted monitoring is a normal
+and defensible technique — **but the alarm thresholds must be derived from
+cover-temperature behaviour, not from conductor limits.** Setting a ΔT threshold
+appropriate to a joint, and then applying it to a reading that is 30–50 % of the
+joint's rise, produces a system that looks healthy while a joint overheats.
+That is a worse outcome than not fitting the system, because it displaces the
+inspection regime that would have caught it.
+
+This is now the single most important open item, and it is an engineering
+question, not a safety-permit question. See E6, and §10.2.
 
 ## 2. Scope
 
@@ -70,7 +93,7 @@ much shorter assessment; and routine maintenance once installed.
 | Ambient sensors | Same bus, used as the ΔT reference | R14 chain, `docs/edge-user-manual.md` |
 | Field bus | RS-485 twisted pair, up to ~110 devices across 2 segments | R16 |
 | Typical scale | Up to 100 joints + 10 ambient per panel | Slice 10 target |
-| Mounting method | **[VERIFY — not documented; see §1.2]** | — |
+| Mounting method | **On the busduct cover, external. Cover isolated from conductors** (confirmed 2026-09-01). Fixing method **[VERIFY — must be non-penetrating; see §1]** | user, 2026-09-01 |
 | Sensor supply | **[VERIFY — loop-powered, or separate supply? Determines whether a second isolation is needed]** | — |
 
 ---
@@ -103,26 +126,37 @@ crew competence and equipment condition. **[SITE]**
 
 ## 4. Hazard register
 
-### A — Electrical, energised equipment
+### A — Electrical
+
+*Revised for external cover mounting. The hazards that dominated the previous
+draft — exposed conductors, arcing tools, dropped fasteners inside the enclosure —
+arise only if the enclosure is opened or penetrated, which this method does not
+do. They are retained as **A1c** because that is the failure mode to guard
+against, not because it is the plan.*
 
 | # | Hazard | Who | Inherent (S×L) | Key controls | Residual |
 |---|---|---|---|---|---|
-| A1 | Contact with exposed live busbar after joint cover removal | Installer, standby | 5×4 = **20** | Eliminate: work dead. If not: energised work permit, arc-rated PPE to the studied incident energy, insulated barriers over adjacent phases, defined approach boundaries, standby person | **[SITE]** |
-| A2 | Arc flash / arc blast from tool or fastener bridging phases | Installer, anyone within the arc flash boundary | 5×3 = **15** | Work dead. Insulated tools only, tethered. Arc flash boundary demarcated and cleared of other trades. Face shield + arc-rated coverall to study | **[SITE]** |
-| A3 | Dropped tool or fastener falls into the open busduct | Installer, plant | 5×4 = **20** | **Work dead.** Tool tethering, tool tally in/out, catch tray or barrier beneath the opening, no loose fasteners over an open enclosure | **[SITE]** |
-| A4 | Induced or capacitively coupled voltage on an isolated busduct running parallel to live circuits | Installer | 4×3 = **12** | Prove dead **at the point of work** with a proving unit before and after. Apply working earths. Do not rely on isolation alone on long parallel runs | |
-| A5 | Backfeed from generator, UPS, PV or an alternative incomer | Installer | 5×3 = **15** | Full isolation schedule identifying **every** source, not just the main incomer. LOTO on each. Test dead at the point of work | **[SITE]** |
-| A6 | Re-energisation onto a fault left by the work (tool, swarf, displaced conductor) | Installer, operators, plant | 5×3 = **15** | Tool tally reconciled before closing. Visual inspection and IR test before re-energisation. Controlled energisation with personnel clear | |
+| A1c | **Enclosure integrity lost during the work** — cover drilled, removed, or displaced — returning the job to exposed live conductors and arc flash | Installer, plant | 5×2 = **10** | **Non-penetrating fixing only** (magnetic / strap / clamp / adhesive), specified in the method statement and verified in the toolbox talk. Explicit written prohibition on removing or opening any cover. Any position where the cover is loose, corroded or previously disturbed is **stopped and referred**, not improvised | 5×1 = **5** |
+| A7 | **Touch voltage on the cover during an earth fault** while it is being handled — the housing is normally part of the earth path | Installer | 5×2 = **10** | Verify bonding and earth continuity at each work position before contact **[SITE]**. Do not work during switching operations or planned maintenance on the same board. Insulating gloves as a secondary measure | 5×1 = **5** |
+| A8 | Static or stored charge on a cover panel that is bonded only through a hinge or a corroded joint | Installer | 3×2 = **6** | Continuity check as A7. Treat a cover failing continuity as a defect to be reported, not worked around | 3×1 = **3** |
+| A4 | Induced or capacitively coupled voltage — relevant only if a run **is** isolated for other reasons and assumed safe | Installer | 4×2 = **8** | Prove dead at the point of work; do not rely on isolation alone on long parallel runs | |
+| A5 | Backfeed from generator, UPS, PV or alternative incomer — relevant only where a shutdown **is** used | Installer | 5×2 = **10** | Isolation schedule covering **every** source, LOTO on each, test dead at the point of work | **[SITE]** |
+
+**No longer applicable with an intact enclosure**, and deliberately recorded as
+removed rather than silently dropped: contact with exposed busbar (old A1),
+arc flash from a bridging tool (old A2), dropped fastener into the busduct
+(old A3), re-energisation onto a fault left inside (old A6), and slackening a
+live joint bolt (old B1). **All of these return the moment condition 1 in §1 is
+broken.**
 
 ### B — The installation act
 
 | # | Hazard | Who | Inherent | Key controls | Residual |
 |---|---|---|---|---|---|
-| B1 | Slackening a live joint bolt to fit the sensor **[VERIFY mounting]** | Installer, plant | 5×4 = **20** | **Not to be done live under any circumstances.** Dead, isolated, earthed. Torque to the busduct manufacturer's figure with a calibrated wrench; record the value | |
-| B2 | Joint left under-torqued or over-torqued after sensor fitting | Operators, plant | 4×3 = **12** | Calibrated torque wrench, recorded per joint, second-person check. Thermographic survey after re-energisation and load — the joint you just disturbed is now the one most likely to run hot | |
-| B3 | Drilling or penetrating the enclosure — swarf, loss of IP rating, reduced clearance | Installer, plant | 4×3 = **12** | Prefer non-penetrating mounting. If penetration is unavoidable: dead only, swarf controlled and vacuumed, clearances re-checked against the busduct rating, IP restored | |
-| B4 | Sensor body or cable reduces phase-to-phase or phase-to-earth clearance | Operators, plant | 5×3 = **15** | Clearances confirmed against the busduct manufacturer's data **before** selecting the mounting position. Written confirmation from the busduct OEM that the arrangement does not void the type test **[SITE]** | |
-| B5 | Adhesive or thermal compound degrades at operating temperature and the sensor falls into the enclosure | Operators, plant | 5×2 = **10** | Mechanical retention, not adhesive alone. Compound rated above the maximum joint temperature plus alarm threshold headroom | |
+| B3 | **Drilling or penetrating the cover** to fix the sensor — swarf inside onto live parts, IP rating lost, clearance reduced | Installer, plant | 5×2 = **10** | **Prohibited.** Non-penetrating fixing specified at procurement, not decided on site. If no non-penetrating option holds, the position is done during a shutdown | 5×1 = **5** |
+| B5 | Sensor or its fixing detaches at operating temperature and falls | Installer, third parties below | 3×3 = **9** | Fixing and any adhesive rated above the maximum cover temperature plus alarm headroom. Mechanical retention in preference to adhesive alone. Secondary tether where the position is over an occupied area | |
+| B6 | Sensor or cable obstructs cover removal for future maintenance, or is damaged when a cover is next removed | Maintainers | 2×4 = **8** | Position clear of cover fixings and joint access. Cable with enough slack to allow cover removal without disconnection. Record the position per joint | |
+| B7 | Cover surface preparation (cleaning, abrading for adhesive) generates dust or damages the finish/corrosion protection | Installer, plant | 2×3 = **6** | Minimum preparation consistent with the fixing. Reinstate any coating disturbed | |
 
 ### C — Physical and environmental
 
@@ -157,6 +191,8 @@ system to mislead people later.*
 | E3 | **False confidence during installation.** The monitoring system is partially installed and is assumed to be watching joints it is not yet watching | Operators, plant | 4×4 = **16** | Explicit statement of coverage at each stage. The system is not a control measure until commissioning is signed off. Existing thermographic inspection regime continues unchanged until then | |
 | E4 | Wrong scale or channel mapping gives plausible but wrong temperatures | Operators, plant | 5×2 = **10** | Verify each commissioned sensor against a calibrated reference at a known temperature. Confirm the Scale column matches the sensor datasheet — a wrong scale produces readings that look reasonable | |
 | E5 | Ambient reference sensor on a different RS-485 segment from the joints that use it — a segment failure removes ΔT for joints on the healthy segment | Operators | 3×3 = **9** | Provide an ambient reference on each segment | |
+| E6 | **Cover temperature read as if it were joint temperature.** Thermal resistance and mass between conductor and cover mean the reading is lower than the joint and its rate of rise is damped and delayed. Thresholds set for a conductor then produce a system that reads healthy while a joint overheats | Operators, plant | 5×4 = **20** | Characterise the cover-to-joint relationship before setting thresholds: thermographic survey of joints **and** covers together, under representative load, on at least a sample of positions. Derive ΔT and RoR thresholds from the COVER data. Re-validate after any busduct rating or load change. Retain thermographic inspection at reduced frequency rather than withdrawing it **[SITE]** | |
+| E7 | **Inspection regime withdrawn on the strength of an uncharacterised system** | Operators, plant | 5×3 = **15** | Thermography continues unchanged until E6 is closed and the system has demonstrated it detects a real rise. Withdrawal is a documented decision, not a drift | |
 
 ---
 
@@ -164,27 +200,37 @@ system to mislead people later.*
 
 | Level | Applied to this work |
 |---|---|
-| **Eliminate** | **Install during a planned shutdown.** Removes hazards A1–A6 and B1 outright. This is the principal recommendation of this assessment. |
-| **Substitute** | Non-contact mounting (clamp-on, external surface sensor) instead of anything requiring a joint bolt to be disturbed. Non-penetrating fixings instead of drilling. |
+| **Eliminate** | **External cover mounting already eliminates the dominant hazards** — the enclosure is never opened, so exposed conductors, bridging tools, dropped fasteners inside and disturbed joint bolts do not arise. Shutdown is reserved for any position where a non-penetrating fixing will not hold. |
+| **Substitute** | **Non-penetrating fixing instead of drilling** — the single most important substitution, and the one that keeps this assessment valid. Decided at procurement, not on site. |
 | **Engineering** | Insulating barriers, arc-rated screens, catch trays under open enclosures, MEWP instead of ladders, exclusion zones, tethered tools. |
 | **Administrative** | Permit to work; isolation and LOTO with a full source schedule; competent person appointment; toolbox talk; tool tally; per-joint commissioning record. |
-| **PPE** | Arc-rated clothing to the studied incident energy, insulated gloves with leather overs, face shield, safety footwear, fall arrest. **PPE is the last line and does not make live work acceptable where a shutdown is available.** |
+| **PPE** | Insulating gloves (A7 touch voltage), safety footwear, fall arrest and helmet for the access method. **Arc-rated clothing is not the basis of this assessment** — it would be needed only if the enclosure were opened, which this method does not do. |
 
 ---
 
-## 6. Prerequisites — none of this work is planned until these exist
+## 6. Prerequisites — before work is planned against this document
 
-- [ ] **[SITE]** Arc flash study giving incident energy and boundaries at each work position
-- [ ] **[SITE]** Isolation schedule identifying every source that can energise the busduct
-- [ ] **[VERIFY]** Sensor mounting method, confirmed in writing with the busduct OEM as not affecting the assembly's type test or clearances
-- [ ] **[VERIFY]** Sensor supply arrangement and whether it needs separate isolation
-- [ ] **[SITE]** Competent person appointed in writing; installer competencies recorded
-- [ ] **[SITE]** Rescue plan for the access method actually used (height, shaft)
-- [ ] **[SITE]** Confirmation of whether any position genuinely cannot be shut down, with the business justification
-- [ ] Busduct manufacturer's torque figures, and a calibrated wrench
-- [ ] Thermographic survey scheduled for after re-energisation and return to load
+**Now much shorter than the previous draft**, because external cover mounting
+removes the arc-flash-study and isolation-schedule prerequisites that dominated
+it. What remains is not optional.
 
----
+- [ ] **[VERIFY]** Non-penetrating fixing selected and proven to hold at maximum
+      cover temperature. This is a procurement decision — if it is left to site,
+      someone will drill.
+- [ ] **[VERIFY]** Sensor supply arrangement (loop-powered or separate)
+- [ ] **[SITE]** Earth continuity verified on the covers to be worked (A7)
+- [ ] **[SITE]** Written confirmation from the busduct OEM that an externally
+      attached sensor does not affect the assembly's rating or type test, and
+      does not impair cover ventilation or heat dissipation
+- [ ] **[SITE]** Access method and rescue plan for the positions concerned
+      (height, riser shafts) — unchanged by the mounting method
+- [ ] **[SITE]** Method statement stating explicitly that **no cover is to be
+      opened, removed or drilled**, with the stop-and-refer rule for any position
+      where that would be needed
+- [ ] **E6 characterisation plan agreed** — how cover-to-joint behaviour will be
+      established before thresholds are trusted
+- [ ] Thermographic survey scheduled to run alongside commissioning, giving both
+      the baseline and the E6 data
 
 ## 7. Emergency arrangements **[SITE]**
 
@@ -227,18 +273,25 @@ editions and clauses applicable to this site have not been verified here.**
 
 ---
 
-## 10. What this draft cannot tell you
+## 10. What this draft still cannot tell you
 
-Stated plainly so the gaps are not mistaken for completeness:
+Revised after the mounting method was confirmed. The list is shorter, and its
+priority has inverted.
 
-1. **The mounting method** — the single most important input, and it is not
-   documented anywhere in this repository. Everything in §B is provisional
-   until it is established.
-2. **Incident energy** — without an arc flash study there is no basis for
-   selecting PPE, and no basis for deciding whether a position can be worked
-   live at all.
-3. **Likelihood scores** — these depend on crew, equipment and the specific
-   physical arrangement. The severities are defensible; the likelihoods are
-   placeholders.
-4. **Whether a shutdown is available** — a commercial and operational question
-   that determines whether most of this document is even needed.
+1. **The cover-to-joint thermal relationship (E6).** Now the largest open item
+   by some distance. Without it the thresholds are guesses, and a monitoring
+   system with wrong thresholds is worse than none, because it displaces the
+   inspection that would have found the fault. This is measurement engineering,
+   not safety paperwork, and it needs load-condition data from this site.
+2. **The fixing method.** Must be non-penetrating, and must be settled at
+   procurement. The whole safety case in §1 rests on it.
+3. **Likelihood scores.** Severities are defensible; likelihoods are
+   placeholders until scored against the crew, the access and the specific runs.
+4. **Cover ventilation.** Whether an attached sensor and its cable affect heat
+   dissipation from the cover is an OEM question, not one this document can
+   answer.
+
+**Superseded by the 2026-09-01 revision:** the arc flash study, the full
+isolation schedule and the shutdown recommendation, all of which the previous
+draft made prerequisites on the assumption that the joint had to be opened.
+They return in full if condition 1 of §1 is ever broken.
