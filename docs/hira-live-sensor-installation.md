@@ -1,7 +1,8 @@
 # Hazard Identification & Risk Assessment — installing BusductTherMo joint sensors
 
 **DRAFT FOR COMPETENT-PERSON REVIEW. NOT AN APPROVED DOCUMENT.**
-Prepared 2026-09-01. **Rev 4, same day** — as-built clamp geometry (5 mm plate,
+Prepared 2026-09-01. **Rev 5, same day** — sensing element confirmed in the plate
+touching the cover; §1.3b resolved. **Rev 4** — as-built clamp geometry (5 mm plate,
 1 mm gap) assessed in §1.3a/§1.3b. **Rev 3** — magnetic clamp confirmed; see §1.3,
 which is now the most important engineering item in this document. **Rev 2** — revised throughout after the mounting
 method was confirmed as *external, on the busduct cover, cover isolated from the
@@ -137,22 +138,49 @@ measurement the opposite way to the lag in §1.5, and heating the magnet from
 the side the gap was meant to protect. Compare plate, cover and magnet
 temperatures in the same survey. **[VERIFY]**
 
-### 1.3b Where is the sensing element in this stack?
+### 1.3b Sensing element location — RESOLVED, with three consequences
 
-**The open question this design raises, and it is not a safety one.** The stack
-is now: joint → cover → (coating) → 5 mm plate → 1 mm gap → magnet. Depending on
-where the temperature sensing element sits in that assembly, it reads something
-quite different:
+**Confirmed 2026-09-01: the sensing element is in the 5 mm plate, touching the
+cover.** That is the best of the two arrangements — the element sits *ahead* of
+the air gap, so the magnet and the gap are not in the measurement path. There is
+**one** attenuating stage between joint and reading (joint → cover), not two.
 
-| Element location | What it measures |
+Three things follow from the element being in the plate rather than on the
+cover directly.
+
+**a) Plate-to-cover contact quality is now the dominant measurement
+uncertainty.** Metal-to-metal contact is only as good as flatness, coating and
+contact pressure. Surface irregularity leaves air pockets, and air is the
+insulator that matters at this scale.
+
+**And contact pressure comes from the magnet** — which §1.3a establishes is
+reduced by the 1 mm gap and reduced again when hot. So the two concerns are
+coupled: **a weaker magnet gives worse thermal contact, which gives a lower and
+laggier reading.** The failure is graceful in appearance and misleading in
+substance — the reading does not fail, it just quietly under-reports. Verify
+contact on a curved or ribbed cover, not only on a flat test piece. **[SITE]**
+
+**b) Plate self-heating is now a direct measurement error, not just a magnet
+concern.** With the element inside the plate, any hysteresis or eddy loss in a
+5 mm ferrous plate sitting in the enclosure's AC field is read as joint
+temperature. That is a **positive** bias, opposite in sign to the thermal lag,
+and the two do not cancel in any predictable way — one is load-dependent, the
+other is geometry-dependent. B11 is upgraded accordingly.
+
+**c) The plate adds thermal mass at the measurement point, further damping rate
+of rise.** Indicative, for steel:
+
+| | Thermal mass per unit area |
 |---|---|
-| In the plate, contacting the cover | Close to cover temperature — best case |
-| Behind or within the magnet | Cover temperature attenuated by a **second** thermal barrier, on top of the joint-to-cover lag already in §1.5 |
+| 5 mm plate | `0.005 × 7850 × 460` ≈ **18 kJ/m²·K** |
+| 1.5 mm cover | `0.0015 × 7850 × 460` ≈ **5.4 kJ/m²·K** |
 
-If the element is behind the gap, there are **two** attenuating stages between
-the joint and the reading, and the E6 characterisation must be done on the
-assembly as built — not on a bare sensor against a hot plate. **[VERIFY — where
-is the element?]**
+So the plate may **roughly triple** the local thermal mass the sensor sees.
+Absolute temperature settles out eventually and is largely unaffected; **rate of
+rise is not** — and RoR is what the A2 rules alarm on. This compounds the
+damping already noted in §1.5 and is a further reason E6 must characterise the
+assembly as built. **[VERIFY — plate material and thickness confirm the figures
+above]**
 
 **Required:**
 - Magnet grade selected for the **maximum credible cover temperature**, which is
@@ -284,7 +312,7 @@ broken.**
 | B8 | **Magnet will not hold — cover is aluminium or non-ferrous** | Installer | 2×3 = **6** | Magnet test on a sample cover **before** procurement commits to this fixing **[SITE]**. If non-ferrous, the fixing decision reopens; do not improvise with adhesive or a drill on site | |
 | B9 | **Finger pinch or crush** as a strong magnet snaps onto the cover | Installer | 3×4 = **12** | Gloves. Controlled approach technique, sliding onto the surface rather than dropping on. Two-handed placement where the magnet is strong enough to require it | |
 | B10 | Strong magnet attracts loose ferrous debris, tools or swarf and carries it into the work | Installer, plant | 2×3 = **6** | Clean the clamp face and the cover position before placement. Keep the clamp bagged until the moment of fitting | |
-| B11 | **Hysteresis and eddy heating in the 5 mm ferrous plate** in the enclosure's AC field — a local heat source that did not exist before, heating the magnet from the side the air gap was meant to protect, and biasing the reading high | Plant, measurement integrity | 3×3 = **9** | Measure plate, cover and magnet temperatures together in the E6 survey **[VERIFY]**. OEM confirmation that an added ferrous plate on the enclosure is acceptable **[SITE]** | |
+| B11 | **Hysteresis and eddy heating in the 5 mm ferrous plate.** The sensing element is INSIDE this plate, so any self-heating is read directly as joint temperature — a positive bias opposite in sign to the thermal lag, and the two do not cancel predictably | Measurement integrity, operators | 4×3 = **12** | Measure plate, cover and magnet temperatures together in the E6 survey **[VERIFY]**. OEM confirmation that an added ferrous plate on the enclosure is acceptable **[SITE]** | |
 | B12 | **Holding force at the as-built 1 mm gap, plus cover coating, is below what the position needs** — especially once the magnet is hot | Installer, third parties below, plant | 4×3 = **12** | Force-versus-gap curve read at the **actual** working gap (design gap + coating thickness), at temperature, not the zero-gap headline figure **[VERIFY]**. Secondary retention regardless | |
 | B6 | Sensor or cable obstructs cover removal for future maintenance, or is damaged when a cover is next removed | Maintainers | 2×4 = **8** | Position clear of cover fixings and joint access. Cable with enough slack to allow cover removal without disconnection. Record the position per joint | |
 | B7 | Cover surface preparation (cleaning, abrading for adhesive) generates dust or damages the finish/corrosion protection | Installer, plant | 2×3 = **6** | Minimum preparation consistent with the fixing. Reinstate any coating disturbed | |
@@ -322,7 +350,7 @@ system to mislead people later.*
 | E3 | **False confidence during installation.** The monitoring system is partially installed and is assumed to be watching joints it is not yet watching | Operators, plant | 4×4 = **16** | Explicit statement of coverage at each stage. The system is not a control measure until commissioning is signed off. Existing thermographic inspection regime continues unchanged until then | |
 | E4 | Wrong scale or channel mapping gives plausible but wrong temperatures | Operators, plant | 5×2 = **10** | Verify each commissioned sensor against a calibrated reference at a known temperature. Confirm the Scale column matches the sensor datasheet — a wrong scale produces readings that look reasonable | |
 | E5 | Ambient reference sensor on a different RS-485 segment from the joints that use it — a segment failure removes ΔT for joints on the healthy segment | Operators | 3×3 = **9** | Provide an ambient reference on each segment | |
-| E6 | **Cover temperature read as if it were joint temperature.** Thermal resistance and mass between conductor and cover mean the reading is lower than the joint and its rate of rise is damped and delayed. Thresholds set for a conductor then produce a system that reads healthy while a joint overheats | Operators, plant | 5×4 = **20** | Characterise the cover-to-joint relationship before setting thresholds: thermographic survey of joints **and** covers together, under representative load, on at least a sample of positions. Derive ΔT and RoR thresholds from the COVER data. Re-validate after any busduct rating or load change. Retain thermographic inspection at reduced frequency rather than withdrawing it **[SITE]** | |
+| E6 | **Cover temperature read as if it were joint temperature**, further damped by the 5 mm plate's own thermal mass (§1.3b c) and offset by any plate self-heating (B11). Thermal resistance and mass between conductor and cover mean the reading is lower than the joint and its rate of rise is damped and delayed. Thresholds set for a conductor then produce a system that reads healthy while a joint overheats | Operators, plant | 5×4 = **20** | Characterise the cover-to-joint relationship before setting thresholds: thermographic survey of joints **and** covers together, under representative load, on at least a sample of positions. Derive ΔT and RoR thresholds from the COVER data. Re-validate after any busduct rating or load change. Retain thermographic inspection at reduced frequency rather than withdrawing it **[SITE]** | |
 | E8 | **Sensor detached but not detected** — it reads near ambient and looks like a healthy cool joint | Operators, plant | 5×3 = **15** | Treat a sustained near-ambient or negative ΔT as a fault, not as good news **[design-chat item — no current A-rule covers this]**. Physical check of clamp grip at each thermographic survey | |
 | E7 | **Inspection regime withdrawn on the strength of an uncharacterised system** | Operators, plant | 5×3 = **15** | Thermography continues unchanged until E6 is closed and the system has demonstrated it detects a real rise. Withdrawal is a documented decision, not a drift | |
 
@@ -356,8 +384,10 @@ it. What remains is not optional.
       or does heat bypass it through the plate? (§1.3a)
 - [ ] **[VERIFY]** Force-versus-gap curve, read at 1 mm **plus cover coating
       thickness**, at operating temperature
-- [ ] **[VERIFY]** Location of the sensing element within the plate/magnet
-      assembly (§1.3b) — determines what E6 must characterise
+- [ ] **[SITE]** Plate-to-cover contact verified on a **curved or ribbed** cover,
+      not only on a flat test piece (§1.3b a)
+- [ ] **[VERIFY]** Plate material and thickness, for the thermal-mass and
+      eddy-heating assessments (§1.3b b, c)
 - [ ] **[VERIFY]** Secondary mechanical retention specified for every position
 - [ ] Decision on whether sustained near-ambient / negative ΔT should raise a
       detachment fault (E8) — design-chat item
