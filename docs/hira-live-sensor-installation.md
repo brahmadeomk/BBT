@@ -1,7 +1,8 @@
 # Hazard Identification & Risk Assessment — installing BusductTherMo joint sensors
 
 **DRAFT FOR COMPETENT-PERSON REVIEW. NOT AN APPROVED DOCUMENT.**
-Prepared 2026-09-01. **Rev 2, same day** — revised throughout after the mounting
+Prepared 2026-09-01. **Rev 3, same day** — magnetic clamp confirmed; see §1.3,
+which is now the most important engineering item in this document. **Rev 2** — revised throughout after the mounting
 method was confirmed as *external, on the busduct cover, cover isolated from the
 conductors*. Rev 1 assumed the joint had to be opened and concluded the work
 should be eliminated; that conclusion no longer stands. Superseded items are
@@ -36,16 +37,19 @@ safe is never removed. The severe electrical hazards of the previous draft
 ### The two conditions everything now rests on
 
 **1. The cover must not be removed, opened or penetrated.**
-The whole basis of this assessment is an intact enclosure. Three ways that gets
-lost in practice, each of which returns the work to the previous draft's risk
-level and requires a shutdown:
+**Satisfied by design: the sensor uses a magnetic clamp** (confirmed
+2026-09-01), which is non-penetrating. Two residual ways integrity is still lost
+in practice, each returning the work to Rev 1 risk levels and requiring a
+shutdown:
 
-- **Drilling or self-tapping into the cover.** Swarf falls inside, onto or
-  between live conductors, and the IP rating is broken. **Fixing must be
-  non-penetrating** — magnetic, strap, clamp or adhesive.
-- **Removing the cover "just to see"** or to route the cable more neatly.
+- **Removing the cover "just to see"**, or to route the cable more neatly.
 - **Cover already ill-fitting, corroded or previously disturbed** on the run in
-  question, so that working on it displaces it.
+  question, so that clamping to it displaces it.
+
+Drilling is now excluded by the hardware rather than by a rule someone has to
+remember, which is a materially stronger control. The method statement should
+still say so explicitly, because a magnet that will not hold (see §1.3) is
+exactly the situation in which someone reaches for a drill.
 
 **2. The cover must be verified as bonded and at earth potential at each work
 position** — not assumed from the design. An isolated-from-conductors cover is
@@ -53,6 +57,56 @@ not a live part in normal operation, but on most busduct systems the housing is
 part of the earth path: under an earth fault it carries fault current and rises
 in potential while someone is touching it. That is a low-likelihood,
 high-severity hazard which stays in the register (A7) rather than disappearing.
+
+### 1.3 The magnetic clamp has one failure mode that must be designed out
+
+**A permanent magnet loses holding force as it gets hot, and above its maximum
+working temperature the loss is permanent — it does not come back when it
+cools.** Approximate limits, to be confirmed with the magnet supplier rather
+than taken from here:
+
+| Magnet | Approx. max working temperature |
+|---|---|
+| NdFeB, standard N grade | ~80 °C |
+| NdFeB, H / SH / UH / EH grades | ~120–200 °C |
+| SmCo (samarium cobalt) | ~250–300 °C |
+| AlNiCo | ~450 °C+ |
+
+A loaded busduct cover commonly runs **60–90 °C**, and the alarm thresholds this
+system exists to detect sit *above* that. So a standard N-grade neodymium clamp
+is inside its degradation range in normal service and past it during the event
+being monitored.
+
+**This is a correlated failure, and that is what makes it serious.** The sensor
+is most likely to lose grip and fall off *at the moment the joint is
+overheating* — the exact event it was installed to detect. The failure is not
+independent of the hazard; it is caused by it. A system that detaches precisely
+when it matters is worse than no system, because the joint reads normal (or
+reads nothing, and looks like a comms fault) at the point of failure.
+
+**Required:**
+- Magnet grade selected for the **maximum credible cover temperature**, which is
+  the alarm-threshold temperature plus margin, **not** the normal running
+  temperature. **[VERIFY — grade and rated temperature]**
+- A **secondary mechanical retention** (lanyard, strap or captive tether) so a
+  clamp that does let go cannot fall onto people or plant below, and so the
+  failure is visible rather than silent.
+- Detachment must be **detectable**: a sensor that falls off will read close to
+  ambient. Consider whether a joint reading *at or below* ambient for a
+  sustained period should raise a fault. ΔT going persistently negative is not a
+  physical condition for a loaded joint. **[Design-chat item — this is a
+  plausible new alarm rule, and the current A-rules do not cover it.]**
+
+### 1.4 Two practical checks before any of this matters
+
+- **The cover must be ferromagnetic.** Many busduct enclosures are **aluminium**
+  or aluminium alloy, and a magnet will not hold to them at all. **[SITE —
+  confirm the cover material on the actual runs; a magnet test on one cover
+  settles it in seconds.]** If the covers are aluminium, the magnetic clamp is
+  not viable and the fixing decision reopens.
+- **Paint, powder coating and any air gap are thermal insulators** between the
+  cover and the sensor, adding to the cover-to-joint lag in §1.5. Surface
+  condition at each clamp position affects the reading.
 
 ### The concern that now matters more than the installation risk
 
@@ -93,7 +147,9 @@ much shorter assessment; and routine maintenance once installed.
 | Ambient sensors | Same bus, used as the ΔT reference | R14 chain, `docs/edge-user-manual.md` |
 | Field bus | RS-485 twisted pair, up to ~110 devices across 2 segments | R16 |
 | Typical scale | Up to 100 joints + 10 ambient per panel | Slice 10 target |
-| Mounting method | **On the busduct cover, external. Cover isolated from conductors** (confirmed 2026-09-01). Fixing method **[VERIFY — must be non-penetrating; see §1]** | user, 2026-09-01 |
+| Mounting method | **Magnetic clamp on the busduct cover, external. Cover isolated from conductors** (confirmed 2026-09-01) | user, 2026-09-01 |
+| Magnet grade / rated temperature | **[VERIFY — must exceed the alarm-threshold cover temperature, not the running temperature; see §1.3]** | — |
+| Cover material | **[SITE — must be ferromagnetic. Aluminium enclosures are common and a magnet will not hold; see §1.4]** | — |
 | Sensor supply | **[VERIFY — loop-powered, or separate supply? Determines whether a second isolation is needed]** | — |
 
 ---
@@ -154,7 +210,11 @@ broken.**
 | # | Hazard | Who | Inherent | Key controls | Residual |
 |---|---|---|---|---|---|
 | B3 | **Drilling or penetrating the cover** to fix the sensor — swarf inside onto live parts, IP rating lost, clearance reduced | Installer, plant | 5×2 = **10** | **Prohibited.** Non-penetrating fixing specified at procurement, not decided on site. If no non-penetrating option holds, the position is done during a shutdown | 5×1 = **5** |
-| B5 | Sensor or its fixing detaches at operating temperature and falls | Installer, third parties below | 3×3 = **9** | Fixing and any adhesive rated above the maximum cover temperature plus alarm headroom. Mechanical retention in preference to adhesive alone. Secondary tether where the position is over an occupied area | |
+| B5 | **Magnetic clamp loses holding force as the cover heats and the sensor falls.** Above the magnet's maximum working temperature the loss is permanent. **Correlated with the hazard being monitored**: most likely to let go exactly when the joint is overheating | Installer, third parties below, plant | 4×3 = **12** | Magnet grade rated above the **alarm-threshold** cover temperature, not the running temperature **[VERIFY]**. Secondary mechanical retention on every position. Periodic verification of grip as a maintenance task | |
+| B8 | **Magnet will not hold — cover is aluminium or non-ferrous** | Installer | 2×3 = **6** | Magnet test on a sample cover **before** procurement commits to this fixing **[SITE]**. If non-ferrous, the fixing decision reopens; do not improvise with adhesive or a drill on site | |
+| B9 | **Finger pinch or crush** as a strong magnet snaps onto the cover | Installer | 3×4 = **12** | Gloves. Controlled approach technique, sliding onto the surface rather than dropping on. Two-handed placement where the magnet is strong enough to require it | |
+| B10 | Strong magnet attracts loose ferrous debris, tools or swarf and carries it into the work | Installer, plant | 2×3 = **6** | Clean the clamp face and the cover position before placement. Keep the clamp bagged until the moment of fitting | |
+| B11 | Magnet or its field affects nearby instrumentation, or the clamp heats by eddy currents in the enclosure field | Plant | 2×2 = **4** | OEM confirmation **[SITE]**. Check clamp temperature against cover temperature during the E6 survey — a clamp running hotter than the cover indicates induced heating | |
 | B6 | Sensor or cable obstructs cover removal for future maintenance, or is damaged when a cover is next removed | Maintainers | 2×4 = **8** | Position clear of cover fixings and joint access. Cable with enough slack to allow cover removal without disconnection. Record the position per joint | |
 | B7 | Cover surface preparation (cleaning, abrading for adhesive) generates dust or damages the finish/corrosion protection | Installer, plant | 2×3 = **6** | Minimum preparation consistent with the fixing. Reinstate any coating disturbed | |
 
@@ -192,6 +252,7 @@ system to mislead people later.*
 | E4 | Wrong scale or channel mapping gives plausible but wrong temperatures | Operators, plant | 5×2 = **10** | Verify each commissioned sensor against a calibrated reference at a known temperature. Confirm the Scale column matches the sensor datasheet — a wrong scale produces readings that look reasonable | |
 | E5 | Ambient reference sensor on a different RS-485 segment from the joints that use it — a segment failure removes ΔT for joints on the healthy segment | Operators | 3×3 = **9** | Provide an ambient reference on each segment | |
 | E6 | **Cover temperature read as if it were joint temperature.** Thermal resistance and mass between conductor and cover mean the reading is lower than the joint and its rate of rise is damped and delayed. Thresholds set for a conductor then produce a system that reads healthy while a joint overheats | Operators, plant | 5×4 = **20** | Characterise the cover-to-joint relationship before setting thresholds: thermographic survey of joints **and** covers together, under representative load, on at least a sample of positions. Derive ΔT and RoR thresholds from the COVER data. Re-validate after any busduct rating or load change. Retain thermographic inspection at reduced frequency rather than withdrawing it **[SITE]** | |
+| E8 | **Sensor detached but not detected** — it reads near ambient and looks like a healthy cool joint | Operators, plant | 5×3 = **15** | Treat a sustained near-ambient or negative ΔT as a fault, not as good news **[design-chat item — no current A-rule covers this]**. Physical check of clamp grip at each thermographic survey | |
 | E7 | **Inspection regime withdrawn on the strength of an uncharacterised system** | Operators, plant | 5×3 = **15** | Thermography continues unchanged until E6 is closed and the system has demonstrated it detects a real rise. Withdrawal is a documented decision, not a drift | |
 
 ---
@@ -214,9 +275,14 @@ system to mislead people later.*
 removes the arc-flash-study and isolation-schedule prerequisites that dominated
 it. What remains is not optional.
 
-- [ ] **[VERIFY]** Non-penetrating fixing selected and proven to hold at maximum
-      cover temperature. This is a procurement decision — if it is left to site,
-      someone will drill.
+- [ ] **[SITE]** Magnet test on a sample cover — is it ferromagnetic at all? (§1.4)
+- [ ] **[VERIFY]** Magnet grade and rated working temperature, selected against
+      the **alarm-threshold** cover temperature rather than the running
+      temperature (§1.3). A standard N-grade neodymium clamp is very likely
+      inadequate.
+- [ ] **[VERIFY]** Secondary mechanical retention specified for every position
+- [ ] Decision on whether sustained near-ambient / negative ΔT should raise a
+      detachment fault (E8) — design-chat item
 - [ ] **[VERIFY]** Sensor supply arrangement (loop-powered or separate)
 - [ ] **[SITE]** Earth continuity verified on the covers to be worked (A7)
 - [ ] **[SITE]** Written confirmation from the busduct OEM that an externally
