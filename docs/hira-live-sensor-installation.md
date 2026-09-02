@@ -1,7 +1,8 @@
 # Hazard Identification & Risk Assessment — installing BusductTherMo joint sensors
 
 **DRAFT FOR COMPETENT-PERSON REVIEW. NOT AN APPROVED DOCUMENT.**
-Prepared 2026-09-01. **Rev 7, same day** — gap corrected to **0.25 mm** (Rev 4-6
+Prepared 2026-09-01. **Rev 8, same day** — insulating the magnet assessed (§1.3c);
+higher magnet grade recommended in preference. **Rev 7** — gap corrected to **0.25 mm** (Rev 4-6
 assumed 1 mm). Force and demagnetisation concerns substantially reduced; coating
 sensitivity raised. **Rev 6** — first field data folded in: installed
 commercial site, 2000 A, cover 60 °C, 2 months (§1.3-INSTALLED). **Rev 5** — sensing element confirmed in the plate
@@ -200,6 +201,66 @@ before. If present, the plate reads **hotter** than the cover — biasing the
 measurement the opposite way to the lag in §1.5, and heating the magnet from
 the side the gap was meant to protect. Compare plate, cover and magnet
 temperatures in the same survey. **[VERIFY]**
+
+### 1.3c Proposed: thermal insulation around the magnet
+
+**Asked 2026-09-01.** It targets the right thing — §1.3a's finding is that heat
+bypasses the air gap through the metal, so blocking that metal path is the
+correct response. Three conditions decide whether it delivers.
+
+**a) Insulation alone changes the time constant, not the steady state.**
+An insulated body with no cooler path to anywhere still reaches the temperature
+of its surroundings — it just takes longer. Fully encapsulating the magnet
+inside a 60 °C plate builds a thermos: slower to heat, same destination.
+
+It works only as a **pair**:
+
+| | |
+|---|---|
+| Insulate | magnet from the hot plate — sides and back |
+| Couple | magnet to a cooler sink — ambient air, via an exposed boss, fin, or a deliberately conductive path through the housing exterior |
+
+Plant-room ambient (~30–40 °C) is the sink. With both halves the magnet settles
+between ambient and plate temperature; with only the first it settles at plate
+temperature, eventually.
+
+**b) The insulation must NOT enter the magnetic working gap.**
+§1.3a(b) establishes that at a 0.25 mm design gap the force curve is steep and a
+150 µm coating is already a 60 % perturbation. Insulation on the *working face*
+would add directly to that gap and cost holding force — the failure mode this is
+meant to prevent. **Sides and back only.**
+
+**c) If the magnet self-heats, insulation makes it worse.**
+NdFeB is metallic and conductive (~1.5 µΩ·m). In the AC field beside a 2000 A
+busduct it may carry eddy currents of its own. Insulating a body that generates
+heat traps that heat. Whether this matters is measurable, not arguable: read the
+magnet body temperature in situ (§1.3a a) **before** committing to insulation. If
+the magnet already runs *hotter* than the plate, insulation is the wrong
+direction entirely.
+
+### The simpler alternative, and probably the better one
+
+**Specify a higher-grade magnet instead.** An H/SH-grade NdFeB (~120–150 °C) or
+SmCo (~250–300 °C) removes the problem in material selection rather than in
+thermal design:
+
+| | Insulation + heat sink | Higher magnet grade |
+|---|---|---|
+| New parts / assembly steps | Yes | No |
+| New failure modes | Insulation degradation, sink fouling, trapped self-heating | None |
+| Depends on ambient staying cool | Yes | No |
+| Needs verification | Yes — thermocouple, in situ | Datasheet |
+| Retrofit to installed units | Rework each unit | Swap on next service |
+
+Thermal design is the harder path and it is contingent on an ambient that a
+plant room does not guarantee. Grade selection is a one-line change to the bill
+of materials.
+
+**What decides it: the alarm threshold temperature.** The magnet has to survive
+the *hottest cover temperature the system is meant to still be reporting at* —
+not the 60 °C observed in normal service. Set the thresholds first (§E6), then
+choose the magnet for that number plus margin. Doing it the other way round is
+how a sensor comes to fall off during the event it was installed to catch.
 
 ### 1.3b Sensing element location — RESOLVED, with three consequences
 
