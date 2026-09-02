@@ -1,7 +1,8 @@
 # Hazard Identification & Risk Assessment — installing BusductTherMo joint sensors
 
 **DRAFT FOR COMPETENT-PERSON REVIEW. NOT AN APPROVED DOCUMENT.**
-Prepared 2026-09-01. **Rev 5, same day** — sensing element confirmed in the plate
+Prepared 2026-09-01. **Rev 6, same day** — first field data folded in: installed
+commercial site, 2000 A, cover 60 °C, 2 months (§1.3-INSTALLED). **Rev 5** — sensing element confirmed in the plate
 touching the cover; §1.3b resolved. **Rev 4** — as-built clamp geometry (5 mm plate,
 1 mm gap) assessed in §1.3a/§1.3b. **Rev 3** — magnetic clamp confirmed; see §1.3,
 which is now the most important engineering item in this document. **Rev 2** — revised throughout after the mounting
@@ -85,6 +86,50 @@ overheating* — the exact event it was installed to detect. The failure is not
 independent of the hazard; it is caused by it. A system that detaches precisely
 when it matters is worse than no system, because the joint reads normal (or
 reads nothing, and looks like a comms fault) at the point of failure.
+
+### 1.3-INSTALLED  Field data: 2 months at 2000 A, cover reaching 60 °C
+
+**Reported 2026-09-01: an installed commercial building, ~2000 A, 430 V LV
+busduct, cover temperature reaching 60 °C, running two months with no
+abnormalities.** This is the first real operating data and it changes several
+judgements from estimates into measurements.
+
+**a) 60 °C is a benign number for the magnet — but the gap works against it.**
+At 60 °C a standard N-grade NdFeB magnet has lost roughly 4–5 % of its flux
+reversibly (≈0.11 %/K over a 40 K rise). That is recoverable and unremarkable.
+
+The counterintuitive part is the interaction with §1.3a: **an open magnetic
+circuit demagnetises at a LOWER temperature than a closed one.** A large air gap
+gives a low permeance coefficient, which moves the magnet's operating point down
+its demagnetisation curve and towards the knee — so the 1 mm gap that was
+intended to protect the magnet thermally makes it *more* susceptible to
+irreversible loss at whatever temperature it does reach. The gap helps and hurts
+at the same time, and which dominates is a question for the magnet supplier
+given this geometry. **[VERIFY — ask the supplier for the working point at 1 mm
+gap and 60–90 °C, not just the catalogue max working temperature.]**
+
+**b) Two months of no abnormalities evidences less than it appears.**
+It is real and welcome, but note precisely what it covers:
+
+| Evidenced | Not evidenced |
+|---|---|
+| The clamp holds at 60 °C in this installation | Behaviour above 60 °C — i.e. during the fault the system exists to detect |
+| No detachment in 2 months | Cumulative irreversible loss, which is time-and-temperature dependent and slow |
+| Normal-load thermal behaviour | A full seasonal load cycle; a commercial building's summer peak may not be in the window |
+| The system runs without nuisance alarms | **That it would detect a real fault** — no fault has occurred to detect |
+
+The last row is the one to hold on to. **Absence of alarms during a period with
+no known fault is not evidence of detection capability.** That is E3/E7, and two
+quiet months is exactly the evidence that tends to get mistaken for validation.
+
+**c) 60 °C is a touch-burn temperature.** Metal at 60 °C causes burns on
+prolonged contact. Relevant to C1 for anyone handling covers or clamps in
+service, and to the maintenance task of checking clamp grip.
+
+**d) The installation now has two months of historian data**, which is the
+input §E6 asks for. See §10.1 — it does not contain joint temperatures, but it
+does contain the observed ΔT range and rate-of-rise distribution under real
+load, which is enough to set thresholds empirically rather than by guess.
 
 ### 1.3a The 5 mm plate and 1 mm gap — what it does and does not do
 
@@ -453,7 +498,14 @@ Revised after the mounting method was confirmed. The list is shorter, and its
 priority has inverted.
 
 1. **The cover-to-joint thermal relationship (E6).** Now the largest open item
-   by some distance. Without it the thresholds are guesses, and a monitoring
+   by some distance — but **partly answerable from data you already have.** The
+   installed site has two months of historian records. They do not contain joint
+   temperatures, so the absolute transfer function still needs a thermographic
+   pairing. They *do* contain the observed ΔT range and the rate-of-rise
+   distribution under real load and real diurnal cycling, which is enough to set
+   thresholds **statistically** — above observed normal variation — instead of
+   inheriting numbers meant for conductor temperature. That is a much better
+   starting point than the current defaults, and it needs no site visit. Without it the thresholds are guesses, and a monitoring
    system with wrong thresholds is worse than none, because it displaces the
    inspection that would have found the fault. This is measurement engineering,
    not safety paperwork, and it needs load-condition data from this site.
