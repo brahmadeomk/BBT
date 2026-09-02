@@ -1,7 +1,8 @@
 # Hazard Identification & Risk Assessment — installing BusductTherMo joint sensors
 
 **DRAFT FOR COMPETENT-PERSON REVIEW. NOT AN APPROVED DOCUMENT.**
-Prepared 2026-09-01. **Rev 3, same day** — magnetic clamp confirmed; see §1.3,
+Prepared 2026-09-01. **Rev 4, same day** — as-built clamp geometry (5 mm plate,
+1 mm gap) assessed in §1.3a/§1.3b. **Rev 3** — magnetic clamp confirmed; see §1.3,
 which is now the most important engineering item in this document. **Rev 2** — revised throughout after the mounting
 method was confirmed as *external, on the busduct cover, cover isolated from the
 conductors*. Rev 1 assumed the joint had to be opened and concluded the work
@@ -83,6 +84,75 @@ overheating* — the exact event it was installed to detect. The failure is not
 independent of the hazard; it is caused by it. A system that detaches precisely
 when it matters is worse than no system, because the joint reads normal (or
 reads nothing, and looks like a comms fault) at the point of failure.
+
+### 1.3a The 5 mm plate and 1 mm gap — what it does and does not do
+
+**Design as built (confirmed 2026-09-01): the magnet is carried in a 5 mm metal
+plate, with a 1 mm gap between the busduct surface and the magnet face.**
+
+That is clearly aimed at the problem above, and the intent is right. Three
+things need checking before it can be credited as the control.
+
+**a) Thermally, a gap on ONE face may achieve very little at steady state.**
+Heat takes the path of least resistance, and if the magnet is metallically
+enclosed by the plate, the metal is that path:
+
+| Path | Approx. thermal resistance |
+|---|---|
+| 1 mm air across the gap | `0.001 / 0.026` ≈ **0.038** K·m²/W |
+| 5 mm steel through the plate wall | `0.005 / 45` ≈ **0.0001** K·m²/W |
+
+The metal route is on the order of **hundreds of times** less resistive, so heat
+flows *around* the gap rather than across it. Unless the magnet is isolated from
+the plate on **all** faces — insulating spacers, not just an air gap on the
+working face — it will sit at essentially plate temperature, and the plate sits
+at essentially cover temperature. The gap then limits transient peaks, not the
+steady state, and a busduct runs hot continuously rather than transiently.
+
+**This is a measurement, not a calculation.** Put a thermocouple on the magnet
+body during the thermal survey (§E6) and read it alongside the cover. If the
+magnet tracks the cover, the gap is not protecting it and the grade question in
+§1.3 stands unchanged. **[VERIFY]**
+
+**b) A 1 mm gap costs a large fraction of the holding force.**
+Magnetic holding force falls off steeply with air gap — for a typical clamp,
+1 mm commonly leaves only a fraction of the zero-gap figure, and the curve is
+steepest in exactly this range. The design has traded grip for thermal
+protection, which is a legitimate trade but must be quantified:
+
+- Obtain the **force-versus-gap curve** for this clamp from the supplier and
+  read the figure at 1 mm, not the headline zero-gap force. **[VERIFY]**
+- **Paint or powder coating on the cover adds to the effective gap.** A
+  150 µm coating on top of a 1 mm design gap is a further 15 % of gap, on the
+  steep part of the curve. The working gap is the design gap **plus** the
+  coating. **[SITE]**
+- Confirm the remaining force at temperature, since both effects apply at once:
+  reduced flux from heat **and** reduced coupling from the gap.
+
+**c) A ferrous plate in the enclosure's AC field can heat on its own account.**
+Hysteresis and eddy losses in a 5 mm steel plate sitting against a busduct
+enclosure carrying high AC current are a local heat source that was not there
+before. If present, the plate reads **hotter** than the cover — biasing the
+measurement the opposite way to the lag in §1.5, and heating the magnet from
+the side the gap was meant to protect. Compare plate, cover and magnet
+temperatures in the same survey. **[VERIFY]**
+
+### 1.3b Where is the sensing element in this stack?
+
+**The open question this design raises, and it is not a safety one.** The stack
+is now: joint → cover → (coating) → 5 mm plate → 1 mm gap → magnet. Depending on
+where the temperature sensing element sits in that assembly, it reads something
+quite different:
+
+| Element location | What it measures |
+|---|---|
+| In the plate, contacting the cover | Close to cover temperature — best case |
+| Behind or within the magnet | Cover temperature attenuated by a **second** thermal barrier, on top of the joint-to-cover lag already in §1.5 |
+
+If the element is behind the gap, there are **two** attenuating stages between
+the joint and the reading, and the E6 characterisation must be done on the
+assembly as built — not on a bare sensor against a hot plate. **[VERIFY — where
+is the element?]**
 
 **Required:**
 - Magnet grade selected for the **maximum credible cover temperature**, which is
@@ -214,7 +284,8 @@ broken.**
 | B8 | **Magnet will not hold — cover is aluminium or non-ferrous** | Installer | 2×3 = **6** | Magnet test on a sample cover **before** procurement commits to this fixing **[SITE]**. If non-ferrous, the fixing decision reopens; do not improvise with adhesive or a drill on site | |
 | B9 | **Finger pinch or crush** as a strong magnet snaps onto the cover | Installer | 3×4 = **12** | Gloves. Controlled approach technique, sliding onto the surface rather than dropping on. Two-handed placement where the magnet is strong enough to require it | |
 | B10 | Strong magnet attracts loose ferrous debris, tools or swarf and carries it into the work | Installer, plant | 2×3 = **6** | Clean the clamp face and the cover position before placement. Keep the clamp bagged until the moment of fitting | |
-| B11 | Magnet or its field affects nearby instrumentation, or the clamp heats by eddy currents in the enclosure field | Plant | 2×2 = **4** | OEM confirmation **[SITE]**. Check clamp temperature against cover temperature during the E6 survey — a clamp running hotter than the cover indicates induced heating | |
+| B11 | **Hysteresis and eddy heating in the 5 mm ferrous plate** in the enclosure's AC field — a local heat source that did not exist before, heating the magnet from the side the air gap was meant to protect, and biasing the reading high | Plant, measurement integrity | 3×3 = **9** | Measure plate, cover and magnet temperatures together in the E6 survey **[VERIFY]**. OEM confirmation that an added ferrous plate on the enclosure is acceptable **[SITE]** | |
+| B12 | **Holding force at the as-built 1 mm gap, plus cover coating, is below what the position needs** — especially once the magnet is hot | Installer, third parties below, plant | 4×3 = **12** | Force-versus-gap curve read at the **actual** working gap (design gap + coating thickness), at temperature, not the zero-gap headline figure **[VERIFY]**. Secondary retention regardless | |
 | B6 | Sensor or cable obstructs cover removal for future maintenance, or is damaged when a cover is next removed | Maintainers | 2×4 = **8** | Position clear of cover fixings and joint access. Cable with enough slack to allow cover removal without disconnection. Record the position per joint | |
 | B7 | Cover surface preparation (cleaning, abrading for adhesive) generates dust or damages the finish/corrosion protection | Installer, plant | 2×3 = **6** | Minimum preparation consistent with the fixing. Reinstate any coating disturbed | |
 
@@ -280,6 +351,13 @@ it. What remains is not optional.
       the **alarm-threshold** cover temperature rather than the running
       temperature (§1.3). A standard N-grade neodymium clamp is very likely
       inadequate.
+- [ ] **[VERIFY]** Magnet body temperature measured against cover temperature on
+      the as-built assembly — does the 1 mm gap actually keep the magnet cool,
+      or does heat bypass it through the plate? (§1.3a)
+- [ ] **[VERIFY]** Force-versus-gap curve, read at 1 mm **plus cover coating
+      thickness**, at operating temperature
+- [ ] **[VERIFY]** Location of the sensing element within the plate/magnet
+      assembly (§1.3b) — determines what E6 must characterise
 - [ ] **[VERIFY]** Secondary mechanical retention specified for every position
 - [ ] Decision on whether sustained near-ambient / negative ΔT should raise a
       detachment fault (E8) — design-chat item
