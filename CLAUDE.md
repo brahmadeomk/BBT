@@ -102,6 +102,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 
 | Artifact | Path | Status |
 |---|---|---|
+| **Current development status — the one page to share with the design chat** | `docs/STATUS.md` | present (2026-09-01) |
 | Edge Implementation Work Plan (this plan) | `docs/BusductTherMo_Edge_Implementation_WorkPlan.md` (+ original `.docx`) | present |
 | Edge Cloud Readiness Workplan (phase-level plan this one maps to; §6 is Slice 8's exit checklist) | `docs/BusductTherMo_Edge_Cloud_Readiness_Workplan.docx` (+ extracted `.md`) | present (2026-07-21) |
 | Edge node config spec | `docs/busduct_edge_config.yaml` | present |
