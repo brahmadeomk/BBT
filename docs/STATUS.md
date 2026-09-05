@@ -5,7 +5,7 @@ position: what is running, what is built but unproven, what is blocked, and what
 needs a decision. Detail lives elsewhere (§7) — this is the summary that should
 be enough to hold a design conversation without reading the repository.
 
-**As of 2026-09-01.** Update this file when a slice changes state; it is only
+**As of 2026-09-05.** Update this file when a slice changes state; it is only
 useful if it is current.
 
 ---
@@ -24,7 +24,7 @@ Two deployments exist:
 | Joints | 9 (incl. a 4-channel module) | 35 |
 | Load | bench | ~2000 A, 430 V LV |
 | Running since | continuous development | ~2 months |
-| Observed | multi-channel decode verified | cover reaching 60 °C; WATCH on 1–2 joints; no false alarms |
+| Observed | multi-channel decode verified; **J10 reads 131 vs a Fluke 87V at 132.0 °C** | cover reaching 60 °C; WATCH on 1–2 joints; no false alarms |
 | **Code version** | tracks `claude/code-handoff-strategy-y551k2` | **UNKNOWN — needs confirming (§5)** |
 
 ---
@@ -83,12 +83,27 @@ semantics.
 
 ---
 
+## 3a. What changed on 2026-09-05
+
+- **First independent reference check**: J10 read 131 against a Fluke 87V
+  thermocouple at 132.0 °C. Agreement is within the *reference's* uncertainty
+  (±2.5–3 °C at that temperature), which is the most a working multimeter gives.
+  It rules out gross scale, sign and offset error at a reading far above the
+  working band — including the wrong `temp_scale` this panel still carries.
+- **Sensor plausibility gate made two-sided.** It was `sensorVal > 300` only, so
+  J19's −273 (an absolute-zero *no sensor* sentinel) was accepted as a
+  measurement and the joint went silently unmonitored — a dead channel
+  presenting as a healthy cold joint. Now −40 … 300 plus a non-finite check.
+  See D2: the exact-zero case (J09) is deliberately still open.
+
+---
+
 ## 4. Decisions needed from the design chat
 
 | # | Decision | Why it needs the chat |
 |---|---|---|
 | D1 | **Licence management** — see `docs/licence-management-proposal.md` §9 | Six open decisions. §1 is the blocking one and is a **business** call: what a lapsed licence may switch off. As specified it blinds both the HMI and the BMS at once, on a fire-safety monitor. Recommendation is to gate commercial value, never the alarm path |
-| D2 | **Sensor-detachment alarm rule** | The magnetic clamp can lose grip when hot — and a detached sensor reads near ambient, i.e. as a *healthy cool joint*. A sustained near-ambient or negative ΔT is not physical for a loaded joint. This would be a **new A-rule**, so it belongs here, not in the repo |
+| D2 | **"Reads implausibly cool" as a fault class** | Originally raised as a *detachment* rule: the magnetic clamp can lose grip when hot, and a detached sensor reads near ambient, i.e. as a *healthy cool joint*. **2026-09-05 made it broader** — a dead channel on the test panel produced the same signature (J19 −273, J09 exactly 0, unalarmed) by a different route. The bound fix catches −273; exact zero needs a rule, because 0 °C is real in an unheated panel. A sustained near-ambient or negative ΔT on a loaded joint is not physical. **New A-rule**, so it belongs here |
 | D3 | **Alarm thresholds for cover-mounted sensing** | The sensor reads the *cover*, not the conductor — lower absolute, and RoR damped by the cover plus the 5 mm mounting plate. Thresholds inherited from conductor limits would read healthy while a joint overheats. Needs the E6 characterisation (§6) before numbers are trusted |
 | D4 | **Cloud data pipeline** — IoT Rule → Timestream/S3, or alternative | Not started. Gates positional telemetry and any fleet view |
 | D5 | **OTA update approach** | A/B scheme depends on the Pi's OS/boot layout |

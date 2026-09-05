@@ -272,6 +272,65 @@ describe('ProcessLogic matches on (unit address, channel) (2026-09-01)', () => {
   });
 });
 
+describe('sensor plausibility band is two-sided (2026-09-05)', () => {
+  // Found live: J19 read -273 and J09 read exactly 0 while their neighbours read
+  // 27-31 degC against a 33.8 degC ambient. The gate was `sensorVal > 300` only,
+  // so an implausible LOW reading was accepted as a measurement and a dead
+  // channel presented as a healthy cold joint - never alarmed.
+  const pl = () => JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'))
+    .find((n) => n.id === '39dad91df0c15744').func;
+
+  // Assert on the CODE, not the commentary: the comment block above this gate
+  // says "-273" and "> 300" while explaining the bug, so a naive substring
+  // search passes against prose even if the check itself is gone.
+  const gate = () => {
+    const b = pl();
+    const i = b.indexOf('let sensor_status');
+    return b.slice(i, b.indexOf('const freeze', i));
+  };
+
+  test('an implausibly low reading is a sensor fault', () => {
+    assert.match(gate(), /sensorVal < SENSOR_MIN_C/);
+    assert.match(pl(), /SENSOR_MIN_C = -40\b/);
+  });
+
+  test('the upper limit is unchanged at 300', () => {
+    // This completes an existing check; it must not retune an alarm threshold.
+    assert.match(pl(), /SENSOR_MAX_C = 300\b/);
+    assert.match(gate(), /sensorVal > SENSOR_MAX_C/);
+  });
+
+  test('a non-finite reading is a fault, not a value', () => {
+    assert.match(gate(), /!Number\.isFinite\(sensorVal\)/);
+  });
+
+  test('an out-of-band reading freezes the joint like any other fault', () => {
+    // The whole point: it must not update the EMA or feed deltaT.
+    assert.match(pl(), /sensor_status === "Sensor_Error"/);
+  });
+
+  // Behavioural check on the real gate, lifted out of the flow rather than
+  // re-typed - a copy would keep passing after the flow changed.
+  test('the extracted gate classifies the live readings correctly', () => {
+    const body = gate();
+    const run = new Function('sensor', 'sensorVal', `let sensor_status = sensor.st ?? "OK";${
+      body.slice(body.indexOf('const SENSOR_MIN_C'))}\nreturn sensor_status;`);
+    // A healthy reading carries the frame's own lowercase "ok" through; only an
+    // absent st defaults to "OK". What matters is that it is not a fault.
+    const faulted = (v, st = 'ok') => run({ st }, v) === 'Sensor_Error';
+    assert.equal(faulted(31.4), false, 'a normal joint');
+    assert.equal(faulted(131), false, 'J10 under a heat test - hot but real');
+    assert.equal(faulted(-273), true, 'J19 absolute-zero sentinel');
+    assert.equal(faulted(382.36), true, 'the same value read unsigned');
+    assert.equal(run({ st: 'err' }, 25), 'Communication_Error', 'comm errors still win');
+    // NOT caught by the band, and deliberately so: 0 degC is a real temperature
+    // in an unheated panel. Distinguishing a dead channel from a cold one needs
+    // the sustained-negative-deltaT rule (STATUS.md D2), which is a design-chat
+    // decision, not a bound.
+    assert.equal(faulted(0), false, 'exact zero is still accepted - see D2');
+  });
+});
+
 describe('alarms raised against the applied configuration (2026-09-01)', () => {
   // ProcessLogic read the legacy draft while the alarm sweep cleared against the
   // applied document. Two sources of truth for one lifecycle: it let a joint id

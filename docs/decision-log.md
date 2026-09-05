@@ -5096,3 +5096,93 @@ it in this environment. Structural checks only: div balance, wrapper present and
 bounded, sticky present with an opaque background, on all six tables.
 **Confirmed working on the device (2026-09-01)**, so the `min(vh, px)` heights
 sit correctly inside the 7-8 unit cards and no height tuning was needed.
+
+---
+
+## 2026-09-05 — Field calibration check on J10, and a one-sided plausibility gate
+
+A Fluke 87V with a thermocouple was put against J10 while the panel showed
+**131**; the meter read **132.0 °C**. First independent reference check the
+system has had, and the first at a temperature far above the working band.
+
+**What it establishes.** No gross scale error, no sign error, no offset drift,
+and the `0.01` decode scale is right at a high reading. That is a real result:
+the wrong `temp_scale` of `0.1` this panel carries in its applied config would
+have displayed 1310, and the array-coercion bug fixed on 2026-09-01 would have
+displayed 0. It also exercises the sign-extension path indirectly — a reading
+this far from zero would expose a mis-set word count.
+
+**What it does not establish.** That the sensor is accurate to 1 °C. The
+reference is not that good: the 87V's temperature function is roughly ±1 % of
+reading plus 1 °C, and a bead-type K probe adds about ±1.1 °C or 0.4 %, so the
+reference's own combined uncertainty at 132 °C is on the order of ±2.5–3 °C. The
+honest statement is **the two agree to within the reference's uncertainty** —
+which is the most a working multimeter can give, and is what was wanted.
+
+Two things were not recorded and should be next time, because they change what
+the number means:
+
+- **Where the probe sat.** On the mounting plate beside the sensor element, this
+  validates the sensor. On the busduct surface under the magnet, it validates
+  the whole mounting chain including the 0.25 mm gap — a far more valuable
+  claim, and the transfer function D3 needs.
+- **Whether the two readings were simultaneous and settled.** At 131 °C on a
+  bench heat source, a minute's drift is several degrees.
+
+### The defect the same screenshot showed
+
+On the same Grafana panel: **J19 read −273** and **J09 read exactly 0**, while
+every neighbour read 27–31 °C against a 33.8 °C ambient. Neither is a
+temperature. −273 is absolute zero and 0 is register `0x0000` — both are
+standard module sentinels for *no sensor attached*.
+
+They were being carried through as measurements. ProcessLogic's gate was
+
+```js
+else if (sensorVal > 300) sensor_status = "Sensor_Error";
+```
+
+**one-sided.** Nothing rejected an implausibly *low* value, so a dead channel
+presented as a healthy **cold** joint: ΔT deeply negative, so no ΔT alarm; the
+step down is a falling transient, so no RoR alarm; and the joint is still in the
+applied config, so the decommission sweep leaves it alone. Two joints silently
+unmonitored, indistinguishable on the dashboard from two cool ones.
+
+**This is the same failure shape as the detachment hazard in the HIRA** (STATUS.md
+D2): an unmeasurable joint that reads as a safe one. It arrived by a different
+route — a dead channel rather than a fallen sensor — which is the argument for
+treating "reads implausibly cool" as a fault class rather than patching each
+cause as it appears.
+
+**A detection was also lost on 2026-09-01 without anyone noticing.** An
+open-circuit module reporting −27300 centi-degrees decoded UNSIGNED as **+382**,
+which tripped `> 300`. Reading it as two's complement is arithmetically correct
+— that fix stands — but it moved the value from the caught side of a one-sided
+test to the uncaught side. A correct fix to one component silently disabled a
+check in another. Worth remembering when a decode changes sign, range or units:
+**ask what downstream thresholds were catching the old representation.**
+
+### The fix
+
+The gate is now two-sided, `SENSOR_MIN_C = -40` to `SENSOR_MAX_C = 300`, plus an
+explicit non-finite check. −40 °C is the conventional industrial floor and sits
+far below any panel this ships into, so it cannot reject a real reading. The
+ambient path has had this shape — plausibility band plus a zero sentinel — since
+2026-07-28; this brings the joint path level with it. **The upper limit is
+untouched**: this completes an existing check rather than retuning an alarm
+threshold.
+
+**J09's exact zero is deliberately still accepted.** 0 °C is a real temperature
+in an unheated panel, and a blanket rejection would be wrong for a cold site.
+The ambient resolver can reject it because an *ambient* of 0 in a switchgear
+room is not physical; a joint has no such guarantee. Discriminating a dead
+channel from a genuinely cold one needs the sustained-near-ambient/negative-ΔT
+rule already queued as **D2**, which is a new alarm rule and therefore a
+design-chat decision, not something to slip in under a bounds check.
+
+So J19 will now fault; **J09 will not**, and needs the panel to say whether it is
+a dead channel or a fabricated zero — `validateValue(value, defaultValue = 0)`
+in the legacy chain defaults missing data to 0, so the value may never have come
+from the sensor at all. Check `global.sensorData[<unit>][<reg>]` for J09's
+channel: absent means fabricated, present-and-zero means the module is sending
+the sentinel.
