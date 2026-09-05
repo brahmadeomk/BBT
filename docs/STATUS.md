@@ -90,11 +90,18 @@ semantics.
   (±2.5–3 °C at that temperature), which is the most a working multimeter gives.
   It rules out gross scale, sign and offset error at a reading far above the
   working band — including the wrong `temp_scale` this panel still carries.
-- **Sensor plausibility gate made two-sided.** It was `sensorVal > 300` only, so
-  J19's −273 (an absolute-zero *no sensor* sentinel) was accepted as a
-  measurement and the joint went silently unmonitored — a dead channel
-  presenting as a healthy cold joint. Now −40 … 300 plus a non-finite check.
+- **Sensor plausibility gate made two-sided — built and tested, but HELD, not
+  deployed.** The gate was `sensorVal > 300` only, so nothing rejected an
+  implausibly *low* reading and a dead channel could present as a healthy cold
+  joint. Now −40 … 300 plus a non-finite check. The defect is visible in the
+  source independently of any device, which is why the fix is kept; but the
+  panel that showed it (J19 −273, J09 exactly 0) **is not running current
+  code**, so it is not field-validated. Re-check those joints after the update.
   See D2: the exact-zero case (J09) is deliberately still open.
+  - Version-independent finding: both the legacy and current decode map raw
+    `0x955C` to ≈ −273 °C (−272.99 vs −273.00), so **the module really is
+    sending an absolute-zero sentinel** and updating will not make J19 read
+    sensibly — it will only make it *classified* as a fault.
 
 ---
 
@@ -117,7 +124,8 @@ semantics.
 |---|---|
 | **AWS policy push** — grant publish on `status/{c}/{s}/{p}` as a new active policy version | Site/AWS admin. Gates the LWT and confirming `device_health` receipt |
 | **Scale column → `0.01`** in Modbus Settings on the test panel | Site. Clears a standing warning and stops the config carrying a value the next reader would trust |
-| **Confirm what code version the commercial building runs** | Site. Not currently known, and it matters — the test panel tracks the development branch |
+| **Confirm what code version each deployment runs** | Site. Not currently known for the commercial building, and on 2026-09-05 an out-of-date *test* panel led to a field observation being read as current-code behaviour. Record the build before drawing conclusions from a screen |
+| **Re-check J09 / J19 after updating the test panel** | Site. Confirms the held plausibility-gate fix, and settles whether J09's zero is a sentinel or a fabricated default |
 | **Reference BACnet gateway hardware** | Procurement. Gates Slice 11's last acceptance criterion and the first real MGate CSV import |
 | **Thermography on the 1–2 flagged joints** | Site. See §6 — the single highest-value action available right now |
 

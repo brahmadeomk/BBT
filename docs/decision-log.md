@@ -5101,6 +5101,14 @@ sit correctly inside the 7-8 unit cards and no height tuning was needed.
 
 ## 2026-09-05 — Field calibration check on J10, and a one-sided plausibility gate
 
+> **STATUS: the code change is HELD, not deployed (user, 2026-09-05).** The
+> panel in the screenshot **is not running current code**, so the J09/J19
+> readings below cannot be attributed to the current decode path. The gate fix
+> is committed and tested because the defect is visible in the source
+> independently of any device — but it is **not field-validated**, and the
+> reading provenance claims in "The defect the same screenshot showed" are
+> weaker than first written. See the correction at the end of this entry.
+
 A Fluke 87V with a thermocouple was put against J10 while the panel showed
 **131**; the meter read **132.0 °C**. First independent reference check the
 system has had, and the first at a temperature far above the working band.
@@ -5186,3 +5194,61 @@ in the legacy chain defaults missing data to 0, so the value may never have come
 from the sensor at all. Check `global.sensorData[<unit>][<reg>]` for J09's
 channel: absent means fabricated, present-and-zero means the module is sending
 the sentinel.
+
+### Correction (same day): the device is not on current code
+
+The panel in the screenshot is running an **older build**, which invalidates part
+of the reasoning above and needs separating from the part that survives.
+
+**What no longer stands.** That J19's −273 is *what the current decode produces*.
+That was an inference from a screenshot taken on an unknown code version, stated
+as though it exercised the two's-complement path added on 2026-09-01. It did
+not. By the same token the claim that the sign fix "moved the value from the
+caught side of a one-sided test to the uncaught side" is sound as *reasoning
+about the current source*, but this screenshot is not evidence for it.
+
+**What still stands, and does not depend on the device at all.** The gate is
+one-sided in the source:
+
+```js
+else if (sensorVal > 300) sensor_status = "Sensor_Error";
+```
+
+That is readable in `flows_BBT.json` without any panel. An unbounded low side on
+a fire-safety monitor is a defect whether or not this screenshot showed it, so
+the fix is kept — but **held, not deployed**, pending a look at the same joints
+on current code.
+
+**And one conclusion is actually stronger than before, because it is
+version-independent.** Both candidate decodes converge on the same raw register:
+
+| Decode | Arithmetic on raw `0x955C` (38236) | Result |
+|---|---|---|
+| Legacy `sensorData` writer | `((65535 − 38236) / 100) × −1` | **−272.99** |
+| Current `channel-decode.js` | `(38236 − 65536) × 0.01` | **−273.00** |
+
+They differ by 0.01 °C — the off-by-one already noted in `channel-decode.js`.
+So whichever build produced the display, **the module is genuinely transmitting a
+raw value that means −273 °C**, and that is a sentinel, not a measurement. The
+practical consequence: **updating the code will not make J19 read sensibly.** It
+should still show ≈ −273, changing only in the second decimal. If it changes by
+more than that, the decode is not what either path predicts and that is a
+separate finding worth chasing.
+
+**What the update *will* change** is whether −273 is *classified* as a fault
+rather than displayed as a temperature — which is the whole point of the gate
+fix, and the thing to confirm once it is deployed.
+
+**J09's exact 0 remains genuinely ambiguous** and the update does not settle it
+either: `validateValue(value, defaultValue = 0)` fabricates a zero for missing
+data, so it may never have come from the sensor. The check is unchanged —
+inspect `global.sensorData[<unit>][<reg>]` for J09's channel: absent means
+fabricated, present-and-zero means the module is sending the sentinel.
+
+**The lesson.** A screenshot dates the *display*, not the *build*. Reading a
+field observation as confirmation of current-code behaviour needs the version
+established first — and the version was never asked for. The habit that would
+have caught it is the one already recorded against the commercial building in
+STATUS.md: **record what code a deployment is running before drawing conclusions
+from what it shows.** That was written about the other site and not applied to
+this one.
