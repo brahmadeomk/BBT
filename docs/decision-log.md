@@ -5667,3 +5667,60 @@ own terms** regardless of which dominates the CPU. A busduct joint's thermal tim
 constant is minutes; sampling it ~6 times a second buys no detection capability
 that ~5 s sampling does not, and costs a 297× data rate. Even if logging turned
 out to be the entire CPU cost, the scan rate should still be fixed.
+
+### RESULT: logging is the wear problem, the scan rate is the CPU problem
+
+`write bt_kpi` disabled, everything else untouched:
+
+| | Before | After | Change |
+|---|---|---|---|
+| node-red %CPU | 74 | **74** | **none** |
+| `bo` blocks/s | 936 | **129** | **−86 %** |
+| interrupts/s | 15 037 | 11 772 | −22 % |
+| context switches/s | 27 003 | 20 922 | −23 % |
+| SD writes | 83 GB/day | **11 GB/day** | −86 % |
+
+The disable demonstrably took effect — `bo` collapsed — so this is a real
+measurement and not a no-op.
+
+**Node-RED's CPU did not move at all.** The InfluxDB write path, one HTTP POST
+per data point, is *not* what is consuming the core. I expected it to be a large
+share and it is essentially none. That is the second wrong prediction in this
+investigation and the reason the test was worth running before building the
+batching fix I had proposed.
+
+**But the write path is essentially the whole SD-wear problem**: 83 → 11 GB/day.
+So the two symptoms have different owners:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Slow HMI (node-red at ~74 % of a core) | message volume through the flow, i.e. **the scan rate** | poll interval |
+| SD wear (~29 TB/year) | **historian writes**, which are derived from the scan rate | poll interval, or batching |
+
+**One fix addresses both**, because the logging rate is downstream of the scan
+rate: slowing the scan cuts messages *and* points proportionally. Batching would
+fix only the wear, and is now demoted to optional.
+
+#### What the number implies, and the next falsifiable step
+
+~74 % of a core against ~35 frames/s is **~21 ms of CPU per frame** — for a chain
+of roughly 30 node hops that should cost tens of microseconds each. Node-RED's
+own routing does not explain a figure that large, so something per-message is
+disproportionately expensive. The candidates are all editor/browser fan-out:
+`node.status()` on every frame (Scale Nano Reading), 12 active debug nodes on the
+frame path, and dashboard updates — all of which serialise and push over
+websocket **to every connected session**, and the panel is being driven over VNC
+with browser tabs open on it.
+
+So the next two steps, in order, each with a stated falsification:
+
+1. **Raise `inter_frame_ms` from 10 ms toward 500 ms** (no code). Readings should
+   fall ~18×, from 59/s to ~3.2/s. **If node-red's CPU does not fall roughly in
+   proportion, the cost is not per-message and the scan rate is not the answer
+   either.**
+2. If it does not, **close every browser tab pointing at the Pi** — editor and
+   dashboard — and re-measure. That isolates the websocket fan-out.
+
+**Re-enable `write bt_kpi` first.** It was not the CPU problem, the panel needs
+its trend history, and once the scan is slowed its write volume falls with
+everything else.
