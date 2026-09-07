@@ -5608,3 +5608,62 @@ had to think about, because it never did.
 
 **Nothing changed in code.** The interim knob is a config edit; the compiler fix
 and the choice of interval both belong in the design chat.
+
+### Scan rate or InfluxDB logging? They are coupled, but the CPU can be separated
+
+Asked 2026-09-07: is the cost the 10 ms RS-485 scan or the InfluxDB logging?
+(10 ms matches the measurement — a 169 ms sweep over 6 slaves is ~28 ms per
+slave, i.e. ~18 ms transaction plus a 10 ms inter-frame gap.)
+
+**They are not independent: the scan rate sets the logging rate.** 59 readings/s
+arrive because the bus is scanned that fast, and every one becomes a point. Slow
+the scan and both fall together. But the *CPU* can be attributed, and the answer
+matters because the two fixes have different costs.
+
+#### What the logging path actually does
+
+`Historian Points` → `write bt_kpi`, and `toInfluxPoints` ends:
+
+```js
+return [{ measurement, fields, tags, timestamp }];   // exactly ONE point
+```
+
+One message in, one point out, one node message to the `influxdb batch` node.
+**Nothing accumulates across messages.** The node's name is misleading — "batch"
+means it *accepts* an array, not that it aggregates one. So the panel is doing
+**~59 separate HTTP POSTs per second, each carrying a single data point.** That
+is the most expensive possible way to write 59 points: line-protocol
+serialisation, HTTP client, socket and round-trip per point, all inside
+Node-RED's single thread. `Historian Points` also calls `node.status()` with a
+`toLocaleTimeString()` on every message, which is a websocket publish and an Intl
+format per reading.
+
+#### The test that separates them, 2 minutes and reversible
+
+Disable the **`write bt_kpi`** node and Deploy, then watch `top`:
+
+- node-red falls from ~82 % to ~20-30 % → **the logging path is the cost**, and
+  the fix is to batch writes.
+- node-red stays near 80 % → **the scan rate is the cost**, driving the whole
+  flow (ProcessLogic, Alarm Manager, dashboard, BMS, cloud batcher), and the fix
+  is the poll interval.
+
+Nothing else changes: alarms, HMI and BMS all keep working, only trend history
+stops recording for the duration.
+
+#### The two fixes buy different things
+
+| Fix | CPU | SD wear | Sample rate | Cost |
+|---|---|---|---|---|
+| Slow the scan (poll interval) | falls ~18× at `ifm=500`, more with the compiler fix | falls with it | **reduced** — blacklist detection slows to 3 sweeps | alarm responsiveness |
+| Batch historian writes (~5 s) | removes the per-point HTTP cost | large: InfluxDB write amplification drops sharply with batch size | **unchanged** | a bounded code change |
+
+They are complementary, not alternatives. Batching keeps full sample rate for
+alarms while removing the logging cost; slowing the scan reduces everything
+including the work the alarms are computed from.
+
+**Recommendation: both** — and note that **a 10 ms scan is indefensible on its
+own terms** regardless of which dominates the CPU. A busduct joint's thermal time
+constant is minutes; sampling it ~6 times a second buys no detection capability
+that ~5 s sampling does not, and costs a 297× data rate. Even if logging turned
+out to be the entire CPU cost, the scan rate should still be fixed.
