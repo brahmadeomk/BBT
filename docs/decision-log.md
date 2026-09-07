@@ -5378,3 +5378,85 @@ lookup, and dashboard tables carrying 71 rows instead of 10) rather than from
 message rate. **Unverified** — the clean way to settle it is the same `ps` and
 `vmstat` from this panel, which turns a one-panel snapshot into a controlled
 comparison.
+
+### The configured poll interval never reaches the device
+
+`top` on panel **ESBUSBBT04** (the 6-sensor / 10-joint panel):
+
+```
+Cpu(s): 25.7 us, 4.7 sy, 0.0 ni, 64.3 id, 4.7 wa
+ 738 root  20  0 2322220 284516 49864 R  63.6  3.6  4d+5h node-red
+ 738 root  20  0 2322220 284516 49864 R  79.7  3.6  4d+5h node-red
+ 738 root  20  0 2323244 284812 49864 R  80.1  3.6  4d+5h node-red
+```
+
+**node-red is at 64-80 % of a core on a panel with six sensors**, and its TIME+
+of **4d 5h against 5d 3h of uptime** says it has averaged ~82 % of a core
+continuously since boot. The 71-device panel showed the same process at 100 %.
+
+**So Node-RED's cost is very nearly independent of device count.** The load
+difference between the two panels (1.86 vs 5.2) was mostly the *other* processes
+— Chromium at ~125 %, Xorg, orca — not the sensors. The per-device scaling model
+from the previous entry was wrong, and the benchmark's "flat in device count"
+result was pointing at this the whole time.
+
+#### The mechanism, confirmed in the compiler and the firmware
+
+`compileNanoJob` emits exactly one rate control:
+
+```js
+const comm = [Math.round(bus.inter_frame_ms * 1000), bus.baud, bus.timeout_ms];
+```
+
+and `Nano_IOT.ino` applies it as `pollingDelay(Polling)` between transactions,
+looping its read list continuously. There is **no per-slave scheduling in the
+firmware at all.**
+
+Meanwhile the schema carries `slaves[].poll_interval_s` (**default 30 s**), the
+Modbus Settings dashboard shows it as a per-slave column, and **R10 validates
+it** — "worst-case scan time per bus must fit within the shortest
+`poll_interval_s` on that bus". R10 checks the sweep *fits*; nothing then waits
+out the remainder of the interval. So the operator sets a poll interval, the
+validator confirms it is satisfiable, the dashboard displays it — and the device
+never receives it.
+
+At the schema default `inter_frame_ms` of 20 ms (the firmware's own default is
+1.7 ms, lower still), with a ~11 ms transaction at 19200 baud:
+
+| Slaves | Sweep | Frames/s | Each slave polled | vs 30 s configured |
+|---|---|---|---|---|
+| 6 | 0.19 s | ~32 | every 0.19 s | **162× too often** |
+| 71 | 2.20 s | ~32 | every 2.20 s | **14× too often** |
+
+**The frame rate is the same either way** — it is bounded by bus speed, not slave
+count — which is exactly why both panels load Node-RED equally. Every downstream
+consumer (ProcessLogic, Alarm Manager, historian writes, dashboard updates, BMS
+image) runs at that rate instead of the intended one.
+
+**This is the third instance of the same class of defect in this project**, after
+`temp_scale` (migrated as a guess, never read until it broke the panel) and the
+one-sided plausibility gate. A field that is *validated and displayed but never
+actuated* is worse than one that is absent: R10 passing gives positive evidence
+that the setting is in force.
+
+#### Status: hypothesis, not conclusion
+
+That the over-polling is what consumes the core is **not yet proven** — it is the
+only mechanism found that is device-count independent, which is the striking fact
+to explain, but three earlier guesses in this investigation were wrong. The test
+is cheap and needs no code: **raise `inter_frame_ms` on the RS-485 Buses table and
+watch node-red's %CPU.** At 100 ms the frame rate drops ~4× (9/s at 19200 baud);
+if node-red's CPU does not fall roughly in proportion, this is not the cause
+either.
+
+Safe to raise: the serial-silence watchdogs trigger on *no frames at all*, and
+frames keep arriving throughout a sweep, so sweep length does not affect them.
+The Diagnostics "No Data" expiry is 60 s per device, so the sweep must stay well
+under that — at 71 slaves, `inter_frame_ms` up to ~800 ms would still qualify.
+Thermal monitoring of a busduct joint does not need sub-second sampling; the
+joint's own time constant is minutes.
+
+**The real fix is a design-chat item**, because it is firmware-level: either the
+firmware honours per-slave intervals, or the compiler emits a sweep-level delay
+so `poll_interval_s` is actually enforced. Until one of those exists,
+`poll_interval_s` should not be presented to the operator as if it does anything.
