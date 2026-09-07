@@ -5460,3 +5460,68 @@ joint's own time constant is minutes.
 firmware honours per-slave intervals, or the compiler emits a sweep-level delay
 so `poll_interval_s` is actually enforced. Until one of those exists,
 `poll_interval_s` should not be presented to the operator as if it does anything.
+
+### Full process list from ESBUSBBT04: no browser, and an SD-card wear problem
+
+```
+%CPU %MEM     RSS COMMAND          procs ------io----  -system--  ------cpu-----
+82.6  3.5  282416 node-red          r  b   bi    bo     in     cs  us sy id wa
+50.0  0.0    6708 sudo              4  0   43   993   6608     28  30  6 59  5
+13.9 30.0 2403948 influxd           3  0    0   892  15086  27192  26  9 61  4
+ 1.8  0.4   32512 systemd-journal   2  1    0  1074  15591  27926  34 11 52  4
+ 1.6  1.3  107936 Xorg              4  0    0   926  15994  28869  24  7 64  5
+ 1.4  4.6  375180 grafana           6  0    0   852  13477  24024  24  7 65  4
+ 0.8  2.6  215900 orca
+```
+
+**No Chromium on this panel at all.** That confirms the previous entry's reading:
+the 71-device panel's extra ~1.25 cores were a local browser, not its sensors,
+and node-red's own cost (82.6 % here, 100 % there) is essentially flat in device
+count.
+
+#### The new finding: the historian is writing ~0.9 MB/s, continuously
+
+`bo` holds at **850-1070 blocks/s** — roughly **0.88 MB/s sustained**, which is
+**~80 GB/day, ~29 TB/year**, on the SD card, from a panel with **six sensors**.
+`bi` is ~0 (reads are cached), `wa` sits at 4-5 %, `b` occasionally 1, and
+`jbd2/mmcblk0p2-8` — the ext4 journal thread — appears in the top processes.
+`influxd` is holding **2.4 GB RSS, 30 % of RAM**.
+
+Disk *space* is fine (35.8 % used). **Wear is not.** A typical industrial SD card
+is rated in the low hundreds of TBW, so ~29 TB/year puts card replacement on a
+2-5 year cycle — on a device whose whole purpose is unattended fire-safety
+monitoring, where the same card holds the historian, the cloud outbox and the
+persistent context store. `docs/historian.md` anticipated flash wear in general;
+this is the first time it has been measured, and it is an order of magnitude
+worse than "background noise".
+
+#### It is the same root cause, if the poll hypothesis holds
+
+At the configured 30 s poll interval, six sensors should produce **12
+readings/minute**. Continuous polling produces **~1,900/min** at 20 ms
+inter-frame, or **~17,000/min** at the firmware's 1.7 ms default. Every one of
+those becomes a Node-RED message, a `bt_kpi` point, and an InfluxDB write. That
+single mis-actuated setting would explain node-red's CPU, influxd's CPU and RSS,
+the write rate, and the 15 k interrupts / 27 k context switches per second — all
+of it, on a panel doing almost nothing.
+
+#### The measurement that settles it, exactly
+
+The historian already holds the answer; no instrumentation needed:
+
+```
+influx -database busduct -execute "SELECT count(temp_c) FROM bt_kpi WHERE time > now() - 1m"
+```
+
+Six sensors at the configured 30 s interval = **12**. Anything in the thousands
+confirms the over-polling and its factor in one number. Then raise
+`inter_frame_ms` on the RS-485 Buses table and re-run both that query and `top`:
+CPU and write rate should fall in proportion, and if they do not, the cause is
+elsewhere and this entry is wrong.
+
+**Note the retention design does not save us here** — `raw` is 7 d, `rollup_1h`
+90 d, `rollup_1d` ~5 y (`tools/influx-setup.influxql`). Retention bounds how much
+is *kept*, not how much is *written*; every point is written to the card before
+any of it is expired, and the continuous queries then read it all back to
+downsample. Over-sampling costs full write amplification regardless of how
+briefly the data survives.
