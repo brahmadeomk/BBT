@@ -42,7 +42,7 @@ Two deployments exist:
 | 7 | Remote config channel | **Done**, live-verified end to end |
 | 8a | Security hardening (PINs from env, sudoers, kiosk) | **Done**, live-verified |
 | 9 | Device blacklisting + recovery | **Done**, live-verified |
-| 10 | Scale hardening (110 devices, 2 segments, ambient fallback) | **Done** except positional telemetry, which is built and **off by default** — no cloud consumer yet |
+| 10 | Scale hardening (110 devices, 2 segments, ambient fallback) | **Done** except positional telemetry, which is built and **off by default** — no cloud consumer yet. **⚠ Re-opened 2026-09-07**: at **71 devices** panel ESBUSBBT06 sits at sustained load **~5.2 on 4 cores** with a visibly slow HMI. The 110-device target is not currently reachable. Cause under investigation — see below |
 | 11 | BMS integration (Modbus TCP + MGate CSV) | **Core done**, live on Modbus TCP. **Not verified against a real BACnet gateway** — needs the hardware |
 | 8b | Portability drill, pilot, rollout | **Not started** — deliberately last, so the pilot runs against the shipping configuration |
 
@@ -102,6 +102,42 @@ semantics.
     `0x955C` to ≈ −273 °C (−272.99 vs −273.00), so **the module really is
     sending an absolute-zero sentinel** and updating will not make J19 read
     sensibly — it will only make it *classified* as a fault.
+
+---
+
+## 3b. Open: HMI latency at 71 devices (2026-09-07)
+
+Panel **ESBUSBBT06**, 71 devices, BMS tier 3 (1058 registers), all responding.
+Reported symptom: slow HMI button response. The Panel & Uplink tile shows
+**load 4.9 / 5.19 / 5.21 on 4 cores**, CPU 70.6 °C, uptime 53 m — RAM, disk and
+Wi-Fi all healthy. All three load averages agree, so this is steady state, not a
+boot transient; the machine is oversubscribed by roughly 30 % and every UI click
+queues behind it. **This is a Pi-side problem, not tablet rendering.**
+
+**Not yet established: which process owns the CPU.** Node-RED, InfluxDB, Grafana
+and any kiosk browser all run here, and Linux load counts uninterruptible disk
+wait, so an SD card shared by the historian, the outbox and the context store
+could produce this without the CPU being the constraint. 70.6 °C argues for real
+CPU work (an idle Pi 4 sits ~45–50 °C) but does not identify the owner. **No code
+has been changed** — measure first.
+
+**Prime suspect if it is Node-RED**, visible in the source and scale-dependent:
+`buildOutputs` in the Alarm Manager runs on **every sensor reading** (both the
+joint and ambient outputs of ProcessLogic feed it) and unconditionally does
+
+```js
+const currentHistoryJSON = JSON.stringify(historian);   // whole alarm history
+```
+
+purely to decide whether the history changed — which it does only on a raise or
+clear. Cost is O(history size) × O(readings per second), so it multiplies on
+**both** axes as a panel grows; at 9 joints with a short history it was
+invisible. The same function also writes the active-alarm map into the
+**persistent** context store on every reading. An O(1) revision counter would
+replace the stringify with identical semantics.
+
+Confirm before fixing: `top`/`vmstat` for the owner and for iowait, and the size
+of `busbartherm.alarmHistorian`.
 
 ---
 
