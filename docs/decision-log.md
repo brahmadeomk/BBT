@@ -5341,3 +5341,40 @@ and prints `!! NEVER INVOKED (not a measurement)`.
 the state under test** (device-health `busSeen`, blacklist probe backoff, now
 this). The guard is cheap and belongs in any harness whose output is a number:
 **assert the code ran before believing what it cost.**
+
+### Control panel: 6 sensors / 10 joints, load 1.86
+
+A second panel (Wi-Fi `TLD_SC_5G`, uptime **5d 3h**) with only **6 sensors and 10
+joints** reports **load 1.85 / 1.89 / 1.86 on 4 cores**, CPU 60.4 °C, "Panel
+healthy". Steady over five days.
+
+Two points, same software family:
+
+| Devices | Load (4 cores) |
+|---|---|
+| 6 | **1.86** |
+| 71 | **5.20** |
+
+Naively that is ~1.9 fixed plus ~0.05 per device, which extrapolates to **~7.4 at
+the 110-device target** — comfortably past 4 cores. Treat that as indicative
+only: two different machines, possibly different code versions, and the 71-device
+panel was additionally running a local Chromium at ~125 % that this one may not
+be. It is a reason to measure, not a prediction to design against.
+
+**The more interesting half is the intercept, not the slope.** A panel with six
+sensors sitting at load 1.86 for five days means **most of the cost is not the
+sensors** — it is the constant stack (Node-RED, InfluxDB, Grafana, X, any local
+browser) ticking over. Halving that baseline would buy more headroom at 110 than
+optimising anything on the per-frame path, which the benchmark has already shown
+costs ~60-90 µs.
+
+This also constrains the earlier frame-rate hypothesis. The Nano loops
+continuously through its read list, so **total frames per second is bounded by
+bus speed and is roughly independent of how many slaves are on it** — more slaves
+means each is polled less often, not that more frames arrive. If that holds, the
+6- and 71-device panels see similar message rates, and the load difference must
+come from per-message work that scales with panel size (ProcessLogic's O(n) joint
+lookup, and dashboard tables carrying 71 rows instead of 10) rather than from
+message rate. **Unverified** — the clean way to settle it is the same `ps` and
+`vmstat` from this panel, which turns a one-panel snapshot into a controlled
+comparison.
