@@ -5525,3 +5525,86 @@ is *kept*, not how much is *written*; every point is written to the card before
 any of it is expired, and the continuous queries then read it all back to
 downsample. Over-sampling costs full write amplification regardless of how
 briefly the data survives.
+
+### CONFIRMED: 297× over-sampling, measured
+
+```
+$ sudo influx -database busduct -execute "SELECT count(temp_c) FROM bt_kpi WHERE time > now() - 1m"
+name: bt_kpi
+time                count
+1788784690592430141 3558
+```
+
+**3558 points/minute on a panel with six sensors and ten joints.** At the
+configured 30 s poll interval it should be **12**. That is **297×**, and it is a
+measurement, not an inference.
+
+Each joint is being sampled every **0.17 s** (a 169 ms sweep), against a 30 s
+setting the operator chose, the dashboard displays, and R10 validates. **5.12
+million points a day instead of 17.3 thousand.** This is the cause of the ~0.9
+MB/s of SD writes, and it is consistent with node-red's 82.6 % on a panel that is
+otherwise doing nothing.
+
+The hypothesis in the previous two entries is confirmed on its factual half — the
+poll interval is not in force, by a factor of ~300. That the CPU falls when it is
+corrected is still to be demonstrated, and remains the acceptance test.
+
+#### Interim mitigation, no code
+
+Raise `inter_frame_ms` on the RS-485 Buses table. It is schema-capped at 500 ms:
+
+| Slaves | ifm=500 ms | Sweep | vs now |
+|---|---|---|---|
+| 6 | | **3.1 s** | ~18× fewer points |
+| 71 | | **36.3 s** | close to the 30 s intent |
+
+Note the asymmetry: because the knob is a *per-packet* delay, the same setting
+gives a small panel a fast sweep and a large one a slow sweep. A six-slave panel
+cannot reach a 30 s sweep through this knob at all (it would need 5 s per packet,
+ten times the schema cap). That asymmetry is itself the argument for fixing it
+properly.
+
+#### The proper fix is compiler-only — no firmware reflash
+
+`comm[0]` is simply "microseconds to wait between transactions"; the firmware
+stores it in a `long` and has no cap. The 500 ms limit lives only in the JSON
+schema, on a field *named* for the RS-485 inter-frame gap — a different concept
+that has been overloaded into a rate control. So `compileNanoJob` can compute the
+delay needed to hit the configured interval:
+
+```
+perPacket = max(inter_frame_ms, (min(poll_interval_s) * 1000 / slaveCount) - txEstimate)
+```
+
+keeping the RS-485 minimum gap as a floor and stretching it to meet the poll
+interval. Every panel already in the field would be corrected by a config
+re-apply, with no visit to the Nano. R10's meaning changes from "check the sweep
+fits" to "compute the delay that makes it fit", which is a small edit to logic
+that already does the timing arithmetic.
+
+#### But 30 s is probably the wrong target, and this is a design-chat call
+
+Slowing the sample rate is not free, and three existing mechanisms are keyed to
+it:
+
+- **Ambient staleness.** `resolveAmbient` rejects a reading older than
+  `maxAgeSec` (default **60 s**). At 71 slaves and ifm=500 ms the sweep is 36 s,
+  so ambient age approaches 36 s — inside the limit, but a true 30 s *per-slave*
+  interval on a large panel would push ages past 60 s and the ambient would start
+  being rejected as stale, silently disabling ΔT. **The two settings must be
+  chosen together.**
+- **Blacklist detection latency.** A device is blacklisted after 3 consecutive
+  failures, i.e. 3 sweeps. Today that is ~0.5 s; at a 30 s interval it becomes
+  ~90 s before a dead sensor is noticed.
+- **RoR** is safe either way — the EMA is time-weighted by `dtSec`, so it adapts
+  to whatever the interval is.
+
+So the question is not "how slow can it go" but **what sampling interval a
+fire-safety monitor should run at.** ~5-10 s looks like the sweet spot on the
+numbers above: ambient stays fresh, a dead sensor is caught in 15-30 s, RoR is
+unaffected, and the data rate falls ~35-70× from today. **The current 30 s
+default may itself be too slow** once it actually takes effect — which nobody has
+had to think about, because it never did.
+
+**Nothing changed in code.** The interim knob is a config edit; the compiler fix
+and the choice of interval both belong in the design chat.
