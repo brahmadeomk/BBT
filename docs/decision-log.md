@@ -5252,3 +5252,92 @@ have caught it is the one already recorded against the commercial building in
 STATUS.md: **record what code a deployment is running before drawing conclusions
 from what it shows.** That was written about the other site and not applied to
 this one.
+
+---
+
+## 2026-09-07 — HMI latency at 71 devices: measuring instead of guessing
+
+Panel ESBUSBBT06, 71 devices, slow HMI. `ps`/`vmstat` from the panel:
+
+```
+%CPU %MEM   RSS COMMAND          procs -----io---- -------cpu-------
+ 100  4.2 339868 node-red         r  b   bi   bo   us sy id wa
+79.5  3.7 299192 chromium         9  0    0  232   53 10 36  1
+34.2  1.9 154040 chromium         6  0   50  284   57 12 31  0
+14.0 15.5 1247020 influxd         1  0    0   96   55  8 37  0
+ 6.7  1.3 108440 Xorg             6  0  326  742   51 11 37  1
+ 5.5  1.0  83648 orca
+```
+
+**`wa` ≈ 0 and `b` = 0, so the SD-card theory is dead** — this is CPU in user
+space, not I/O. (Worth having checked: Linux load counts uninterruptible disk
+wait, so load 5.2 alone could not distinguish the two.)
+
+**node-red is at 100 %, and Node.js is single-threaded — that IS its ceiling.**
+One core fully consumed, no headroom, so every HMI message queues. That is a
+direct and sufficient explanation of the symptom. Chromium is second at ~125 %
+across four processes: a browser rendering the dashboard **on the Pi itself**.
+`orca`, a GNOME screen reader, is burning 5.5 % on a kiosk panel for nothing.
+
+### Two guesses, both wrong, before any measurement
+
+Recorded because the pattern is the point, not the answers:
+
+1. **"The Alarm Manager stringifies the whole alarm history on every reading."**
+   True, and it looked like an O(history) × O(rate) cost — until the same file
+   turned out to cap the history at 100 entries (`splice(0, 50)` at 100). Bounded
+   and small.
+2. **"The legacy InfluxDB feeder reads every joint and writes on every frame."**
+   It does read 11 joints and write per message — but its upstream `delay` node
+   is `pauseType: rate`, 1/second, `drop: true`. Throttled since long before this.
+
+Both were plausible readings of the flow graph. Both were false. **Reasoning
+about a flow's shape kept producing confident wrong answers**, which is what
+prompted building a measurement instead.
+
+### The measurement
+
+`tools/bench-hot-path.js` lifts the four function nodes a frame actually
+traverses out of `flows_BBT.json` and runs them against a synthetic panel:
+
+| Devices | Alarm Mgr | ProcessLogic | Blacklist | Scale | **Total/frame** |
+|---|---|---|---|---|---|
+| 9 | 43.8 | 6.0 | – | – | **56.8 µs** |
+| 25 | 41.1 | 7.7 | – | – | **56.8 µs** |
+| 71 | 41.2 | 10.5 | – | – | **58.9 µs** |
+| 110 | 60.0 | 20.0 | – | – | **92.4 µs** |
+
+**Per-frame cost is roughly flat in device count** — it does not blow up on the
+way to 110. And the absolute number is nowhere near a core: at 200 frames/s,
+~2 % of one core on this machine, so perhaps 7–11 % on a Pi 4 (3–5× slower for
+JS). **The flow's own logic is not what is pegging Node-RED.** The Alarm Manager
+is still the largest single node at ~70 % of that total, so it is the right place
+to optimise *if* the total ever matters — but today it does not.
+
+That leaves the Node-RED runtime itself: per-message cloning and routing across
+~30 nodes per frame, `node.status()` and debug-node traffic to any open editor,
+and the dashboard's socket.io fan-out to every connected browser. The
+node-red-at-100 % / chromium-at-125 % / 20 k context-switches-per-second triple
+is consistent with a Node-RED ↔ browser ping-pong, but that is a hypothesis and
+**the next measurement, not a conclusion.**
+
+### A cost of my own, noted
+
+`node.status()` at the end of "Scale Nano Reading" (added 2026-09-01, for the
+per-channel readout) runs on **every frame**, and Node-RED publishes every status
+change to all connected editor sessions. Not a core's worth, but it is per-frame
+work that did not exist before, and it should be throttled to ~1/s regardless of
+how this investigation ends.
+
+### The benchmark's own first result was a lie
+
+Its first run reported the Alarm Manager at **0.0 µs** — because ProcessLogic
+returns `[null,null,null]` at `if (!cfg?.ror?.timeWindowMin)`, and the synthetic
+config had `timeWindowMin` at the top level instead of under `ror`. The node
+never ran, and "never ran" measures as free. The harness now counts invocations
+and prints `!! NEVER INVOKED (not a measurement)`.
+
+**This is the third time in this project a fixture has silently failed to reach
+the state under test** (device-health `busSeen`, blacklist probe backoff, now
+this). The guard is cheap and belongs in any harness whose output is a number:
+**assert the code ran before believing what it cost.**
