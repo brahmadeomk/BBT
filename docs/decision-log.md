@@ -5724,3 +5724,47 @@ So the next two steps, in order, each with a stated falsification:
 **Re-enable `write bt_kpi` first.** It was not the CPU problem, the panel needs
 its trend history, and once the scan is slowed its write volume falls with
 everything else.
+
+### Browser fan-out eliminated too — and my explanation for the magnitude is gone
+
+Remote browser sessions closed, `write bt_kpi` still disabled:
+
+| node-red %CPU | |
+|---|---|
+| baseline | 74.5 |
+| InfluxDB writes off | 74.2 |
+| **+ all remote browsers closed** | **70.5** |
+
+A ~4-point drop, i.e. nothing. **Editor and dashboard websocket fan-out is not the
+cause either.** Context switches actually rose (20.9 k → 27.6 k) and system time
+roughly doubled (~7 % → ~13 %), so whatever Node-RED is doing it is not waiting
+on browsers.
+
+Two candidates eliminated by direct experiment. What remains is message volume
+through the flow — the scan rate.
+
+**But the magnitude is still unexplained, and that should be said plainly.**
+~70 % of a core at ~35 frames/s is **~20 ms of CPU per frame**. Nothing measured
+so far accounts for that: the four function nodes benchmarked cost ~57 µs
+combined, the InfluxDB write is gone, the browsers are gone.
+
+**A limitation of `tools/bench-hot-path.js` is now clear.** Its header warns that
+it excludes Node-RED's runtime overhead, but it also silently excludes **every
+other function node on the frame path** — the ~28-node legacy decode chain on
+`modbusMaster_V2` and the 94-node **Alert system** tab, which `ToProcessFlow`
+feeds on every frame. Those were never measured, and "I benchmarked the hot path"
+was a broader claim than the tool supports. The benchmark covers four nodes, not
+the path.
+
+#### Next: raise the poll interval, which is both the test and the likely fix
+
+If CPU is proportional to message rate, raising `inter_frame_ms` from 10 ms
+toward 500 ms cuts readings ~18× and CPU should follow — and it does not matter
+which node is expensive, because they all run per message. If CPU does **not**
+fall roughly in proportion, there is a fixed cost independent of rate and the
+next step is bisection: disable the `ToProcessFlow` link (Alert system, 94 nodes)
+and re-measure, then the legacy decode chain.
+
+That ordering is deliberate. Slowing the scan is wanted on its own merits — a
+297× over-sample against the configured interval — so it is worth doing before
+spending more effort attributing a cost that may be about to disappear.
