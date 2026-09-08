@@ -6617,3 +6617,44 @@ indistinguishable from "no page has ever opened". Harmless in production, where
 meaning "no sensor", which this project *has* been bitten by. Now `null` for
 never and a number otherwise. A distinct type costs nothing, and the test that
 found it was the one written to check boundary behaviour.
+
+### Correction: that saving was quoted in the wrong unit
+
+Asked, fairly: is gating the row builder the right approach? Re-examining the
+number I used to justify it:
+
+| | |
+|---|---|
+| builder cost per 1 s tick | **0.052 ms** on the dev machine |
+| on a Pi (3-5× slower) | **~0.2 ms/tick = 0.02 % of a core** |
+| "92.5 % saving" in absolute terms | **~0.02 percentage points** |
+
+**I quoted a ratio where the absolute number was the decision-relevant one.**
+92.5 % of almost nothing is almost nothing. The change is harmless and slightly
+tidier, but it is not a performance win and should not have been presented as
+one.
+
+**And the ~4-5 point "residual" I attributed to the row builder is not
+established either.** 18.8 % came from 3 samples over 4 s; 23.4 % from 5 samples
+over 20 s, under conditions that differed in at least one way nobody recorded
+(whether the Diagnostics page was open). A 4-point difference is inside the noise
+of that method. Attributing it to a specific node was the same over-reading this
+investigation has repeatedly punished — the discipline held while candidates were
+being *eliminated by experiment*, and slipped as soon as the numbers got small.
+
+#### Is the approach right?
+
+**As an architecture, timer-plus-gate is poll-then-discard.** The cleaner design
+is demand-driven: the reading cache is already maintained continuously and
+cheaply by an event, so the table could be built when the UI asks for it and the
+1 s timer removed entirely. That would be the right shape.
+
+**It is not worth doing for 0.02 %.** Every change to this flow has to be
+deployed to a live fire-safety panel and re-verified, and this session has
+already produced two regressions from changes that looked obviously safe.
+
+**Keep the gate** — it is written, tested, and removes work that had no purpose —
+**and stop optimising here.** node-red sits at ~23 % with the panel 70-77 % idle;
+there is no CPU problem left to solve. The open question is not a number, it is
+whether the **HMI actually responds now**, which is the symptom that started all
+of this and has still not been confirmed.
