@@ -6658,3 +6658,48 @@ already produced two regressions from changes that looked obviously safe.
 there is no CPU problem left to solve. The open question is not a number, it is
 whether the **HMI actually responds now**, which is the symptom that started all
 of this and has still not been confirmed.
+
+### Leaving the Diagnostics page was slow — client-side, and fixed server-side
+
+Live report 2026-09-08: HMI response much better overall, but switching *away*
+from the Diagnostics page took slightly longer. That is Angular teardown, and
+counting what it had to destroy per row made the cause obvious:
+
+| Per row | Before | After |
+|---|---|---|
+| `ng-model` on disabled `<input>` | **4** | 0 |
+| `blacklist.byUnit[RawData.ID]` resolutions | **6** | 0 |
+| watchers (interpolations + `ng-if` + `ng-class`) | 9 | **9→3 in the device cell** |
+
+At 71 rows that was **284 NgModelControllers** — a full Angular model controller
+per cell, with formatters, parsers and a `$render`, built purely to display
+read-only text — plus ~640 watchers. Every one is evaluated on each digest and
+destroyed when the page closes. At the 240-sensor target it would be ~960
+controllers and ~2160 watchers.
+
+Two changes, neither of which alters what the page looks like:
+
+- **The four disabled `<input ng-model>` cells become `<div>`s with the same
+  class.** `.bms-input` only sets width, background, colour, border, padding and
+  text-align — all of which apply identically to a div; `box-sizing: border-box`
+  and `display: block` were added so the 100 % width behaves the same.
+- **`annotateDevice()` collapses the device cell server-side** into one
+  `Device` string and one `DeviceClass`. The text and class names are
+  byte-identical to what the template produced, pinned by unit tests, because a
+  performance fix must not quietly change what an operator sees.
+
+This also cuts the *live* cost, not just teardown: six property-chain lookups per
+row were being re-evaluated on every digest, and digests run on every update.
+
+#### The fifth comment-versus-code trap, this time in my own check
+
+The post-edit structural check reported `<div` 11 / `</div>` 10 — an unbalanced
+tag. It was not: the CSS comment I had just written to explain the change
+contains a literal `<div>`, and the naive count read it as an open tag. The
+verification now strips CSS and HTML comments first, and asserts the nesting
+depth **never goes negative** rather than only that the totals match — totals can
+balance while the structure is wrong.
+
+Five times now a check in this project has matched prose instead of code. The
+rule is cheap and should simply be habit: **strip comments before asserting on
+structure, and assert on nesting rather than counts.**

@@ -207,6 +207,38 @@ function appliedDoc(createStore, { nowMs = Date.now(), ttlMs = 30000 } = {}) {
 }
 
 /**
+ * Collapse the per-row device/blacklist state into ONE label and ONE class.
+ *
+ * WHY (2026-09-08, from a live report: leaving the Diagnostics page was slow).
+ * The template resolved `msg.payload.blacklist.byUnit[RawData.ID]` **six times
+ * per row**, across three `ng-if`s, an `ng-class` and two interpolations. Angular
+ * re-evaluates every one of those on every digest, and has to tear them all down
+ * when the page closes — at 71 rows that is ~640 watchers, and it would be ~2160
+ * at the 240-sensor target.
+ *
+ * The server already knows the answer once. Computing it here turns six
+ * expressions per row into two, and the text and class names are byte-identical
+ * to what the template produced, so nothing looks different.
+ */
+function annotateDevice(rows, byUnit) {
+  const map = byUnit || {};
+  for (const row of rows) {
+    const b = map[row.ID];
+    if (!b) {
+      row.Device = 'Active';
+      row.DeviceClass = 'dev-active';
+      continue;
+    }
+    const blacklisted = b.status === 'blacklisted';
+    const retry = b.next_probe_in_sec !== null && b.next_probe_in_sec !== undefined
+      ? ` ${b.next_probe_in_sec}s` : '';
+    row.Device = (blacklisted ? 'BLACKLISTED' : 'PROBING') + retry;
+    row.DeviceClass = blacklisted ? 'dev-blacklisted' : 'dev-probing';
+  }
+  return rows;
+}
+
+/**
  * Is anyone actually looking at the Diagnostics page?
  *
  * The dashboard template emits `open` / `heartbeat` / `close` events, and the
@@ -254,6 +286,7 @@ module.exports = {
   record,
   snapshot,
   appliedDoc,
+  annotateDevice,
   noteUiEvent,
   uiActive,
   UI_TIMEOUT_MS,

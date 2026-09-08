@@ -239,3 +239,73 @@ describe('the gated builder does no work with the page closed', () => {
     assert.match(r.status.text, /1 channels/);
   });
 });
+
+describe('device state is collapsed server-side (2026-09-08)', () => {
+  const { annotateDevice } = require('../../src/diagnostics/slave-table');
+
+  // The template resolved blacklist.byUnit[RawData.ID] SIX times per row. The
+  // text and classes below must stay byte-identical to what it produced, or the
+  // page changes appearance for a performance fix.
+  test('no entry means Active', () => {
+    const rows = [{ ID: 3 }];
+    annotateDevice(rows, {});
+    assert.deepEqual(rows[0], { ID: 3, Device: 'Active', DeviceClass: 'dev-active' });
+  });
+
+  test('blacklisted, with and without a retry countdown', () => {
+    const rows = [{ ID: 3 }, { ID: 4 }];
+    annotateDevice(rows, {
+      3: { status: 'blacklisted', next_probe_in_sec: 42 },
+      4: { status: 'blacklisted', next_probe_in_sec: null },
+    });
+    assert.equal(rows[0].Device, 'BLACKLISTED 42s');
+    assert.equal(rows[0].DeviceClass, 'dev-blacklisted');
+    assert.equal(rows[1].Device, 'BLACKLISTED', 'null countdown adds no suffix');
+  });
+
+  test('probing gets its own class', () => {
+    const rows = [{ ID: 3 }];
+    annotateDevice(rows, { 3: { status: 'probing', next_probe_in_sec: 5 } });
+    assert.equal(rows[0].Device, 'PROBING 5s');
+    assert.equal(rows[0].DeviceClass, 'dev-probing');
+  });
+
+  test('a missing byUnit map is treated as all-active, never as a crash', () => {
+    // This runs on the live diagnostic path; blacklist state may be unavailable.
+    const rows = [{ ID: 3 }];
+    annotateDevice(rows, undefined);
+    assert.equal(rows[0].Device, 'Active');
+  });
+});
+
+describe('the Diagnostics template stays cheap to render (2026-09-08)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, '');
+  const tpl = () => strip(JSON.parse(fs.readFileSync(
+    path.join(__dirname, '..', '..', 'flows', 'flows_BBT.json'), 'utf8'))
+    .find((n) => n.id === 'db41c2b5077e83fc').format);
+
+  test('no ng-model in the table - it built an NgModelController per cell', () => {
+    // Four disabled <input ng-model> cells x 71 rows = 284 controllers, purely
+    // to display text. Divs with the same class render identically.
+    assert.equal((tpl().match(/ng-model=/g) || []).length, 0);
+  });
+
+  test('the device cell resolves the blacklist map zero times', () => {
+    assert.equal((tpl().match(/byUnit\[RawData\.ID\]/g) || []).length, 0,
+      'precomputed into RawData.Device / RawData.DeviceClass');
+  });
+
+  test('div nesting is balanced and never goes negative', () => {
+    // Comments are stripped first: the CSS comment explaining this change
+    // contains a literal "<div>", which a naive count reads as an open tag.
+    // Fifth time in this project a check has matched prose instead of markup.
+    let depth = 0;
+    for (const m of tpl().matchAll(/<\/?div\b/g)) {
+      depth += m[0] === '<div' ? 1 : -1;
+      assert.ok(depth >= 0, 'a </div> closed a div that was never opened');
+    }
+    assert.equal(depth, 0);
+  });
+});
