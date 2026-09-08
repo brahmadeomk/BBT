@@ -620,3 +620,33 @@ describe('table headers stay pinned while scrolling (2026-09-01)', () => {
     }
   });
 });
+
+describe('every busductConfigService member a flow node calls actually exists', () => {
+  // Found the hard way 2026-09-08: sortAuditDesc was required into
+  // node-red/index.js but never added to module.exports. The audit viewers call
+  // `cs.sortAuditDesc(...)` behind a `cs && cs.sortAuditDesc` guard, so the
+  // omission did not throw - it silently fell back to UNSORTED audit entries.
+  // Graceful fallbacks turn a missing export into a behaviour change nobody
+  // sees, which is why this checks the contract rather than trusting the guard.
+  const svc = require('../src/config-service/node-red');
+
+  test('no flow node calls a member the service does not export', () => {
+    const flows = JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+    const missing = [];
+    for (const n of flows) {
+      const body = n.func || '';
+      if (!body.includes('busductConfigService')) continue;
+      // Which local names hold the service in this node?
+      const vars = new Set();
+      for (const m of body.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*global\.get\(\s*['"]busductConfigService['"]/g)) {
+        vars.add(m[1]);
+      }
+      for (const v of vars) {
+        for (const m of body.matchAll(new RegExp(`\\b${v}\\.([A-Za-z_$][\\w$]*)`, 'g'))) {
+          if (svc[m[1]] === undefined) missing.push(`${n.name || n.id}: ${v}.${m[1]}`);
+        }
+      }
+    }
+    assert.deepEqual([...new Set(missing)], []);
+  });
+});

@@ -30,4 +30,35 @@ function appendLegacyAudit(globalContext, key, entry, cap = 200) {
   globalContext.set(key, log, 'default');
 }
 
-module.exports = { appendLegacyAudit };
+/**
+ * Newest-first ordering for the two audit viewers, done HERE rather than with
+ * Angular's `orderBy` filter in the template.
+ *
+ * WHY (2026-09-08, from a live report that the Audit page was slow to leave).
+ * `ng-repeat="a in msg.payload | orderBy:'-ts'"` re-runs the sort on **every
+ * digest cycle**, not just when the data changes — 200 entries (the cap above)
+ * re-sorted on every UI interaction anywhere on the dashboard. The order only
+ * changes when an entry is appended, which is on a config apply.
+ *
+ * RETURNS A COPY. `global.get(key, 'default')` hands back a live reference to
+ * the stored array, so sorting in place would permanently reorder the persisted
+ * audit log — a record that exists precisely so its order can be trusted.
+ *
+ * Missing values sort last rather than throwing, and equal values keep their
+ * original relative order, so the result is stable across renders.
+ */
+function sortAuditDesc(entries, field) {
+  return (Array.isArray(entries) ? entries : [])
+    .map((e, i) => [e, i])
+    .sort((a, b) => {
+      const av = a[0] ? a[0][field] : undefined;
+      const bv = b[0] ? b[0][field] : undefined;
+      if (av === bv) return a[1] - b[1];
+      if (av === undefined || av === null) return 1;
+      if (bv === undefined || bv === null) return -1;
+      return av < bv ? 1 : -1;
+    })
+    .map((pair) => pair[0]);
+}
+
+module.exports = { appendLegacyAudit, sortAuditDesc };

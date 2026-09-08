@@ -6703,3 +6703,47 @@ balance while the structure is wrong.
 Five times now a check in this project has matched prose instead of code. The
 rule is cheap and should simply be habit: **strip comments before asserting on
 structure, and assert on nesting rather than counts.**
+
+### The Audit page, same class of problem — and a silent export bug it uncovered
+
+Reported alongside the Diagnostics lag. The two Audit Trail viewers have no
+`ng-model`, so that fix did not apply; the cost was different:
+
+| | Joint audit `31e8d84…` | Alarm audit `2966ac3…` |
+|---|---|---|
+| rows | up to **200** (the `appendLegacyAudit` cap) | up to 200 |
+| watchers/row | 5 | 8 |
+| `orderBy` in `ng-repeat` | yes | yes |
+| `track by` | yes | **no** |
+
+**`orderBy` inside `ng-repeat` re-runs the sort on every digest cycle** — 200
+entries re-sorted on any UI interaction anywhere on the dashboard, forever, for
+an order that changes only when a config is applied. And the alarm audit had
+**no `track by`**, so Angular rebuilt all 200 rows' DOM whenever the payload
+array identity changed.
+
+Fixed by sorting in the feeding function nodes (`sortAuditDesc` in
+`legacy-audit.js`, the module that already owns these globals) and adding
+`track by $index`. Neither page is on a timer — they refresh at boot and on a
+config apply — so the remaining cost is render and teardown of 200 rows, which is
+inherent to showing 200 rows.
+
+**`sortAuditDesc` returns a copy.** `global.get(key, 'default')` hands back a live
+reference to the persisted array; sorting in place would permanently reorder the
+audit log — a record whose entire value is that its order can be trusted.
+
+#### The bug this uncovered, which tests did not catch
+
+`sortAuditDesc` was required into `node-red/index.js` but **never added to
+`module.exports`**. The viewers call it as `cs.sortAuditDesc(...)` behind a
+`cs && cs.sortAuditDesc` guard, so nothing threw — the pages would simply have
+rendered **unsorted** audit entries, indefinitely, with no error anywhere.
+
+A graceful fallback turned a missing export into a silent behaviour change. That
+is the same shape as every other defect this week: the failure mode is not a
+crash, it is a plausible-looking wrong answer.
+
+Guarded generally now, not just for this one symbol:
+`test/flows-integrity.test.js` finds every local variable in a flow node assigned
+from `global.get('busductConfigService')`, collects every member accessed on it,
+and asserts the service actually exports it. **839 tests.**
