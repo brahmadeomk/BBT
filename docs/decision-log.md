@@ -6147,3 +6147,49 @@ inject): `parameterTypeName` — the array from `Parameter.txt` — and the
 what the panel actually uses. On a BusductTherMo panel that is expected to be
 just `Value/100` (`channel-decode.js` uses the same 0.01 scale), in which case
 20 of the 21 branches and their downstream nodes can go.
+
+### Dispatcher fix measured on ESBUSBBT06, and the tick slowed
+
+Deployed, fresh process (`TIME+ 2:09`):
+
+```
+%Cpu(s): 34.8 us  60.9 id   node-red 136.4   <- discard: process still initialising
+%Cpu(s): 21.4 us  70.4 id   node-red  73.8 S
+%Cpu(s): 24.8 us  65.0 id   node-red  61.9 R
+```
+
+**node-red ~106 % → ~68 %** (mean of the two settled samples), a **38-point**
+drop, and the process is now sometimes in state `S` rather than permanently `R`.
+The first sample is discarded deliberately: at 2 minutes of CPU the flow was
+still initialising, and `RES` falls 349 MB → 296 MB across the three samples as
+GC settles.
+
+**Attribution.** The fan-out was ~38 points of the ~106, so roughly a third. Less
+than the executions-per-second ratio (21×) suggested, which is the useful part:
+the *sends themselves* were never removed — only the clones and the 20 filters
+that returned null. At 71 sensors and 10 Hz the loop still made **710 sends per
+second**, each doing a full `global.get('sensorData')` → mutate →
+`global.set('sensorData', ...)` of an object with 71 entries.
+
+So the remaining cost is the tick rate itself, and that is now slowed from
+**0.1 s to 2 s**:
+
+| inject | sends/s | dynamic-path context gets/s |
+|---|---|---|
+| 0.1 s (was) | 710 | 2,840 |
+| **2 s (now)** | **35.5** | **142** |
+
+Justified by the data cadence, not by taste: at `inter_frame_ms` 250 each sensor
+produces a new reading every ~20 s, so a 2 s tick is still 10× faster than
+anything changes. What slows is the legacy Diagnostics table and the legacy
+alert/SMS nodes, by up to 2 s. **The alarm path is untouched** — ΔT/RoR go
+`Scale Nano Reading → ProcessLogic → Alarm Manager` and never read
+`global.sensorData`.
+
+A test pins the **floor** at 1 s rather than the exact value, so the tick stays
+tunable per panel but cannot silently return to 100 ms.
+
+**Committed separately from the dispatcher fix** so either can be reverted alone
+— two changes in one deploy would have made this measurement uninterpretable,
+which is the same discipline that made the influx and browser tests worth
+anything.

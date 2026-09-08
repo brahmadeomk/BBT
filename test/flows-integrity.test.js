@@ -319,6 +319,16 @@ describe('legacy decode dispatcher routes instead of fanning out (2026-09-08)', 
     assert.match(loop().func, /if \(idx === undefined\) continue;/);
   });
 
+  test('the legacy decode tick is not faster than 1 s', () => {
+    // It re-decodes values that only change when a frame arrives - every ~20 s
+    // per sensor at inter_frame_ms 250. At 0.1 s it was ~200x oversampled and
+    // cost O(sensors) work per tick regardless of the scan rate. Guarding the
+    // floor, not the exact value, so it can still be tuned per panel.
+    const inject = flows().find((n) => n.id === '8233660a43277487');
+    assert.ok(Number(inject.repeat) >= 1,
+      `legacy decode tick is ${inject.repeat}s; below 1s it re-decodes far faster than data arrives`);
+  });
+
   test('each sensor gets a fresh message object', () => {
     // The old loop mutated and re-sent one shared msg; the first recipient holds
     // it by reference, so the next iteration could rewrite a payload in flight.
