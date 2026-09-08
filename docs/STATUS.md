@@ -227,6 +227,14 @@ event that may never arrive needs a deadline, not just a clearer.*
 
 **Thermography on the 1–2 joints currently at WATCH, against their neighbours.**
 
+**Confirmed 2026-09-08: cover-to-joint has not been tested at all.** The two
+reference checks that day (Fluke at 131 °C, contact sensor within ±1 °C) both
+compare the sensor against another sensor on the same surface. They establish
+that the panel reports the temperature it is reading; nothing yet relates that
+temperature to the conductor joint underneath. **This is now the single
+outstanding gap between a validated measurement chain and a defensible alarm
+threshold.**
+
 It delivers three things at once and the opportunity disappears when the flags
 clear:
 
