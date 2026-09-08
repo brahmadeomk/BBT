@@ -107,8 +107,8 @@ semantics.
 
 ## 3b. HMI latency — resolved (2026-09-08)
 
-**node-red 106 % → ~19 % of a core on the 71-device panel; 82 % → 35 % on the
-6-sensor panel.** Two fixes, and they turned out to be the same bug in two
+**node-red 106 % → ~23 % of a core on the 71-device panel; 82 % → 35 % on the
+6-sensor panel.** The first two fixes turned out to be the same bug in two
 places: **work driven at a rate unrelated to the rate the data changes.**
 
 | Cause | Oversampling | Fix |
