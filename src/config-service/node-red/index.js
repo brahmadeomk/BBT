@@ -8,7 +8,7 @@ const { handleConfigManagerMessage } = require('./config-manager-handler');
 const { handleJointMasterMessage } = require('./joint-master-handler');
 const { handleModbusSettingsMessage, writeLegacyModbusGlobals } = require('./modbus-settings-handler');
 const { buildNanoJobMessage } = require('./nano-resend-handler');
-const { appendLegacyAudit, sortAuditDesc } = require('./legacy-audit');
+const { appendLegacyAudit, sortAuditDesc, viewerRows } = require('./legacy-audit');
 const { processRemoteConfig, buildLegacyDrafts } = require('./remote-config-handler');
 const { deriveLegacyBridge } = require('./modbus-settings-handler');
 const blacklist = require('./blacklist-handler');
@@ -45,4 +45,4 @@ function createStore(root = DEFAULT_ROOT) {
   return new ConfigStore({ root, validators: { modbus_joints: validateModbusJoints, alarms: validateAlarms, integration: validateIntegration } });
 }
 
-module.exports = { createStore, sortAuditDesc, handleConfigManagerMessage, handleJointMasterMessage, handleModbusSettingsMessage, writeLegacyModbusGlobals, deriveLegacyBridge, appendLegacyAudit, processRemoteConfig, buildLegacyDrafts, buildNanoJobMessage, blacklist, resolveAmbient, planRecovery, alarmEmail, alarmSweep, processLogicJoints, channelDecode, diagTable, wifi };
+module.exports = { createStore, sortAuditDesc, viewerRows, handleConfigManagerMessage, handleJointMasterMessage, handleModbusSettingsMessage, writeLegacyModbusGlobals, deriveLegacyBridge, appendLegacyAudit, processRemoteConfig, buildLegacyDrafts, buildNanoJobMessage, blacklist, resolveAmbient, planRecovery, alarmEmail, alarmSweep, processLogicJoints, channelDecode, diagTable, wifi };

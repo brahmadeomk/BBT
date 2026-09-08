@@ -6747,3 +6747,36 @@ Guarded generally now, not just for this one symbol:
 `test/flows-integrity.test.js` finds every local variable in a flow node assigned
 from `global.get('busductConfigService')`, collects every member accessed on it,
 and asserts the service actually exports it. **839 tests.**
+
+### Audit viewers capped at 20 rows (user request 2026-09-08)
+
+**Safe because these arrays are not the audit record.** `ConfigStore._appendAudit`
+appends every change to **`audit_trail.jsonl`**, uncapped and untrimmed;
+`joint_config_audit_log` and `audit_busbartherm` are display caches that exist
+only because two `ui_template`s read them. Trimming them deletes nothing — it
+shortens what the dashboard renders. That was worth confirming before touching
+anything called "audit" on a safety system.
+
+Cap **200 → 20**, applied on both write and read:
+
+- **write** — `appendLegacyAudit` now caps at `VIEWER_CAP`;
+- **read** — `viewerRows()` sorts newest-first and slices to the same constant,
+  because a panel already holding 200 entries would otherwise keep rendering all
+  of them until its next config apply. Read-side trimming deliberately **does not
+  write back**: that would put an SD write on every page open, and the stored
+  array converges on the next append anyway.
+
+Two benefits beyond render cost, both specific to `audit_busbartherm`: each entry
+embeds a **full before/after config snapshot** (`oldConfig`/`newConfig`), and the
+array lives in the **localfilesystem** context store — so 200 of them was a
+sizeable object rewritten to the SD card on every context flush, for history
+nobody scrolls to.
+
+#### A test that had to be edited, and now cannot be again
+
+`joint-master-handler.test.js` asserted `log.length === 200` and `log[199]`, so
+changing the cap broke it. It now reads `VIEWER_CAP` from the module and derives
+its expectations, because the property under test is **"the oldest are dropped"**,
+not any particular number. A test that hardcodes a constant it does not own turns
+every deliberate change into a false failure — and the temptation then is to
+update the number without re-reading what the test was for.

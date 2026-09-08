@@ -383,15 +383,19 @@ describe('handleJointMasterMessage - legacy audit viewer entries', () => {
 
 describe('appendLegacyAudit', () => {
   test('appends viewer entries to the global and caps the array', () => {
-    const { appendLegacyAudit } = require('../../../src/config-service/node-red/legacy-audit');
+    // Reads the cap from the module rather than repeating the number: this test
+    // hardcoded 200 and had to be edited when the cap moved to 20 (2026-09-08).
+    // The property under test is "oldest dropped", not any particular size.
+    const { appendLegacyAudit, VIEWER_CAP } = require('../../../src/config-service/node-red/legacy-audit');
     const ctx = new Map();
     const globalContext = { get: (k) => ctx.get(k), set: (k, v) => ctx.set(k, v) };
-    for (let i = 0; i < 205; i++) {
+    const n = VIEWER_CAP + 5;
+    for (let i = 0; i < n; i++) {
       appendLegacyAudit(globalContext, 'joint_config_audit_log', { timestamp: `t${i}`, action: 'SAVE_ROW' });
     }
     const log = ctx.get('joint_config_audit_log');
-    assert.equal(log.length, 200);
-    assert.equal(log[0].timestamp, 't5'); // oldest dropped
-    assert.equal(log[199].timestamp, 't204');
+    assert.equal(log.length, VIEWER_CAP);
+    assert.equal(log[0].timestamp, 't5', 'the five oldest are dropped');
+    assert.equal(log[VIEWER_CAP - 1].timestamp, `t${n - 1}`, 'the newest is kept');
   });
 });
