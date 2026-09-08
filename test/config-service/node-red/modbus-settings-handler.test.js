@@ -229,7 +229,12 @@ describe('handleModbusSettingsMessage - apply', () => {
       { payload: { action: 'apply', slaves: state.slaves, bus: state.bus } },
       { store, legacySlaveList: legacySlaveList() }
     );
-    assert.match(result.msg.payload.error, /still mapped to a joint: J01/);
+    // Asserts the PROPERTIES the message must carry, not its exact prose - the
+    // wording changed on 2026-09-08 after an operator adding a slave was told
+    // "Cannot delete a slave still mapped to a joint" with an empty joint table
+    // on screen. Both halves were true and neither was actionable.
+    assert.match(result.msg.payload.error, /J01/, 'names the joint');
+    assert.match(result.msg.payload.error, /unmap/i, 'gives the deliberate-removal path');
     const { doc } = store.readDomain('modbus_joints');
     assert.equal(doc.config_domain_versions.modbus, 1); // untouched
   });
@@ -625,5 +630,45 @@ describe('handleModbusSettingsMessage - two RS-485 segments', () => {
     // ...but the decode side must still be able to decode either Nano's response
     assert.equal(legacy.slaveLength, 3);
     assert.deepEqual(legacy.SlaveIDList.map((ls) => ls.slaveID), [1, 2, 101]);
+  });
+});
+
+describe('an out-of-date table is diagnosed, not just refused (2026-09-08)', () => {
+  test('the error says the table is stale and points at RELOAD', () => {
+    // The client posts its whole table on every action, so a table that never
+    // loaded the applied configuration silently proposes deleting everything
+    // absent from it. That is what happened live: 2 rows posted against a panel
+    // carrying 12 mapped joints.
+    const store = freshStore();
+    seedModbusJoints(store);
+    const applied = loadState(store);
+    assert.ok(applied.slaves.length > 1, 'fixture must have more than one slave to drop one');
+    // Drop the FIRST row (sl01, mapped to J01) and keep the rest. Two fixture
+    // traps found on the way here: an empty table hits the "at least one slave"
+    // guard first, and keeping only the first row drops the panel ambient, whose
+    // guard fires before the joint one. Neither reaches the code under test.
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'apply', slaves: applied.slaves.slice(1), bus: applied.bus } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.match(result.msg.payload.error, /RELOAD/, 'names the recovery action');
+    assert.match(result.msg.payload.error, /in service/i, 'states the discrepancy');
+    assert.match(result.msg.payload.error, /joint table can look empty/i,
+      'because the operator checked the joint table and saw nothing');
+  });
+
+  test('RELOAD ignores both the posted table and the saved draft', () => {
+    // Without this it fell through to the draft and returned the same stale
+    // rows, so RELOAD appeared to do nothing and the operator stayed locked out.
+    const store = freshStore();
+    seedModbusJoints(store);
+    const applied = loadState(store);
+    const stale = { slaves: [], buses: applied.buses || [applied.bus] };
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'reload', slaves: [], bus: applied.bus } },
+      { store, draft: stale, legacySlaveList: legacySlaveList() }
+    );
+    assert.ok(result.msg.payload.slaves.length > 0, 'rows come back from the applied config');
+    assert.equal(result.msg.payload.slaves.length, applied.slaves.length);
   });
 });

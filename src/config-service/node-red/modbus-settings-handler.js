@@ -217,6 +217,12 @@ function withPayload(msg, payload) {
  * draft; else rows rebuilt from the applied cfg/modbus document.
  */
 function currentState(msg, draft, store, legacySlaveList) {
+  // RELOAD means "show me what is actually configured", so it must bypass BOTH
+  // the client's posted state and the saved draft. Without this it fell through
+  // to the draft and handed back the same stale rows, which is how an operator
+  // ends up locked out: the table proposes deleting every slave it never loaded,
+  // the guard correctly refuses, and RELOAD appears to do nothing.
+  if (msg.payload?.action === 'reload') return stateFromApplied(store, legacySlaveList);
   if (Array.isArray(msg.payload?.slaves) && (msg.payload?.buses || msg.payload?.bus)) {
     return { slaves: msg.payload.slaves, buses: normaliseBuses(msg.payload) };
   }
@@ -498,7 +504,22 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
   const newById = new Map(newSlaves.map((s) => [s.slave_id, s]));
   const missingJoints = current.joints.filter((j) => !newById.has(j.slave_id));
   if (missingJoints.length > 0) {
-    return fail(`Cannot delete a slave still mapped to a joint: ${missingJoints.map((j) => j.joint_id).join(', ')} - unmap it in the joint table first`);
+    // TWO situations reach here and they need different actions, so say both.
+    // Reported live 2026-09-08: an operator ADDING a slave got "Cannot delete a
+    // slave still mapped to a joint", while the joint table on screen was empty.
+    // Both statements were true and neither was useful. The table is the client's
+    // own state, sent whole on every action, so a table that never loaded the
+    // applied configuration silently proposes deleting everything absent from it.
+    const inService = current.modbus.slaves.length;
+    const inTable = newSlaves.length;
+    const names = missingJoints.map((j) => j.joint_id).join(', ');
+    const drift = inTable < inService
+      ? ` This table has ${inTable} slave(s) but ${inService} are in service, so it looks out of date - press RELOAD to load the applied configuration, then re-apply.`
+      : '';
+    return fail(
+      `Applying this table would delete ${inService - inTable > 0 ? inService - inTable : 'a'} slave(s) still mapped to joint(s): ${names}.` +
+      ` To remove them deliberately, unmap those joints first (note the joint table can look empty while joints are in service).${drift}`
+    );
   }
   const shrunkJoints = current.joints.filter((j) => (j.channel ?? 1) > newById.get(j.slave_id).channels);
   if (shrunkJoints.length > 0) {

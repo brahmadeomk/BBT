@@ -6827,3 +6827,49 @@ Three candidates, not yet distinguished, and they need different fixes:
 The two node statuses that separate them: **"Scale Nano Reading"** shows
 `id:channel=value` per frame, and **"Diag Rows"** shows `N channels, M connected`.
 Values in the first with `M = 0` in the second is conclusive for (2).
+
+### "Cannot delete a slave still mapped to a joint" while adding a slave (2026-09-08)
+
+Live report: adding a slave in Modbus Settings was refused with *"Cannot delete a
+slave still mapped to a joint: J22, J39, … — unmap it in the joint table first"*,
+while the Joint Config table on screen was **empty**.
+
+**Both statements were true and neither was useful.** The panel's applied config
+carried 12 mapped joints; the Configuration Status banner on the same screen said
+so — *"In service but not in the editing table: J22, J39, …"*. But the Modbus
+Settings table held only 2 rows.
+
+The mechanism is the design that fixed an earlier bug. The client posts its
+**whole** `{slaves, buses}` state on every action (the 2026 data-loss lesson), so
+a table that never loaded the applied configuration silently proposes deleting
+every slave absent from it. The guard then correctly refuses. The operator sees a
+delete error for an add, and an empty joint table that appears to contradict it.
+
+Two fixes:
+
+**1. RELOAD now actually reloads.** `currentState()` fell through to the saved
+draft when the posted payload had no `slaves`, and `reload()` posted exactly
+that — so it returned the same stale rows and appeared to do nothing. The
+operator was locked out with no way forward: the table proposes a mass delete,
+the guard refuses, and the one button that should fix it is a no-op. `reload` is
+now an explicit action that bypasses **both** the posted state and the draft, and
+the button confirms first because it discards unsaved edits.
+
+**2. The error explains the situation instead of one true fact about it.** It now
+states what would be deleted, gives the deliberate-removal path, notes that *the
+joint table can look empty while joints are in service*, and — when the table
+holds fewer slaves than are in service — says so with both counts and names
+RELOAD.
+
+#### Two fixture traps on the way to a passing test
+
+The first draft posted an **empty** table: that hits an earlier "at least one
+slave is required" guard and never reaches the code under test. The second kept
+only the first row, which drops the **panel ambient**, whose guard fires before
+the joint one — so it asserted against the wrong message. Only dropping a
+joint-mapped row while keeping the ambient exercises the path.
+
+Both were caught by the test failing rather than passing vacuously, which is the
+difference from the earlier cases in this project where a fixture silently missed
+its target. **The live case was 2 rows against 12 joints — a fixture has to
+reproduce the shape, not just the direction.**
