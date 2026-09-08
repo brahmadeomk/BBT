@@ -6094,3 +6094,56 @@ frame is processed — several cores' worth on a Pi. The earlier sizing entry
 concluded the fixed term was the risk at 240; this is that term, and it is a
 **timer that can simply be slowed or made event-driven**. Fixing it may matter
 more to the 240 question than any choice of `inter_frame_ms`.
+
+### Fix: route the legacy decode dispatcher instead of fanning out (2026-09-08)
+
+`parameterForLoop` now has **21 outputs**, one per decode branch, and sends each
+sensor only to the branch whose type it is.
+
+| | Before | After |
+|---|---|---|
+| destinations per send | 21 | **1** |
+| message clones per send | 20 | **0** |
+| node executions/s @ 71 sensors, 10 Hz | 14,910 | **710** |
+| node executions/s @ 240 sensors | 50,400 | 2,400 |
+
+Verified by running the rewritten node against a synthetic 71-sensor context:
+71 sends, all landing on output 7 (`Value/100`) and nowhere else, and an unknown
+type producing zero sends — the same "nothing matched" outcome as before, minus
+21 wasted executions.
+
+**Behaviour-preserving.** The branch filters are deliberately *kept*: each still
+verifies the type it receives, so a wiring mistake fails closed rather than
+mis-decoding. The same messages arrive at the same nodes.
+
+Two things fixed along the way:
+
+- **A latent aliasing bug.** The old loop mutated and re-sent one shared `msg`
+  object per iteration. Node-RED clones for additional wires but the first
+  recipient holds the original by reference, so the next iteration could rewrite
+  a payload already in flight. Never observed; free to fix while rewriting.
+- **`TYPE_OUTPUT` is pinned to the wiring** by `test/flows-integrity.test.js`,
+  which reads each branch's own `compare` array and asserts it matches the output
+  it is wired to. Reordering the wires without the map would route a sensor to
+  the wrong decode type — a *mis-scaled reading*, not an error, which is exactly
+  the kind of silent fault this repo has been bitten by before.
+
+#### On deleting the unused types
+
+**Not done, deliberately, and the reason is that it cannot be decided from this
+repository.** The branch names are matched against `parameterTypeName`, which
+`SetVal` populates from **`Parameter.txt` on the Pi** — site data, not source.
+Which types a given panel uses depends on that file and on the per-slave
+`parameterID{i}` globals. Deleting a type some panel actually uses would stop
+that sensor decoding silently, and this is the live measurement path.
+
+**After this change deleting them buys nothing measurable**: an unused branch is
+never sent a message, so it costs zero. It is now cosmetic cleanup, worth doing
+once against a confirmed list rather than guessed at.
+
+To produce that list, read from the Node-RED context sidebar (or a one-shot
+inject): `parameterTypeName` — the array from `Parameter.txt` — and the
+`parameterID0..N` globals, which index into it. The set of distinct values is
+what the panel actually uses. On a BusductTherMo panel that is expected to be
+just `Value/100` (`channel-decode.js` uses the same 0.01 scale), in which case
+20 of the 21 branches and their downstream nodes can go.

@@ -272,6 +272,60 @@ describe('ProcessLogic matches on (unit address, channel) (2026-09-01)', () => {
   });
 });
 
+describe('legacy decode dispatcher routes instead of fanning out (2026-09-08)', () => {
+  // The 100 ms inject over `slaveLength` used to send every sensor to all 21
+  // branch filters, so Node-RED cloned each message 20 times and ran 20 filters
+  // that matched nothing: ~14,900 node executions/s at 71 sensors, the fixed CPU
+  // cost behind the sluggish HMI. Now one output per branch.
+  const flows = () => JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+  const loop = () => flows().find((n) => n.id === 'bf2e916c59fbf553');
+
+  test('one output per branch, one destination per output', () => {
+    const n = loop();
+    assert.equal(n.wires.length, n.outputs, 'outputs and wire arrays must agree');
+    assert.ok(n.outputs > 1, 'a single output means the fan-out is back');
+    for (const w of n.wires) {
+      assert.equal(w.length, 1, 'each output feeds exactly one branch - no cloning');
+    }
+  });
+
+  // The map lives in the dispatcher but the truth lives in each branch's own
+  // `compare` array. If someone reorders the wires, the map silently routes
+  // sensors to the wrong decode type - a mis-scaled reading, not an error. So
+  // check them against each other rather than against a copy of the map.
+  test('TYPE_OUTPUT agrees with every branch\'s own compare array', () => {
+    const all = flows();
+    const byId = (id) => all.find((n) => n.id === id);
+    const n = loop();
+    const map = {};
+    const block = n.func.slice(n.func.indexOf('const TYPE_OUTPUT'), n.func.indexOf('const NOUT'));
+    for (const m of block.matchAll(/"([^"]+)":\s*(\d+)/g)) map[m[1]] = Number(m[2]);
+
+    let checked = 0;
+    n.wires.forEach((wire, idx) => {
+      const branch = byId(wire[0]);
+      const cmp = /compare\s*=\s*\[([^\]]*)\]/.exec(branch.func || '');
+      assert.ok(cmp, `branch ${branch.name} has no compare array`);
+      for (const nm of cmp[1].matchAll(/["']([^"']+)["']/g)) {
+        assert.equal(map[nm[1]], idx,
+          `type "${nm[1]}" is wired to output ${idx} (${branch.name}) but mapped to ${map[nm[1]]}`);
+        checked += 1;
+      }
+    });
+    assert.equal(checked, n.outputs, 'every branch must contribute a type');
+  });
+
+  test('an unknown type is dropped, not broadcast', () => {
+    assert.match(loop().func, /if \(idx === undefined\) continue;/);
+  });
+
+  test('each sensor gets a fresh message object', () => {
+    // The old loop mutated and re-sent one shared msg; the first recipient holds
+    // it by reference, so the next iteration could rewrite a payload in flight.
+    assert.match(loop().func, /Object\.assign\(\{\}, msg,/);
+  });
+});
+
 describe('sensor plausibility band is two-sided (2026-09-05)', () => {
   // Found live: J19 read -273 and J09 read exactly 0 while their neighbours read
   // 27-31 degC against a 33.8 degC ambient. The gate was `sensorVal > 300` only,
