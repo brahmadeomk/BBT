@@ -178,7 +178,15 @@ so it survived reboots. The panel looked healthy while monitoring nothing.
 
 Fixed with `src/config-service/scan-gate.js`: **bounded** (releases after 120 s
 and restores the polling job), **scoped** (a bus1 scan never blocks bus2), and
-**fails open** on missing information or a missing library.
+**fails open** on missing information or a missing library. **Live-verified
+2026-09-08** — data flowed immediately on deploy.
+
+**Only the blast radius was fixed, not the scan itself.** Start Scan still writes
+its job through the bus1-only legacy `paraRaw` path and still detects completion
+by counting exactly 127 frames from address 1 upward, so on a bus2 panel it
+cannot work — it now releases after 120 s instead of disabling the panel. Routing
+it through the compiler is the same bus1-only legacy dependency as **D7**; worth
+doing as one piece of work.
 
 **Third instance of the same pattern** — after the stuck blacklist alarm and the
 stale exclude set. Worth stating as a rule: *state whose clearing depends on an

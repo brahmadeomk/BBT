@@ -7028,3 +7028,22 @@ instead of polling the commissioned slaves.
 `scanStartedAt` is now stamped when a scan starts, because without a start time a
 latched flag is indistinguishable from a scan that began a moment ago, and the
 gate has no safe way to release.
+
+**LIVE-VERIFIED 2026-09-08**: deployed to the panel and data flowed immediately —
+the bus2 path is no longer gated at all, and the first bus1 frame cleared the
+stale flag and restored polling. This was the cause of the empty Data column and
+the panel-wide "No Data", not any of the three mechanisms guessed before it.
+
+#### Caveat: the scan FEATURE is still brittle, only the gate is safe now
+
+What was fixed is the blast radius, not the scan. Its completion logic is
+unchanged and remains fragile: counting starts only after a frame with `id == 1`,
+it requires exactly `scanTotal` frames, and **the job is written through the
+bus1-only legacy `paraRaw` path**. On a panel whose Nano is on bus2, Start Scan
+still cannot do anything useful — it will now simply release after 120 s with a
+warning instead of disabling the panel forever.
+
+Making the scan actually work per-segment means routing its job through the
+compiler rather than `paraRaw`, which is the same bus1-only legacy dependency
+that the Diagnostics cutover and the poll-interval work (D7) both ran into. Worth
+doing as one piece of work rather than three.
