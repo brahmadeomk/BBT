@@ -6316,3 +6316,54 @@ that function would remove a safety net nobody has noticed is load-bearing.
 If (1) returns 0, delete the lot — the tick, `parameterForLoop`, all 21 branches
 and their conversion nodes — and **raise the absolute-threshold gap as an A-rule**
 rather than losing the capability by accident.
+
+### Deleted: 16 unused decode branches (44 nodes)
+
+User direction 2026-09-08, with the absolute-alarm gap (D8) going to the design
+chat separately.
+
+**Deleted** — sensor kinds this product does not measure: pH, 4-20 mA, RTD, DHT,
+CT current, Schneider EM6400NG / EM1200 / EM6436, BHMS old, BHMS new, Tamura,
+WCS, E-N Meter, Vibration, Negative Vibration, Load cell. With their exclusive
+downstream chains that is **44 nodes**; the flow drops from 658 to 614.
+
+**Kept** — anything that could plausibly decode a temperature: `Raw Data`,
+`Value/10`, `Value/100`, `Value/1000`, `NTC`. The user named RTD, DHT and CT as
+unused; the rest are not temperature at all. NTC and the generic scalers stay
+because **which type a panel actually uses comes from `parameterTypeName`,
+populated from `Parameter.txt` on the Pi** — it cannot be decided from this
+repository, and a temperature decode is the wrong thing to guess wrong about.
+Keeping five costs nothing: an unused branch is never sent a message.
+
+**`Raw Data Logic` was correctly retained.** The deletion walked each branch's
+downstream closure and removed a node only when *every* one of its feeders was
+inside the set. That node is fed by both the deleted DHT branch and the kept Raw
+Data branch, so it stayed — the kind of shared node a hand-deletion removes by
+accident.
+
+#### The safeguard that makes this recoverable
+
+`sensorData` has exactly one source. If a panel's type turns out to be one of the
+deleted sixteen, that sensor simply stops being written — and a frozen
+`sensorData` is indistinguishable from a live one: last-known plausible values,
+no error, no alarm, while the legacy absolute-threshold e-mail/SMS never fires
+again.
+
+So the dispatcher no longer skips an unknown type silently. It collects them,
+sets a **red node status** naming them, and warns (throttled to once per five
+minutes, since the condition is true every tick once true at all). Verified:
+
+```
+all known     -> {"2":5}  status: green  "5/5 dispatched"
+deleted types -> {"2":1}  status: red    "NO DECODE BRANCH: Temperature - RTD, CT current"
+                          warn: "...sensorData will NOT update for them: ..."
+```
+
+**Nothing regressed.** The legacy `SMS and Email for alerts` node is untouched and
+still reads `sensorData`, which the kept branches still write — so the only
+absolute-temperature alerting in the system keeps working until D8 replaces it
+properly. If the red status appears on a panel, restore the branch from git
+history rather than guessing.
+
+**Recovery**: `git revert` this commit, or re-import the branch nodes from the
+previous flow revision. Nothing else references them.

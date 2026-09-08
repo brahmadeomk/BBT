@@ -315,8 +315,17 @@ describe('legacy decode dispatcher routes instead of fanning out (2026-09-08)', 
     assert.equal(checked, n.outputs, 'every branch must contribute a type');
   });
 
-  test('an unknown type is dropped, not broadcast', () => {
-    assert.match(loop().func, /if \(idx === undefined\) continue;/);
+  test('an unknown type is LOUD, not silently skipped', () => {
+    // sensorData has exactly one source - the conversion nodes below the
+    // dispatcher. A type with no branch simply stops being written, and a frozen
+    // sensorData looks identical to a live one: last-known plausible values, no
+    // error, no alarm, while the legacy absolute-threshold alerts never fire
+    // again. So a missing branch must announce itself.
+    const fn = loop().func;
+    assert.match(fn, /unknown\.add\(String\(type\)\)/, 'unknown types must be collected');
+    assert.match(fn, /fill: 'red'/, 'and shown as a red node status');
+    assert.match(fn, /node\.warn\(/, 'and warned about');
+    assert.match(fn, /unknownWarnAt/, 'throttled - it is true every tick once true at all');
   });
 
   test('the legacy decode tick is not faster than 1 s', () => {
