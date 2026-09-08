@@ -246,14 +246,39 @@ describe('device state is collapsed server-side (2026-09-08)', () => {
   // The template resolved blacklist.byUnit[RawData.ID] SIX times per row. The
   // text and classes below must stay byte-identical to what it produced, or the
   // page changes appearance for a performance fix.
-  test('no entry means Active', () => {
-    const rows = [{ ID: 3 }];
+  test('Active requires a fresh OK reading, not merely the absence of a blacklist entry', () => {
+    // A panel showed five rows reading "Device: Active, Status: No Data" - a
+    // contradiction, because Active reads as healthy when the truthful answer is
+    // that nothing has ever been heard from the device.
+    const rows = [{ ID: 3, Status: 'Connected' }];
     annotateDevice(rows, {});
-    assert.deepEqual(rows[0], { ID: 3, Device: 'Active', DeviceClass: 'dev-active' });
+    assert.deepEqual(rows[0], { ID: 3, Status: 'Connected', Device: 'Active', DeviceClass: 'dev-active' });
+  });
+
+  test('never seen, stale or erroring reads Unknown', () => {
+    for (const status of ['No Data', 'Error']) {
+      const rows = [{ ID: 3, Status: status }];
+      annotateDevice(rows, {});
+      assert.equal(rows[0].Device, 'Unknown', status);
+      assert.equal(rows[0].DeviceClass, 'dev-unknown');
+    }
+  });
+
+  test('Active can never appear beside No Data', () => {
+    // The invariant, stated directly - this is the whole point of the change.
+    const rows = [
+      { ID: 1, Status: 'Connected' }, { ID: 2, Status: 'No Data' },
+      { ID: 3, Status: 'Error' }, { ID: 4, Status: 'No Data' },
+    ];
+    annotateDevice(rows, { 4: { status: 'probing', next_probe_in_sec: 9 } });
+    for (const r of rows) {
+      assert.ok(!(r.Device === 'Active' && r.Status !== 'Connected'),
+        `row ${r.ID}: "${r.Device}" beside "${r.Status}"`);
+    }
   });
 
   test('blacklisted, with and without a retry countdown', () => {
-    const rows = [{ ID: 3 }, { ID: 4 }];
+    const rows = [{ ID: 3, Status: 'No Data' }, { ID: 4, Status: 'Connected' }];
     annotateDevice(rows, {
       3: { status: 'blacklisted', next_probe_in_sec: 42 },
       4: { status: 'blacklisted', next_probe_in_sec: null },
@@ -264,7 +289,7 @@ describe('device state is collapsed server-side (2026-09-08)', () => {
   });
 
   test('probing gets its own class', () => {
-    const rows = [{ ID: 3 }];
+    const rows = [{ ID: 3, Status: 'Connected' }];
     annotateDevice(rows, { 3: { status: 'probing', next_probe_in_sec: 5 } });
     assert.equal(rows[0].Device, 'PROBING 5s');
     assert.equal(rows[0].DeviceClass, 'dev-probing');
@@ -272,7 +297,7 @@ describe('device state is collapsed server-side (2026-09-08)', () => {
 
   test('a missing byUnit map is treated as all-active, never as a crash', () => {
     // This runs on the live diagnostic path; blacklist state may be unavailable.
-    const rows = [{ ID: 3 }];
+    const rows = [{ ID: 3, Status: 'Connected' }];
     annotateDevice(rows, undefined);
     assert.equal(rows[0].Device, 'Active');
   });

@@ -214,26 +214,38 @@ function appliedDoc(createStore, { nowMs = Date.now(), ttlMs = 30000 } = {}) {
  * per row**, across three `ng-if`s, an `ng-class` and two interpolations. Angular
  * re-evaluates every one of those on every digest, and has to tear them all down
  * when the page closes — at 71 rows that is ~640 watchers, and it would be ~2160
- * at the 240-sensor target.
+ * at the 240-sensor target. The server already knows the answer once.
  *
- * The server already knows the answer once. Computing it here turns six
- * expressions per row into two, and the text and class names are byte-identical
- * to what the template produced, so nothing looks different.
+ * "UNKNOWN" RATHER THAN "ACTIVE" WHEN THERE IS NO GOOD READING (user request,
+ * same day). The original logic said `Active` whenever the blacklist held no
+ * entry — including for a device that had never been heard from. A panel showed
+ * five rows reading **Device: Active, Status: No Data**, which is a contradiction
+ * on its face: "Active" reads as healthy, when the truthful answer is that we
+ * have no current reading and the blacklist engine has not yet formed a view.
+ *
+ * A device is only called Active when there is a **fresh, OK reading** for it.
+ * Everything else without a blacklist entry — never seen, stale, or erroring —
+ * is Unknown. So `Active` next to `No Data` can no longer appear. This is the
+ * same correction as every other one this week: prefer the honest "we do not
+ * know" over the plausible-looking wrong answer.
  */
 function annotateDevice(rows, byUnit) {
   const map = byUnit || {};
   for (const row of rows) {
     const b = map[row.ID];
-    if (!b) {
+    if (b) {
+      const blacklisted = b.status === 'blacklisted';
+      const retry = b.next_probe_in_sec !== null && b.next_probe_in_sec !== undefined
+        ? ` ${b.next_probe_in_sec}s` : '';
+      row.Device = (blacklisted ? 'BLACKLISTED' : 'PROBING') + retry;
+      row.DeviceClass = blacklisted ? 'dev-blacklisted' : 'dev-probing';
+    } else if (row.Status === 'Connected') {
       row.Device = 'Active';
       row.DeviceClass = 'dev-active';
-      continue;
+    } else {
+      row.Device = 'Unknown';
+      row.DeviceClass = 'dev-unknown';
     }
-    const blacklisted = b.status === 'blacklisted';
-    const retry = b.next_probe_in_sec !== null && b.next_probe_in_sec !== undefined
-      ? ` ${b.next_probe_in_sec}s` : '';
-    row.Device = (blacklisted ? 'BLACKLISTED' : 'PROBING') + retry;
-    row.DeviceClass = blacklisted ? 'dev-blacklisted' : 'dev-probing';
   }
   return rows;
 }

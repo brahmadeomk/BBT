@@ -6780,3 +6780,50 @@ its expectations, because the property under test is **"the oldest are dropped"*
 not any particular number. A test that hardcodes a constant it does not own turns
 every deliberate change into a false failure — and the temptation then is to
 update the number without re-reading what the test was for.
+
+### "Device: Active" beside "Status: No Data" — fixed (user request 2026-09-08)
+
+A panel showed five rows reading **Device: Active, Status: No Data**, with the
+Data column empty. `annotateDevice` said `Active` whenever the blacklist held no
+entry for the unit — including for a device that had **never been heard from**.
+
+That is a contradiction on its face. Green "Active" reads as healthy; the
+truthful answer was that there is no current reading and the blacklist engine has
+not formed a view, because a device that is never polled produces neither an `ok`
+nor an `err` and so never accumulates the three failures that would blacklist it.
+
+Now a device is called **Active only when there is a fresh, OK reading**.
+Everything else without a blacklist entry — never seen, stale, or erroring — is
+**Unknown**, styled muted grey (`#94a3b8`) rather than green: it is an absence of
+information, not a fault, and it must not read as reassuring.
+
+| Blacklist entry | Reading | Device |
+|---|---|---|
+| none | fresh + OK | `Active` |
+| none | never seen / stale / error | **`Unknown`** |
+| blacklisted | any | `BLACKLISTED [Ns]` |
+| probing | any | `PROBING [Ns]` |
+
+The invariant is asserted directly in the tests: **`Active` can never appear
+beside a `Status` other than `Connected`.**
+
+This is the same correction as every other one this week — prefer the honest "we
+do not know" to the plausible-looking wrong answer. It is worth noting how the
+old behaviour arose: the label was written when the only question being asked was
+"is this device blacklisted?", and `Active` was a fair answer to *that* question.
+It became wrong when the column was placed next to a Status column that could
+say "No Data". **A label that is true in isolation can be false in context.**
+
+#### Still open: why the Data column is empty on that panel
+
+Three candidates, not yet distinguished, and they need different fixes:
+1. the sensors are genuinely not connected — in which case the table is correct
+   and this is the new design working as intended;
+2. readings are flowing but the tap into the cache is not reaching it — a defect
+   in the 2026-09-08 cutover;
+3. the Nano is not polling those slaves at all (commissioned without a job
+   resend), which also explains why nothing blacklisted.
+
+The two node statuses that separate them: **"Scale Nano Reading"** shows
+`id:channel=value` per frame, and **"Diag Rows"** shows `N channels, M connected`.
+Values in the first with `M = 0` in the second is conclusive for (2).
