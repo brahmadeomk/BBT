@@ -134,7 +134,43 @@ function buildSlaveRows(doc, cache, { nowMs = Date.now(), staleMs = DEFAULT_STAL
   return { rows, available: true };
 }
 
+/**
+ * MODULE SINGLETON for the live cache.
+ *
+ * CORRECTION (2026-09-08). The first cut kept this in Node-RED **flow context**,
+ * on the reasoning that flow scope is memory-only. That is wrong: a context
+ * store is chosen by `contextStorage.default`, which applies to node, flow AND
+ * global scope alike — and on these panels the default store is
+ * **localfilesystem**. So `flow.set('diagReadings', …)` on every reading put a
+ * write back on the SD card, which is precisely what the historian
+ * investigation was about, and it JSON-serialises the value on the way through.
+ *
+ * A module singleton is the pattern this repo already uses for exactly this —
+ * the blacklist tracker and `getBmsService` are both process-wide for the same
+ * reason. It is memory-only by construction and reaches every function node,
+ * because `busductConfigService` is required once at startup and shared.
+ *
+ * It does NOT survive a Node-RED restart, and that is correct: after a restart
+ * no readings have arrived, so every row should read "No Data" until they do.
+ * Note this cannot repeat the stale-blacklist bug of 2026-08-31, where a
+ * PERSISTED global disagreed with a non-persisted tracker — nothing here is
+ * persisted, so there are no two lifetimes to diverge.
+ */
+const _cache = Object.create(null);
+
+/** Fold a reading into the process-wide cache. */
+function record(msg, nowMs = Date.now()) {
+  return recordReading(_cache, msg, nowMs);
+}
+
+/** The live cache, for the row builder. */
+function snapshot() {
+  return _cache;
+}
+
 module.exports = {
+  record,
+  snapshot,
   recordReading,
   buildSlaveRows,
   readingKey,

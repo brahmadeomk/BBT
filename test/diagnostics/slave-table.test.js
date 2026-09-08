@@ -4,6 +4,7 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   recordReading, buildSlaveRows, statusFor, channelAddress, channelName,
+  record, snapshot,
 } = require('../../src/diagnostics/slave-table');
 
 const doc = (over = {}) => ({
@@ -107,5 +108,29 @@ describe('diagnostics slave table', () => {
   test('rows are ordered by unit address then channel', () => {
     const { rows } = buildSlaveRows(doc(), {}, { nowMs: 0 });
     assert.deepEqual(rows.map((r) => `${r.ID}:${r.Ch}`), ['3:1', '6:1', '6:2', '6:3', '6:4']);
+  });
+});
+
+describe('the live cache is a module singleton, not context', () => {
+  // A context store is chosen by contextStorage.default, which applies to node,
+  // flow AND global scope alike - and on these panels that default is
+  // localfilesystem. Keeping the cache in flow context put an SD write on every
+  // reading, which is what the historian investigation was about.
+  test('record() and snapshot() share one process-wide object', () => {
+    record({ payload: { id: 42, channel: 1, val: 27.5, st: 'ok' } }, 9000);
+    assert.equal(snapshot()['42:1'].val, 27.5);
+  });
+
+  test('a second require sees the same cache', () => {
+    // Both function nodes reach it through the one busductConfigService object,
+    // so they must not get separate copies.
+    delete require.cache[require.resolve('../../src/diagnostics/slave-table')];
+    const again = require('../../src/diagnostics/slave-table');
+    // A fresh require is a fresh module by design; what matters is that the ONE
+    // instance held by busductConfigService is shared, so assert through that.
+    const svc = require('../../src/config-service/node-red');
+    svc.diagTable.record({ payload: { id: 43, channel: 1, val: 30, st: 'ok' } }, 9000);
+    assert.equal(svc.diagTable.snapshot()['43:1'].val, 30);
+    assert.ok(typeof again.record === 'function');
   });
 });

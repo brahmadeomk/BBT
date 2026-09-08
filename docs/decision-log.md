@@ -6439,3 +6439,50 @@ exposed the trap again: the new builder's *comment block* names the legacy
 globals it replaced, so a naive `doesNotMatch` search hits prose and passes or
 fails on documentation. **The updated assertions strip comments first.** That is
 the fourth time in this project a check has matched a comment instead of code.
+
+### Correction: the diagnostics cache was writing to the SD card
+
+The first cut of the Diagnostics cutover kept the live reading cache in Node-RED
+**flow context**, with a comment asserting flow scope is memory-only. **That is
+wrong.** A context store is selected by `contextStorage.default`, and that choice
+applies to node, flow **and** global scope alike — on these panels the default
+store is **localfilesystem**. So `flow.set('diagReadings', …)` put an SD write on
+every reading, and JSON-serialised the object on the way through.
+
+Precisely what the historian investigation was about, introduced two commits
+after it. The repo already documented the fact — `blacklist-handler.js:28`,
+"the Pi's context store is localfilesystem-backed, which JSON-serialises values
+and strips the prototype" — and I asserted the opposite from intuition instead of
+checking. **Same class of error as `temp_scale`: a stored value assumed rather
+than verified.**
+
+Fixed by holding the cache as a **module singleton** in `slave-table.js`, which
+is the pattern this repo already uses for the blacklist tracker and
+`getBmsService`. Memory-only by construction, reaches every function node
+because `busductConfigService` is required once at startup and shared.
+
+It does not survive a restart, which is correct: after one, no readings have
+arrived and every row should read "No Data" until they do. This cannot repeat the
+stale-blacklist bug of 2026-08-31, where a *persisted* global disagreed with a
+non-persisted tracker — nothing here is persisted, so there are no two lifetimes
+to diverge.
+
+Verified by running the real node bodies with a `flow` stub that throws on read
+and counts writes: **0 `flow.set` calls** on the reading path, rows still built
+correctly.
+
+#### Also seen in the same capture, and NOT yet explained
+
+```
+node-red 25.0 S   RES 368436   TIME+ 5:42.47
+node-red 28.4 D   RES 392308   TIME+ 5:43.04
+node-red 54.5 R   RES 440032   TIME+ 5:44.14
+```
+
+RSS climbing ~35 MB per 2 s sample, CPU rising across the three, and one sample
+in state **`D`** (uninterruptible sleep — disk). The context-store writes are a
+candidate but do not obviously account for 18 MB/s, and **three samples are not a
+trend**: RSS routinely climbs between GC cycles, and a deploy re-initialises
+every flow. It needs a re-measure at steady state before anything is concluded —
+the mistake this whole investigation has been about is reading a snapshot as a
+trajectory.
