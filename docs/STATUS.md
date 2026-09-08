@@ -90,14 +90,15 @@ semantics.
   (±2.5–3 °C at that temperature), which is the most a working multimeter gives.
   It rules out gross scale, sign and offset error at a reading far above the
   working band — including the wrong `temp_scale` this panel still carries.
-- **Sensor plausibility gate made two-sided — built and tested, but HELD, not
-  deployed.** The gate was `sensorVal > 300` only, so nothing rejected an
-  implausibly *low* reading and a dead channel could present as a healthy cold
-  joint. Now −40 … 300 plus a non-finite check. The defect is visible in the
-  source independently of any device, which is why the fix is kept; but the
-  panel that showed it (J19 −273, J09 exactly 0) **is not running current
-  code**, so it is not field-validated. Re-check those joints after the update.
-  See D2: the exact-zero case (J09) is deliberately still open.
+- **Sensor plausibility gate made two-sided.** The gate was `sensorVal > 300`
+  only, so nothing rejected an implausibly *low* reading and a dead channel
+  could present as a healthy cold joint. Now −40 … 300 plus a non-finite check.
+  **Status corrected 2026-09-08: it was marked HELD, but ESBUSBBT04 and
+  ESBUSBBT06 have since pulled and deployed several times, so it is live on
+  both.** It remains **not field-validated**: the panel that showed J19 −273 and
+  J09 exactly 0 was on unknown, older code, and was never identified as one of
+  those two. Re-check those joints on that panel. See D2: the exact-zero case
+  (J09) is deliberately still open.
   - Version-independent finding: both the legacy and current decode map raw
     `0x955C` to ≈ −273 °C (−272.99 vs −273.00), so **the module really is
     sending an absolute-zero sentinel** and updating will not make J19 read
