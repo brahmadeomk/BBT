@@ -411,6 +411,79 @@ which change the flow's behaviour:
 After re-importing this flow version, verify each dashboard gate denies
 access with no PIN set and admits with the correct PIN once configured.
 
+## 12. Making the kiosk light on resources
+
+Observed live 2026-09-08: the HMI was noticeably faster in an ordinary Pi browser
+window than in kiosk mode. That is backwards — kiosk renders *less* than a
+windowed browser — so it points at the launch configuration rather than at kiosk
+itself. On the 71-device panel Chromium was measured at **~125 % CPU across four
+processes**, against Node-RED's ~23 %, so the browser is the larger consumer.
+
+Ordered by effect. **Measure `chromium` in `top` before and after each step** —
+this project has repeatedly found the obvious explanation to be the wrong one.
+
+### 12a. Two flags that cause almost every "kiosk is slow" case
+
+- **`--incognito`, or a throwaway `--user-data-dir`** — no disk cache and no GPU
+  shader cache, so every dashboard asset re-fetches and the compositor recompiles
+  shaders on each start.
+- **`--disable-gpu`** (often with `--disable-software-rasterizer` or
+  `--disable-gpu-compositing`) — all compositing falls to the CPU. On a Pi
+  redrawing 70+ table rows that is a large hit, and it is a flag people add to
+  silence an unrelated startup warning.
+
+If either is present, switching to `--start-fullscreen` will be **exactly as
+slow** — and would give up the kiosk lockdown for nothing (see §11: the
+`BUSDUCT_KIOSK_PIN` exit gate only means anything while kiosk is the locked
+state).
+
+### 12b. A leaner launch line
+
+```bash
+chromium-browser --kiosk --noerrdialogs --disable-infobars   --user-data-dir=/home/pi/.config/chromium-kiosk   --disk-cache-dir=/dev/shm/chromium-cache --disk-cache-size=33554432   --enable-low-end-device-mode   --process-per-site --renderer-process-limit=2   --disable-background-networking --disable-component-update   --disable-default-apps --disable-extensions --disable-sync   --disable-session-crashed-bubble --no-first-run   --force-device-scale-factor=1   http://localhost:1880/ui
+```
+
+What each group is for:
+
+| Flags | Why |
+|---|---|
+| persistent `--user-data-dir`, **no** `--incognito`, **no** `--disable-gpu` | the two causes above |
+| `--disk-cache-dir=/dev/shm/...`, `--disk-cache-size=32M` | cache in RAM, not on the SD card. The card already carries the historian, the outbox and the context store; browser cache writes are pure wear for data that is cheap to refetch. Lost on reboot, which is rare |
+| `--enable-low-end-device-mode` | Chromium's own reduced-memory profile — smaller caches, fewer background features |
+| `--process-per-site`, `--renderer-process-limit=2` | the four Chromium processes seen in `ps` are per-renderer/utility; a single-page kiosk does not need them |
+| `--disable-background-networking`, `--disable-component-update`, `--disable-sync`, `--disable-default-apps`, `--disable-extensions` | a panel HMI has no use for update checks, sync or the extension host |
+| `--force-device-scale-factor=1` | avoids a scaling pass on every frame |
+
+`--single-process` is deliberately **not** listed: it lowers memory but is the
+least-tested Chromium path and a renderer crash takes the whole browser with it.
+Not a trade to make on an HMI that must stay up.
+
+### 12c. Free wins outside the browser
+
+`ps` on both panels showed a full LXDE desktop running behind the kiosk:
+
+- **`orca`** — the GNOME screen reader, measured at **5.5 % CPU**. A panel HMI has
+  no use for it: `sudo apt-get purge orca`, or disable it in the session.
+- **`lxpanel-pi`**, `pcmanfm` desktop, and other session pieces — a kiosk needs an
+  X server and a browser, not a desktop environment. Removing the panel and
+  desktop from the session removes their CPU, their memory and their redraws.
+- Check `dtoverlay=vc4-kms-v3d` is present in `/boot/firmware/config.txt`, or
+  Chromium has no GL to accelerate with regardless of its flags.
+
+### 12d. What has already been done on the page side
+
+These are in the flow and need no Pi change — listed so the same ground is not
+covered twice:
+
+- the Diagnostics table is **not built at all** while its page is closed, and its
+  rows carry ~4× fewer Angular watchers (no `ng-model` per cell, device state
+  precomputed server-side);
+- the audit viewers are capped at **20 rows**, sorted server-side rather than by
+  an `orderBy` filter re-running on every digest;
+- Node-RED itself went from ~106 % to ~23 % of a core.
+
+---
+
 ## Updating later
 
 Whenever this repo changes (new commits pushed):
