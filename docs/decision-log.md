@@ -6486,3 +6486,48 @@ trend**: RSS routinely climbs between GC cycles, and a deploy re-initialises
 every flow. It needs a re-measure at steady state before anything is concluded —
 the mistake this whole investigation has been about is reading a snapshot as a
 trajectory.
+
+### The RSS climb is not a leak — but the CPU regression was real, and mine
+
+Second capture after the diagnostics cutover:
+
+```
+node-red  5.9 S  RES 472376  0:42.51
+node-red 54.7 R  RES 520100  0:43.61
+node-red 50.5 D  RES 570648  0:44.63
+```
+
+**RSS was not leaking, and arithmetic settles it without another measurement.**
+The *previous* capture showed the same ~18 MB/s climb on a process with
+`TIME+ 5:42` — 5.7 minutes of CPU already accumulated. Sustained, that rate would
+have reached **~6 GB** by then; it was at 0.43 GB. So it is not monotonic growth,
+it is **V8 heap sawtooth**: a high allocation rate collected at each GC. Worth
+noting as an allocation signal, not a leak, and it needed no further sampling —
+the earlier sample already contained the refutation.
+
+**The CPU regression was real: ~19 % before the cutover, ~53 % after** (TIME+
+delta 2.12 s over 4 s). Cause, and it is the same trap twice in one day:
+
+The row builder cached the applied config with `context.get('diagDoc')` /
+`context.set(...)`. **Node context uses `contextStorage.default` exactly as flow
+and global do**, and on these panels that is localfilesystem — so a ~100 KB
+document was being read back off the SD card and deserialised **every second**,
+and written every 30 s. I had just fixed this in the reading cache and then
+reproduced it two functions away, because I copied the pattern from the
+pre-existing `function 12` without re-applying what I had learned.
+
+Fixed by `appliedDoc()` in `slave-table.js`: module-scope, TTL'd, memory-only.
+**`function 12` is fixed the same way** — it ran the identical `blDoc` pattern and
+now shares the one cache. Measured against the real node bodies: **10 ticks →
+1 store read, 0 context writes** (was 10 reads and 20 writes).
+
+On a read failure the last good document is **kept**, not blanked: the config
+changes only on an apply, and an empty table would read as "no devices
+commissioned" rather than "could not read the configuration". The node status
+shows *"(config stale)"* so the view is not silently trusted.
+
+**The generalisable rule, now stated once in the file and once here:** in this
+deployment **"context" means the SD card unless a store is named**. Node, flow and
+global scope are all the same store. Module scope is the only free memory, which
+is why the blacklist tracker, the BMS service and now both diagnostics caches
+live there.

@@ -168,9 +168,55 @@ function snapshot() {
   return _cache;
 }
 
+let _doc = null;
+let _docTs = 0;
+let _docError = null;
+
+/**
+ * The applied cfg/modbus+joints document, cached IN MEMORY.
+ *
+ * WHY NOT NODE CONTEXT (regression fixed 2026-09-08). The first cut cached it
+ * with `context.get`/`context.set` — copied from the pre-existing `function 12`,
+ * which does the same with `blDoc`. But node context uses `contextStorage.default`
+ * exactly as flow and global do, and on these panels that is **localfilesystem**.
+ * So a ~100 KB config document was being read back out of a disk-backed store on
+ * every 1 s tick, deserialised each time. Node-RED's CPU went from ~19 % to ~53 %
+ * and its allocation rate rose enough to be visible as V8 heap sawtooth in `top`.
+ *
+ * The lesson is the one this file already carries once: **in this deployment
+ * "context" means the SD card unless a store is named.** Module scope is the only
+ * free memory.
+ *
+ * ON A READ FAILURE the last good document is KEPT rather than blanked. The
+ * config changes only on an apply, so a transient read error should not empty
+ * the diagnostics table — and an empty table would read as "no devices
+ * commissioned", a different and alarming statement. The caller is told via
+ * `error` so it can show that the view is not fresh.
+ */
+function appliedDoc(createStore, { nowMs = Date.now(), ttlMs = 30000 } = {}) {
+  if (_doc && (nowMs - _docTs) < ttlMs) return { doc: _doc, ageMs: nowMs - _docTs, error: _docError };
+  try {
+    const d = createStore().readDomain('modbus_joints').doc;
+    if (d) { _doc = d; _docError = null; }
+    else _docError = 'readDomain returned no document';
+  } catch (e) {
+    _docError = String((e && e.message) || e);
+  }
+  _docTs = nowMs;
+  return { doc: _doc, ageMs: 0, error: _docError };
+}
+
+/** Test seam - the module singletons would otherwise leak between cases. */
+function _resetForTests() {
+  _doc = null; _docTs = 0; _docError = null;
+  for (const k of Object.keys(_cache)) delete _cache[k];
+}
+
 module.exports = {
   record,
   snapshot,
+  appliedDoc,
+  _resetForTests,
   recordReading,
   buildSlaveRows,
   readingKey,

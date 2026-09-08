@@ -134,3 +134,42 @@ describe('the live cache is a module singleton, not context', () => {
     assert.ok(typeof again.record === 'function');
   });
 });
+
+describe('the applied-doc cache is in memory, not the SD-backed store', () => {
+  const { appliedDoc, _resetForTests } = require('../../src/diagnostics/slave-table');
+  const doc1 = { modbus: { slaves: [{ slave_id: 'sl01', unit_address: 1, channels: 1, registers: {} }] } };
+
+  test('reads once per TTL, not once per call', () => {
+    // The regression this replaces: a ~100 KB config document read back out of
+    // a localfilesystem-backed node context on every 1 s tick took node-red from
+    // ~19% to ~53% CPU.
+    _resetForTests();
+    let reads = 0;
+    const store = () => { reads += 1; return { readDomain: () => ({ doc: doc1 }) }; };
+    appliedDoc(store, { nowMs: 0, ttlMs: 30000 });
+    appliedDoc(store, { nowMs: 1000 });
+    appliedDoc(store, { nowMs: 29000 });
+    assert.equal(reads, 1, 'three calls inside the TTL must read once');
+    appliedDoc(store, { nowMs: 31000 });
+    assert.equal(reads, 2, 'and again after it expires');
+  });
+
+  test('a read failure keeps the last good document', () => {
+    // The config changes only on an apply, so a transient error must not blank
+    // the table - an empty table reads as "no devices commissioned", which is a
+    // different and alarming statement.
+    _resetForTests();
+    appliedDoc(() => ({ readDomain: () => ({ doc: doc1 }) }), { nowMs: 0 });
+    const r = appliedDoc(() => { throw new Error('EACCES'); }, { nowMs: 60000 });
+    assert.equal(r.doc, doc1, 'last good doc retained');
+    assert.match(r.error, /EACCES/, 'but the caller is told it is not fresh');
+  });
+
+  test('a first-ever failure yields no document, and says why', () => {
+    _resetForTests();
+    const r = appliedDoc(() => { throw new Error('ENOENT'); }, { nowMs: 0 });
+    assert.equal(r.doc, null);
+    assert.match(r.error, /ENOENT/);
+    assert.equal(buildSlaveRows(r.doc, {}).available, false);
+  });
+});
