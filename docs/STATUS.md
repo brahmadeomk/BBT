@@ -5,7 +5,7 @@ position: what is running, what is built but unproven, what is blocked, and what
 needs a decision. Detail lives elsewhere (§7) — this is the summary that should
 be enough to hold a design conversation without reading the repository.
 
-**As of 2026-09-07.** Update this file when a slice changes state; it is only
+**As of 2026-09-08.** Update this file when a slice changes state; it is only
 useful if it is current.
 
 ---
@@ -42,7 +42,7 @@ Two deployments exist:
 | 7 | Remote config channel | **Done**, live-verified end to end |
 | 8a | Security hardening (PINs from env, sudoers, kiosk) | **Done**, live-verified |
 | 9 | Device blacklisting + recovery | **Done**, live-verified |
-| 10 | Scale hardening (110 devices, 2 segments, ambient fallback) | **Done** except positional telemetry, which is built and **off by default** — no cloud consumer yet. **⚠ Re-opened 2026-09-07**: HMI latency traced to a **297× over-sample** — `poll_interval_s` is validated and displayed but never sent to the Nano. Raising `inter_frame_ms` 10→500 on the 6-sensor panel cut node-red from **82 % to 35 %** of a core and readings from 3558 to 304/min. **The 71-device panel still needs its own fix** (a different value — see the decision log) and the compiler change that derives the delay from the configured interval |
+| 10 | Scale hardening (110 devices, 2 segments, ambient fallback) | **Done** except positional telemetry, which is built and **off by default** — no cloud consumer yet. **Re-opened then closed 2026-09-08**: HMI latency on both panels traced to two oversampling defects and fixed — node-red **106 % → ~19 %** at 71 devices, **82 % → 35 %** at 6. See §3b. Headroom at 110 is no longer in doubt; 240 is gated by schema caps, not CPU |
 | 11 | BMS integration (Modbus TCP + MGate CSV) | **Core done**, live on Modbus TCP. **Not verified against a real BACnet gateway** — needs the hardware |
 | 8b | Portability drill, pilot, rollout | **Not started** — deliberately last, so the pilot runs against the shipping configuration |
 
@@ -105,66 +105,55 @@ semantics.
 
 ---
 
-## 3b. HMI latency — root cause found and fixed (2026-09-07)
+## 3b. HMI latency — resolved (2026-09-08)
 
-**The panel was sampling 297× faster than it was configured to.**
-`slaves[].poll_interval_s` (default 30 s) is set by the operator, shown on the
-dashboard and validated by R10 — but `compileNanoJob` never sends it. The only
-rate control reaching the Nano is `bus.inter_frame_ms`, applied as a delay
-between transactions while the firmware loops its read list continuously. There
-is no per-slave scheduling in the firmware at all.
+**node-red 106 % → ~19 % of a core on the 71-device panel; 82 % → 35 % on the
+6-sensor panel.** Two fixes, and they turned out to be the same bug in two
+places: **work driven at a rate unrelated to the rate the data changes.**
 
-Fixed on the 6-sensor panel by raising `inter_frame_ms` from 10 ms to 500 ms — a
-config change, no code:
-
-| | Before | After |
+| Cause | Oversampling | Fix |
 |---|---|---|
-| readings/min | 3558 | **304** |
-| node-red %CPU | 82 | **35** |
-| idle | 54-66 % | 82-84 % |
-| SD writes | 83 GB/day | ~7 GB/day |
+| `poll_interval_s` set to 30 s, actually polling every 0.17 s — validated by R10, shown on the dashboard, **never sent to the Nano** | **297×** | `inter_frame_ms` raised per panel (250 ms on the 71-device panel, 500 ms on the 6-sensor one) |
+| Legacy decode dispatcher re-running at **10 Hz** against values that change every ~20 s, fanning each sensor out to 21 branch filters with 20 message clones | **~200×** | one output per branch (21 wires → 1) + tick 0.1 s → 2 s |
 
-**Four candidates were eliminated by direct experiment before this one landed**,
-three of them mine: the Alarm Manager's history stringify (the history is capped
-at 100), the legacy InfluxDB feeder (already rate-limited), the historian write
-path (disabling it moved CPU by *nothing* — but by 86 % of the disk writes), and
-browser/editor websocket fan-out (4 points). Only the scan rate mattered.
+| Panel | Before | After |
+|---|---|---|
+| ESBUSBBT04 (6 sensors) | 82 % | **35 %** |
+| ESBUSBBT06 (71 sensors) | 106 % | **~19 %** |
 
-### What is still open
+**The two panels were limited by different halves.** The small one had a fast
+sweep, so its cost was per-reading and the scan fix transformed it. The large one
+already swept in 3.3 s, so its cost was the timer-driven dispatcher, which scales
+with sensor count and ignores the scan rate — the scan fix moved it by nothing.
+Same code, opposite bottlenecks.
 
-- **~30 % of a core is a fixed cost**, independent of scan rate — the periodic
-  work (BMS refresh, blacklist tick, applied-joints publish, health nodes,
-  dashboard). Acceptable at 4 cores; it is the term that grows with panel size.
-- **The 71-device panel is NOT fixed, and must not be given the same value.**
-  `inter_frame_ms` is a *per-packet* delay, so 500 ms there means a **38 s
-  sweep** — past its configured interval, near the Diagnostics 60 s "No Data"
-  expiry, and pushing ambient age toward the 60 s `maxAgeSec` beyond which ΔT is
-  silently dropped. ~50-100 ms is its region. It also needs its own measurement:
-  at ifm=10 its sweep was already 3.3 s (~21 readings/s, *lower* than the small
-  panel's 59/s) yet its node-red was higher, so its cost is mostly the fixed
-  term.
-- **~8.7 ms of CPU per reading** is still far more than the ~57 µs the four
-  benchmarked function nodes account for. Harmless at 5 readings/s; it is why the
-  panel was ever in trouble, and it would return at higher device counts.
+**Four candidates were eliminated by direct experiment first**, three of them
+mine: the Alarm Manager's history stringify (capped at 100), the legacy InfluxDB
+feeder (already rate-limited), the historian write path (disabling it moved CPU
+by *nothing* — but by 86 % of the disk writes), and browser/editor websocket
+fan-out (4 points).
 
-### The proper fix (design chat — D7)
+### Still open
 
-Derive the delay from the configured interval in `compileNanoJob`:
+- **The HMI itself is unconfirmed.** Every number says the server has headroom;
+  whether the buttons respond is a separate observation. The client side —
+  Chromium rendering 71-row tables on the Pi — has never been measured
+  independently of the server.
+- **Deleting the 20 unused decode branches.** Not done: the type names come from
+  `Parameter.txt` on the Pi, so which a panel uses cannot be decided from this
+  repo. After the routing fix an unused branch is never sent a message and costs
+  nothing, so this is cosmetic. Read `parameterTypeName` and `parameterID0..N`
+  from the context sidebar to produce a confirmed list.
+- **SD wear** on panels that run the historian: ~29 TB/year at the old scan rate,
+  now ~2.5. The write path is one HTTP POST per point; batching remains an
+  optional further fix.
 
-```
-perPacket = max(inter_frame_ms, (min(poll_interval_s) * 1000 / slaveCount) - txEstimate)
-```
+### D7 still stands
 
-**Compiler-only — no firmware reflash**; `comm[0]` is just microseconds between
-transactions, stored in a `long` with no firmware cap, and the 500 ms limit lives
-only in the JSON schema on a field named for the RS-485 inter-frame gap. Every
-fielded panel would be corrected by a config re-apply. The correct value is a
-function of slave count, which is precisely why no operator should be setting it
-by hand.
-
-**And the target interval needs deciding, not defaulting.** 30 s interacts with
-`maxAgeSec` (60 s, beyond which ambient is rejected and ΔT silently stops) and
-with blacklist detection (3 sweeps). ~5-10 s looks right on the numbers.
+The interim fix is a hand-set per-packet delay whose correct value depends on
+slave count — 500 ms suits 6 slaves and would give 71 slaves a 38 s sweep. The
+compiler should derive it from `poll_interval_s`, and the interval itself needs
+choosing against `maxAgeSec` (60 s) and blacklist detection (3 sweeps).
 
 ---
 

@@ -6193,3 +6193,65 @@ tunable per panel but cannot silently return to 100 ms.
 — two changes in one deploy would have made this measurement uninterpretable,
 which is the same discipline that made the influx and browser tests worth
 anything.
+
+### RESOLVED: node-red 106 % → ~19 % on ESBUSBBT06
+
+```
+%Cpu(s): 11.4 us  79.5 id   node-red  9.1 S
+%Cpu(s): 16.8 us  76.2 id   node-red 19.8 S
+%Cpu(s): 20.6 us  70.5 id   node-red 27.5 R
+```
+
+Mean **18.8 %**, corroborated independently by the `TIME+` delta — 0.68 s of CPU
+across 4 s of wall clock is 17 %, so the instantaneous samples are not a lucky
+window. State is **S, S, R**: mostly sleeping, where it was `R` on every sample
+before.
+
+| Step | node-red | Δ |
+|---|---|---|
+| baseline | 106 % | |
+| `inter_frame_ms` 10 → 250 | 106 % | **0** |
+| dispatcher routing (21 wires → 1) | 67.8 % | −38 |
+| decode tick 0.1 s → 2 s | **18.8 %** | −49 |
+
+**5.6× lower, 87 points recovered**, and the event loop now has ~80 % headroom
+instead of none.
+
+#### The two fixes were the same bug in two places
+
+Both are **work driven at a rate unrelated to the rate the data changes**:
+
+- `poll_interval_s` configured at 30 s, actually polling every 0.17 s — **297×**;
+- the decode dispatcher re-running at 10 Hz against values that change every
+  ~20 s — **~200×**.
+
+That is one failure mode, not two, and it is worth naming because the third
+instance will look different again. Neither was visible as a defect: both
+"worked", both had passed live verification, and the only symptom was a panel
+that felt slow.
+
+#### Why the scan-rate fix did nothing here but everything on ESBUSBBT04
+
+Because the two panels were limited by *different* halves of it. ESBUSBBT04 (6
+sensors) had a fast sweep — 0.17 s per joint — so its cost was dominated by the
+per-reading path, and slowing the scan took it from 82 % to 35 %. ESBUSBBT06 (71
+sensors) already had a 3.3 s sweep, so its readings were only ~21/s; its cost was
+the timer-driven dispatcher, which scales with **sensor count** and ignores the
+scan rate entirely. Same code, opposite bottlenecks. The earlier entry's
+prediction that the scan fix "will help less here" was right for the right
+reason.
+
+#### This substantially changes the 240-sensor outlook
+
+The previous sizing entry concluded the fixed term was the binding constraint at
+240 and might force two panels. That term was overwhelmingly this dispatcher, and
+it is now ~40× smaller: at 240 sensors with a 2 s tick it is 120 sends/s, against
+the 710/s that 71 sensors produced at 10 Hz. **The remaining blockers at 240 are
+the schema caps** — `joints` maxItems 200 above all — not CPU. A bench
+measurement at ~120 is still the right gate before committing, but the answer is
+no longer likely to be "two panels".
+
+**Still to confirm: the HMI itself.** Every number here says the server has
+headroom; whether the buttons respond is a separate observation, and the client
+side (Chromium rendering 71-row tables on the Pi) was never measured
+independently.
