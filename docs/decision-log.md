@@ -5925,3 +5925,58 @@ on one Pi, commission a bench panel at ~120 and measure. If the fixed term is
 already dominant there, the answer is not a different `inter_frame_ms` — it is
 **two panels**, and that is an architecture decision for the design chat, not a
 tuning one.
+
+### ESBUSBBT06 with the local browser closed — the fixed term is confirmed dominant
+
+Fresh capture, **no Chromium at all** (previously ~125 % across four processes):
+
+| | Before | Now |
+|---|---|---|
+| run queue `r` | 6-9 | **1-2** |
+| idle | 31-36 % | **57-68 %** |
+| node-red %CPU | 100 | 106 |
+| top consumers | node-red, 4× chromium, influxd | node-red, influxd (11 %, 1.72 GB RSS), Xorg, grafana |
+
+**The panel is no longer oversubscribed.** A run queue of 6-9 on 4 cores meant
+everything queued; at 1-2 it does not. That came almost entirely from closing the
+Pi's own browser — no code, no tuning. The HMI symptom should already be largely
+gone, and that needs confirming with the actual buttons rather than inferred from
+these numbers.
+
+**node-red is at 106 %** — `ps` sums threads, so this is the main thread saturated
+plus GC/libuv threadpool.
+
+#### This panel's cost is ~87 % fixed, against ~30 % on ESBUSBBT04
+
+At `inter_frame_ms` 10 and 71 slaves, the sweep is ~3.3 s → **~21.5 readings/s**,
+barely a third of ESBUSBBT04's 59/s. Applying that panel's fitted 8.7 ms/reading
+gives a variable term of only ~19 %, leaving **~87 % fixed** — nearly three times
+BT04's ~30 %.
+
+| ifm | sweep | readings/s | variable term |
+|---|---|---|---|
+| **10 (now)** | 3.3 s | 21.5 | ~19 % |
+| 50 | 6.1 s | 11.6 | ~10 % |
+| **100** | 9.7 s | 7.4 | ~6 % |
+| 200 | 16.8 s | 4.2 | ~4 % |
+
+So raising ifm to 100 ms should return **~13 points** of node-red CPU — real, and
+worth taking for the SD wear alone, but nothing like the 47 points it bought on
+the small panel. **The prediction that the scan fix would help less here is borne
+out.** (The split is approximate: per-reading cost is probably also higher here —
+O(n) joint lookups over 71 rows, 71-row tables, a 1058-register BMS image — so
+some of that "fixed" 87 % is really variable cost with a bigger coefficient.
+Either way it is not the scan rate.)
+
+**This panel is now the evidence for the 240-sensor warning.** The term that
+grows with panel size, not the message rate, is what puts Node-RED over a core —
+which is exactly why 240 sensors on one Pi needs measuring at ~120 before it is
+committed to, and why the answer there may be two panels rather than a different
+`inter_frame_ms`.
+
+#### Unconfirmed: whether `bt_kpi` is actually disabled here
+
+`bo` averages **~336 blocks/s** across both vmstat runs. On ESBUSBBT04 the
+historian gave 936 running and 129 disabled. 336 is neither. The `influx` count
+query was not run in this capture, so the historian's state on this panel is not
+established — and `influxd` is still at 11 % CPU with 1.72 GB RSS.
