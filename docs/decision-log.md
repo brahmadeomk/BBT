@@ -5768,3 +5768,30 @@ and re-measure, then the legacy decode chain.
 That ordering is deliberate. Slowing the scan is wanted on its own merits — a
 297× over-sample against the configured interval — so it is worth doing before
 spending more effort attributing a cost that may be about to disappear.
+
+### Summary of the four configurations — node-red is pinned regardless
+
+| Configuration | node-red %CPU | `bo` blocks/s |
+|---|---|---|
+| baseline (influx on, browsers on) | 74.5 | 936 |
+| influx OFF, browsers on | 74.2 | 129 |
+| influx OFF, browsers CLOSED | 70.5 | 129 |
+| influx ON again (**fresh node-red**) | 81.9 | 919 |
+
+**Node-RED sits at 70-86 % in every configuration tested.** Disabling the
+historian moved it by nothing; closing every browser moved it by 4 points. Only
+the disk writes respond, and they track the historian exactly (936 → 129 → 919).
+
+The last run is a **restarted process** — PID 738 → 725, `TIME+` 4d+6h → 83:15,
+free memory 0.6 → 4.5 GB and page cache 3.5 → 1.8 GB, so the Pi itself came back
+up. **A fresh Node-RED reaches ~82 % immediately**, which rules out a leak,
+accumulated context or a degrading state: it is steady-state per-message work
+from the first minute. (System-wide figures in that run are less comparable —
+influxd will be doing post-boot catch-up — but node-red's own %CPU is.)
+
+Influx costs roughly 8-12 points of CPU and **all** of the disk writes. Browsers
+cost ~4. Neither is the story.
+
+**Every candidate except message volume has now been eliminated by experiment.**
+The scan rate is the only untested lever, and it is also the one change wanted on
+its own merits.
