@@ -6017,3 +6017,80 @@ say which, because every capture had one or the other switched off.
 
 Neither has been done. Everything measured so far constrains the *machine*, not
 the *path a button press actually takes*.
+
+### FOUND: a 10 Hz timer fanning out over every sensor — the fixed cost
+
+`inject 8233660a43277487` on `modbusMaster_V2` fires **every 100 ms** into
+`parameterForLoop`:
+
+```js
+var n = global.get('slaveLength')
+for (i = 0; i < n; i++) {
+    msg.payload = [global.get('parameterTypeName[' + global.get('parameterID'+i) + ']'),
+                   flow.get('sensorRawData[' + global.get('sID'+i) + '][' + global.get('sregisterAddress'+i) + ']'), i]
+    node.send(msg);
+}
+```
+
+One output wired to **21 destinations** — the legacy decode-type dispatcher (pH,
+4-20 mA, RTD, DHT, CT current, /10, /100, /1000, three Schneider meter types,
+BHMS old/new, Tamura, WCS, E-N meter, vibration, NTC, load cell). Node-RED clones
+the message once per additional wire, so each `node.send` costs 20 clones.
+
+| Panel | sensors | node executions/s | dynamic-path context gets/s |
+|---|---|---|---|
+| ESBUSBBT04 | 6 | 1,200 | 240 |
+| **ESBUSBBT06** | **71** | **14,910** | **2,840** |
+| proposed 240-sensor | 240 | **50,400** | 9,600 |
+
+And the branch that matches does a **full read-modify-write of the entire
+`sensorData` object** per message (`global.get('sensorData')` → mutate →
+`global.set('sensorData', ...)`), into the *default* context store — which on
+this Pi is localfilesystem. At 71 sensors that is ~710 whole-object rewrites per
+second.
+
+**This is the fixed term.** It is driven by a timer, not by data, so it is
+completely independent of `inter_frame_ms` — which is precisely why the scan-rate
+fix that transformed the 6-sensor panel barely moved this one, and why closing
+the browser did not help either. It scales linearly with sensor count, which is
+why the fixed term measured ~30 % on ESBUSBBT04 and ~87 % on ESBUSBBT06.
+
+It also plausibly explains the residual `bo` ≈ 336 on ESBUSBBT06, a panel with no
+`bt_kpi` historian at all: a persisted context store being marked dirty hundreds
+of times a second.
+
+**Note node-red at ~106 % is saturated**, so the measurements understate demand —
+a single JS thread cannot report the work it wanted to do. True demand on
+ESBUSBBT06 may be well above one core.
+
+#### What it is decoding, and why 10 Hz is 200× too fast
+
+This is the generic multi-sensor-type platform the panel was built on;
+BusductTherMo uses one of the 21 types. The values it re-decodes only change when
+a frame arrives — now every ~20 s per sensor at `inter_frame_ms` 250. Re-running
+the whole dispatch 10 times a second against data that changes every 20 seconds
+is ~200× oversampling of the decode step.
+
+#### The test, and the fix
+
+Change that inject's repeat from **0.1 s to 2 s** in the editor and Deploy —
+20× less work, immediately reversible. Expect node-red to fall from ~106 % toward
+~30 % if this is the dominant term.
+
+Low risk, because **the alarm path does not use it.** ΔT/RoR alarms come from
+`Scale Nano Reading` → `ProcessLogic` → `Alarm Manager`, which read the fanned-out
+channel readings directly, never `global.sensorData`. What slows down is the
+legacy Diagnostics table and the legacy alert/SMS nodes, by up to 2 s — on a
+measurement that updates every 20 s anyway. It should also *help* the client
+side, since fewer dashboard pushes means less Chromium work.
+
+**The proper fix is to drive it from frame arrival rather than a timer**, which
+is a code change and should follow once the test confirms the attribution.
+
+#### This changes the 240-sensor answer
+
+At 240 sensors this loop alone is **50,400 node executions/second** before any
+frame is processed — several cores' worth on a Pi. The earlier sizing entry
+concluded the fixed term was the risk at 240; this is that term, and it is a
+**timer that can simply be slowed or made event-driven**. Fixing it may matter
+more to the 240 question than any choice of `inter_frame_ms`.
