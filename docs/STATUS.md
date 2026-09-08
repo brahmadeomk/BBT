@@ -42,7 +42,7 @@ Two deployments exist:
 | 7 | Remote config channel | **Done**, live-verified end to end |
 | 8a | Security hardening (PINs from env, sudoers, kiosk) | **Done**, live-verified |
 | 9 | Device blacklisting + recovery | **Done**, live-verified |
-| 10 | Scale hardening (110 devices, 2 segments, ambient fallback) | **Done** except positional telemetry, which is built and **off by default** — no cloud consumer yet. **⚠ Re-opened 2026-09-07**: at **71 devices** panel ESBUSBBT06 sits at sustained load **~5.2 on 4 cores** with a visibly slow HMI. The 110-device target is not currently reachable. Cause under investigation — see below |
+| 10 | Scale hardening (110 devices, 2 segments, ambient fallback) | **Done** except positional telemetry, which is built and **off by default** — no cloud consumer yet. **⚠ Re-opened 2026-09-07**: HMI latency traced to a **297× over-sample** — `poll_interval_s` is validated and displayed but never sent to the Nano. Raising `inter_frame_ms` 10→500 on the 6-sensor panel cut node-red from **82 % to 35 %** of a core and readings from 3558 to 304/min. **The 71-device panel still needs its own fix** (a different value — see the decision log) and the compiler change that derives the delay from the configured interval |
 | 11 | BMS integration (Modbus TCP + MGate CSV) | **Core done**, live on Modbus TCP. **Not verified against a real BACnet gateway** — needs the hardware |
 | 8b | Portability drill, pilot, rollout | **Not started** — deliberately last, so the pilot runs against the shipping configuration |
 

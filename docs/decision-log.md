@@ -5795,3 +5795,61 @@ cost ~4. Neither is the story.
 **Every candidate except message volume has now been eliminated by experiment.**
 The scan rate is the only untested lever, and it is also the one change wanted on
 its own merits.
+
+### RESOLVED: `inter_frame_ms` 10 → 500 on ESBUSBBT04
+
+| | Before | After |
+|---|---|---|
+| readings/min (`bt_kpi`) | 3558 | **304** (11.7× fewer) |
+| node-red %CPU | 81.9 | **34.8** (2.35× lower) |
+| idle | 54-66 % | **82-84 %** |
+| process state | `R` every sample | **`S` in 2 of 3** |
+
+The state column is the qualitative confirmation: Node-RED was *running* on every
+sample before and now spends most of its time *sleeping*. That is the difference
+the HMI feels.
+
+#### CPU is not purely per-message — there is a fixed floor
+
+CPU fell 2.35× while the message rate fell 11.7×, so fitting
+`CPU = FIXED + k × readings/s` to the two points:
+
+- **FIXED ≈ 30 % of a core**, independent of scan rate — the periodic work: BMS
+  refresh 5 s, blacklist tick 10 s, applied-joints publish 10 s, power health
+  30 s, device health 60 s, telemetry, the dashboard's own updates.
+- **k ≈ 0.87 % per reading/s**, i.e. **~8.7 ms of CPU per reading**. The variable
+  part collapsed from 51.5 points to 4.4 (**−91 %**).
+
+8.7 ms per reading is still enormous for one message — the four benchmarked
+function nodes account for ~57 µs of it. The rest is the unmeasured majority of
+the path (legacy decode chain, the 94-node Alert system tab, dashboard, BMS and
+cloud taps, and Node-RED's own message cloning). It no longer *matters* at 5
+readings/s, but it is the reason the panel was ever in trouble, and it would bite
+again at higher device counts.
+
+#### The value does NOT transfer to the 71-device panel — do not copy it across
+
+`inter_frame_ms` is a **per-packet** delay, so the sweep it produces scales with
+slave count. With the implied ~36 ms transaction time:
+
+| Slaves | ifm=10 | ifm=50 | ifm=100 | ifm=500 |
+|---|---|---|---|---|
+| 6 | 0.28 s | 0.5 s | 0.8 s | **3.2 s** |
+| 71 | 3.3 s | 6.1 s | 9.6 s | **38 s** |
+
+**500 ms on ESBUSBBT06 would give a 38 s sweep** — past the 30 s the operator
+configured, close to the Diagnostics 60 s "No Data" expiry, and pushing ambient
+age toward the 60 s `maxAgeSec` beyond which ΔT is silently dropped. ~50-100 ms
+is the right region there.
+
+**And note what this implies about that panel's 100 % CPU.** At ifm=10 its sweep
+was already 3.3 s, i.e. ~21 readings/s — *lower* than this panel's 59/s — yet its
+node-red was higher. So the big panel's cost is mostly the **fixed** term, which
+grows with panel size (bigger tables, more joints per lookup, larger dashboard
+payloads, 1058 BMS registers), not with message rate. **Slowing its scan will
+help less than it did here**, and that panel needs its own measurement rather
+than this panel's conclusion.
+
+This is exactly the argument for deriving the delay from `poll_interval_s` in the
+compiler instead of hand-setting a per-packet number: the correct value is a
+function of slave count, and no operator should have to compute it.
