@@ -178,7 +178,7 @@ with blacklist detection (3 sweeps). ~5-10 s looks right on the numbers.
 | D4 | **Cloud data pipeline** — IoT Rule → Timestream/S3, or alternative | Not started. Gates positional telemetry and any fleet view |
 | D5 | **OTA update approach** | A/B scheme depends on the Pi's OS/boot layout |
 | D6 | **HIRA sign-off** — `docs/hira-live-sensor-installation.md` | Needs a competent person and the duty holder. Currently a 9-revision draft; the electrical conclusion is settled (external cover mounting, intact enclosure), the open items are measurement questions |
-| D7 | **Enforce the poll interval in the compiler, and choose its value** — see §3b | `poll_interval_s` is validated, displayed and never actuated; the operator-facing knob that *does* work is a per-packet delay whose correct value depends on slave count. Compiler-only fix, no reflash. The interval itself interacts with `maxAgeSec` and blacklist detection, so it is a monitoring-policy decision, not a default |
+| D7 | **Enforce the poll interval in the compiler, and choose its value** — see §3b | `poll_interval_s` is validated, displayed and never actuated; the operator-facing knob that *does* work is a per-packet delay whose correct value depends on slave count. Compiler-only fix, no reflash. The interval itself interacts with `maxAgeSec` and blacklist detection, so it is a monitoring-policy decision, not a default  **Also gates 240-sensor sizing** (decision log 2026-09-08): the 500 ms cap means fatter modules *raise* the reading rate, and `joints` maxItems 200 blocks 240 points outright. |
 
 ---
 

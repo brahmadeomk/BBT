@@ -5853,3 +5853,75 @@ than this panel's conclusion.
 This is exactly the argument for deriving the delay from `poll_interval_s` in the
 compiler instead of hand-setting a per-packet number: the correct value is a
 function of slave count, and no operator should have to compute it.
+
+## 2026-09-08 — Sizing 240 sensors on two RS-485 segments
+
+Asked: what `inter_frame_ms` for 240 sensors across two independent buses.
+
+**The number depends on slaves per bus, not sensors** — `compileNanoJob` emits one
+read per *slave*, and a multi-channel module returns all its channels in a single
+transaction. So the packaging decision comes first. With the measured ~36 ms
+transaction and a 30 s sweep target (half the 60 s `maxAgeSec` / Diagnostics
+"No Data" limit, leaving margin):
+
+| Packaging | slaves/bus | ifm wanted | usable | sweep | readings/s | R16 loading |
+|---|---|---|---|---|---|---|
+| 1 channel (240 slaves) | 120 | 215 ms | **215** | 30 s | **8.0** | 121/128 = **95 %** |
+| **2 channel (120 slaves)** | 60 | 465 ms | **465** | 30 s | **8.0** | 61/128 = 48 % ✓ |
+| 4 channel (60 slaves) | 30 | 960 ms | 500 (capped) | 16 s | 14.8 | 31/128 = 24 % |
+| 8 channel (30 slaves) | 15 | 1960 ms | 500 (capped) | **8 s** | **29.6** | 16/128 = 13 % |
+
+**Recommendation: 2-channel modules, 60 slaves per bus, `inter_frame_ms` ≈ 465 ms.**
+The only packaging that reaches a 30 s sweep *within* the 500 ms schema cap while
+leaving RS-485 headroom.
+
+#### The counter-intuitive part
+
+**Fatter modules make the CPU problem worse, not better.** Intuition says fewer
+devices means less work; the opposite holds, because the 500 ms cap binds on a
+short read list and the sweep collapses. Eight-channel modules give 30 slaves in
+total and a **29.6 readings/s** load — nearly four times the 8.0 of the
+two-channel layout — purely because the panel cannot be told to wait longer
+between packets. The reading rate is `sensors / sweep`, and sweep is
+`slaves_per_bus × (tx + ifm)`; reducing slave count shortens the sweep unless
+`ifm` can grow to compensate, and it cannot past 500 ms.
+
+That is the same asymmetry found on ESBUSBBT04 vs ESBUSBBT06, and the strongest
+argument yet for **D7**: the delay should be derived from the configured poll
+interval, not hand-set as a per-packet number with a cap that means different
+things at different panel sizes.
+
+#### But 240 does not fit the schema today
+
+| Cap | Value | 240 sensors |
+|---|---|---|
+| `joints` maxItems | **200** | **BLOCKS every packaging** |
+| `slaves` maxItems | 128 | blocks single-channel (240) |
+| `unit_address` 1-247, unique panel-wide | 247 | blocks single-channel once ambients are added (240 + ~10 > 247) |
+| `buses` maxItems | 4 | fine |
+| R16 `rs485_max_devices` | 128/bus | 121/128 at single-channel — 95 %, warns, no headroom |
+
+**`joints` maxItems 200 is binding in every layout**, so 240 measurement points
+needs a schema change whatever the module choice. Single-channel is blocked three
+times over and should be discounted regardless.
+
+Downstream, the BMS register map at tier 3 would be `500 + 240 × 8 = 2420`
+registers, against the MGate's **1200-command import cap** — so **at least two
+gateways, split by zone** (`tools/mgate-csv.js --zones=`), which the existing
+two-gateway guidance already covers.
+
+#### The real risk is not `inter_frame_ms`
+
+The fitted model from ESBUSBBT04 is `CPU ≈ 30 % + 8.7 ms × readings/s`. At 8
+readings/s the variable term is only ~7 %. **The fixed term is the problem, and
+it grows with panel size** — 240-row dashboard tables, ProcessLogic's O(n) joint
+lookup, a 2420-register BMS image, blacklist state over 240 devices, the
+device-health builder. ESBUSBBT06 showed exactly this: 71 devices at ~21
+readings/s pinned Node-RED at 100 %, i.e. mostly fixed cost.
+
+**That term has never been measured above 71 devices, and extrapolating it would
+repeat the mistake this whole investigation was about.** Before committing to 240
+on one Pi, commission a bench panel at ~120 and measure. If the fixed term is
+already dominant there, the answer is not a different `inter_frame_ms` — it is
+**two panels**, and that is an architecture decision for the design chat, not a
+tuning one.
