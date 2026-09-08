@@ -6955,3 +6955,76 @@ back.
 discovered**: the edits are discarded, so a typo in one field costs the whole
 edit. That is the deliberate choice — a table that always shows what is running
 is worth more on a safety system than preserving an edit that was refused.
+
+## 2026-09-08 — A stuck scan flag was silently disabling ALL measurement
+
+The empty Data column had a cause after all, and it was not any of the three I
+guessed. User observation: *"we have configured sensors only on bus 2 and
+observed data is not coming out from function 14 in modbusMaster_V2. Input is
+coming from bus 1 and bus 2."*
+
+`function 14` was:
+
+```js
+if (flow.get("scanActive") != 1) { return msg }
+```
+
+**A fail-CLOSED gate in front of the entire measurement path.** ProcessLogic, the
+Alarm Manager, the historian, the BMS image, the cloud gateway and the
+diagnostics table are all downstream of it. `scanActive` is set by the Start Scan
+button and cleared in exactly **one** place — when the scan's frame counter
+reaches `scanTotal` (127).
+
+Every one of these leaves it latched at 1 forever:
+
+- the counter only begins once a frame with `id == 1` has been seen
+  (`start_Count`), so if address 1 never answers it never starts;
+- one dropped frame leaves the count short of 127;
+- **the scan writes its job through the legacy `paraRaw` path, which is bus1
+  only** — on this panel, whose sensors are on bus2, the scan could never
+  complete;
+- Node-RED restarting mid-scan: flow context here is localfilesystem-backed, so
+  the flag **survives** while the scan that would clear it does not.
+
+The panel then looks entirely healthy — HMI up, BMS serving, heartbeat advancing,
+Device column reading Active — while monitoring **nothing at all**, with no
+alarm, no indication, across reboots. On a fire-safety monitor that is the worst
+available failure shape.
+
+**Third instance in this project of a flag outliving the thing that would reset
+it** — the stuck blacklist alarm, the stale exclude set, now this. The pattern is
+worth naming: *state whose clearing depends on an event that may never arrive
+needs a deadline, not just a clearer.*
+
+#### The fix: `src/config-service/scan-gate.js`
+
+Three properties, all of which the old gate lacked:
+
+| Property | Behaviour |
+|---|---|
+| **Bounded** | past 120 s the gate releases, clears the flag and restores `paraRaw` from its backup. A scan is a foreground operation an operator waits for; 127 addresses at a 500 ms worst-case timeout is ~64 s |
+| **Scoped** | the scan is bus1-only, so bus2 frames are never gated. Blocking them was pure collateral — and fatal on a bus2-only panel |
+| **Fails open** | no start time (a scan predating this code, or context lost) releases rather than being read as "just started". A missing library also passes data through |
+
+Verified against the real node body:
+
+```
+THE STUCK PANEL (flag set, no start time, sensors on bus2)
+  bus2 frame -> passed         (scan is bus1-only)
+  bus1 frame -> passed, scanActive cleared, paraRaw restored, warns
+
+A REAL SCAN, 3s in
+  bus1 -> blocked  "scan active 3s - measurement paused"
+  bus2 -> passed
+
+A SCAN 3 MINUTES OLD
+  bus1 -> passed, cleared, "scan exceeded 120s - releasing"
+```
+
+Clearing the flag also **restores `paraRaw` from `paraRaw_backup`** — releasing
+the gate without that would leave the Nano scanning addresses 1..127 forever
+instead of polling the commissioned slaves.
+
+`scanStartedAt` is now stamped when a scan starts, because without a start time a
+latched flag is indistinguishable from a scan that began a moment ago, and the
+gate has no safe way to release.

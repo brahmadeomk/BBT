@@ -167,6 +167,25 @@ choosing against `maxAgeSec` (60 s) and blacklist detection (3 sweeps).
 
 ---
 
+## 3c. A stuck scan flag was disabling all measurement (2026-09-08)
+
+`function 14` on `modbusMaster_V2` gated the **entire** measurement path on
+`scanActive != 1` — fail-closed, with the flag cleared only by a scan counter
+reaching 127. If address 1 never answered, a frame was dropped, Node-RED
+restarted mid-scan, or the panel's sensors were on **bus2** (the scan job is
+bus1-only), the flag latched forever — and flow context is localfilesystem-backed,
+so it survived reboots. The panel looked healthy while monitoring nothing.
+
+Fixed with `src/config-service/scan-gate.js`: **bounded** (releases after 120 s
+and restores the polling job), **scoped** (a bus1 scan never blocks bus2), and
+**fails open** on missing information or a missing library.
+
+**Third instance of the same pattern** — after the stuck blacklist alarm and the
+stale exclude set. Worth stating as a rule: *state whose clearing depends on an
+event that may never arrive needs a deadline, not just a clearer.*
+
+---
+
 ## 4. Decisions needed from the design chat
 
 | # | Decision | Why it needs the chat |
