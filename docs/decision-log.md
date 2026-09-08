@@ -6579,3 +6579,41 @@ heap to the OS once its high-water mark rises, and the churn before this fix was
 substantial. It is **stable**, which is the property that matters, and a restart
 would show the true floor. Worth a glance after the next restart, not worth
 chasing now.
+
+### The easy saving, taken: gate the row builder on someone watching
+
+The dashboard template emits `open`/`heartbeat`/`close`, and the gate node has
+always used them to stop forwarding data to a page nobody has open — but it sits
+**after** the row builder, so 71+ row objects were built every second and thrown
+away. The gate now runs first.
+
+Measured against the real node body at 71 slaves, 60 ticks:
+
+| | builds | store reads | time |
+|---|---|---|---|
+| page closed | 0 | 0 | 0.2 ms |
+| page open | 60 | 1 | 3.1 ms |
+
+**92.5 % of the builder's cost disappears when nobody is looking** — which is most
+of the time on a panel in service.
+
+**Presence lives in the module, not in either node's context.** Two reasons, both
+already learned the hard way in this file: context is the SD-backed store unless
+a store is named, and two copies of a lifetime that can disagree is the exact
+shape of the stale-blacklist and stale-exclude bugs. The gate node now *records*
+into the module and *reads back* from it, so the two nodes cannot drift; its own
+context copy survives only as a fallback for the library-not-loaded case.
+
+**Fail-safe direction: unknown presence means inactive.** Being wrong costs a
+table that does not refresh until the next heartbeat — visible and
+self-correcting. Assuming active would cost exactly the work this exists to
+avoid. Nothing safety-related is downstream; alarms do not pass through here.
+
+#### A sentinel collision the test caught
+
+The first cut used `0` for "never seen", so `noteUiEvent('open', 0)` was
+indistinguishable from "no page has ever opened". Harmless in production, where
+`Date.now()` is never 0 — but it is the same class of ambiguity as a 0 °C reading
+meaning "no sensor", which this project *has* been bitten by. Now `null` for
+never and a number otherwise. A distinct type costs nothing, and the test that
+found it was the one written to check boundary behaviour.

@@ -206,9 +206,47 @@ function appliedDoc(createStore, { nowMs = Date.now(), ttlMs = 30000 } = {}) {
   return { doc: _doc, ageMs: 0, error: _docError };
 }
 
+/**
+ * Is anyone actually looking at the Diagnostics page?
+ *
+ * The dashboard template emits `open` / `heartbeat` / `close` events, and the
+ * downstream gate node has always used them to stop forwarding data to a page
+ * nobody has open. But that gate sits *after* the row builder, so 71+ row
+ * objects were constructed every second and then thrown away.
+ *
+ * Holding the presence flag HERE rather than in either node's context does two
+ * things: it is memory, not the SD-backed store (the mistake this file records
+ * twice already), and it gives both nodes ONE source of truth. Two copies of a
+ * lifetime that can disagree is the shape of the stale-blacklist and
+ * stale-exclude bugs — not worth repeating for a UI flag.
+ *
+ * FAIL-SAFE DIRECTION: unknown means *inactive*. The cost of being wrong is a
+ * table that does not refresh until the next heartbeat, which is visible and
+ * self-correcting; the cost of assuming active is the work this exists to avoid.
+ * Nothing safety-related is downstream — alarms do not pass through here.
+ */
+const UI_TIMEOUT_MS = 15000; // matches the gate node's own window
+
+// `null` means never seen, NOT zero. The legacy gate used 0 as the "never"
+// sentinel, which collides with a real timestamp of 0 - harmless with
+// Date.now(), but it is the same class of ambiguity as a 0 degC reading meaning
+// "no sensor", and this project has been bitten by that one. A distinct type
+// costs nothing.
+let _uiLastSeen = null;
+
+function noteUiEvent(event, nowMs = Date.now()) {
+  if (event === 'open' || event === 'heartbeat') _uiLastSeen = nowMs;
+  else if (event === 'close') _uiLastSeen = null;
+  return _uiLastSeen;
+}
+
+function uiActive(nowMs = Date.now(), timeoutMs = UI_TIMEOUT_MS) {
+  return _uiLastSeen != null && (nowMs - _uiLastSeen) <= timeoutMs;
+}
+
 /** Test seam - the module singletons would otherwise leak between cases. */
 function _resetForTests() {
-  _doc = null; _docTs = 0; _docError = null;
+  _doc = null; _docTs = 0; _docError = null; _uiLastSeen = null;
   for (const k of Object.keys(_cache)) delete _cache[k];
 }
 
@@ -216,6 +254,9 @@ module.exports = {
   record,
   snapshot,
   appliedDoc,
+  noteUiEvent,
+  uiActive,
+  UI_TIMEOUT_MS,
   _resetForTests,
   recordReading,
   buildSlaveRows,

@@ -173,3 +173,69 @@ describe('the applied-doc cache is in memory, not the SD-backed store', () => {
     assert.equal(buildSlaveRows(r.doc, {}).available, false);
   });
 });
+
+describe('the row builder is gated on someone actually watching', () => {
+  const { noteUiEvent, uiActive, _resetForTests: reset } = require('../../src/diagnostics/slave-table');
+
+  test('unknown presence means inactive - fail towards doing no work', () => {
+    reset();
+    assert.equal(uiActive(1000), false);
+  });
+
+  test('open and heartbeat mark active, close marks inactive immediately', () => {
+    reset();
+    noteUiEvent('open', 1000);
+    assert.equal(uiActive(1000), true);
+    noteUiEvent('heartbeat', 10000);
+    assert.equal(uiActive(14000), true, 'still inside the window');
+    noteUiEvent('close', 15000);
+    assert.equal(uiActive(15000), false);
+  });
+
+  test('presence expires if the heartbeat stops', () => {
+    // A browser killed without a close event must not pin the builder on.
+    reset();
+    noteUiEvent('open', 0);
+    assert.equal(uiActive(15000), true, 'exactly on the boundary');
+    assert.equal(uiActive(15001), false);
+  });
+});
+
+describe('the gated builder does no work with the page closed', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const cs = require('../../src/config-service/node-red');
+
+  const runBuilder = (now) => {
+    const flows = JSON.parse(fs.readFileSync(
+      path.join(__dirname, '..', '..', 'flows', 'flows_BBT.json'), 'utf8'));
+    const n = flows.find((x) => x.id === '2aa9ec351622e3e9');
+    let reads = 0;
+    const svc = Object.assign({}, cs, {
+      createStore: () => { reads += 1; return { readDomain: () => ({ doc: { modbus: { slaves: [
+        { slave_id: 'sl01', unit_address: 3, channels: 1, label: 'A', registers: { temp_base_addr: 3 } }] } } }) }; },
+    });
+    let status = null;
+    const out = new Function('msg', 'node', 'global', 'flow', 'context', n.func)(
+      {}, { status(s) { status = s; } },
+      { get: (k) => (k === 'busductConfigService' ? svc : undefined) },
+      { get() {}, set() {} }, { get() {}, set() {} });
+    return { out, status, reads };
+  };
+
+  test('page closed: returns nothing, reads no config, builds no rows', () => {
+    cs.diagTable._resetForTests();
+    const r = runBuilder(1000);
+    assert.equal(r.out, null);
+    assert.equal(r.reads, 0, 'the config store must not be touched');
+    assert.match(r.status.text, /idle/);
+  });
+
+  test('page open: builds normally again', () => {
+    cs.diagTable._resetForTests();
+    cs.diagTable.noteUiEvent('open', Date.now());
+    const r = runBuilder(Date.now());
+    assert.ok(r.out && r.out.payload.RecipDetails.length === 1);
+    assert.match(r.status.text, /1 channels/);
+  });
+});
