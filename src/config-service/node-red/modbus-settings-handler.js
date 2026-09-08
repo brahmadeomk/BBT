@@ -512,7 +512,20 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
     // applied configuration silently proposes deleting everything absent from it.
     const inService = current.modbus.slaves.length;
     const inTable = newSlaves.length;
-    const names = missingJoints.map((j) => j.joint_id).join(', ');
+    // Name the SLAVE, not just the joint. Three plausible causes for a slave
+    // going missing from the rendered table were tested and falsified on
+    // 2026-09-08 (duplicate addresses - readDomain validates; a missing
+    // `channels` field - DEFAULTS.channels is 4; the same address on two buses -
+    // that has its own guard, which fires first). Identifying the joint alone
+    // does not say WHICH commissioned slave the table failed to render, which is
+    // the fact needed to diagnose it, so print that instead of guessing again.
+    const slaveById = new Map(current.modbus.slaves.map((s) => [s.slave_id, s]));
+    const names = missingJoints.map((j) => {
+      const s = slaveById.get(j.slave_id);
+      return s
+        ? `${j.joint_id} (slave ${j.slave_id}, unit ${s.unit_address} on ${s.bus_id || 'bus1'}, ${s.channels ?? '?'} ch)`
+        : `${j.joint_id} (slave ${j.slave_id} - NOT in the applied config either)`;
+    }).join('; ');
     const drift = inTable < inService
       ? ` This table has ${inTable} slave(s) but ${inService} are in service, so it looks out of date - press RELOAD to load the applied configuration, then re-apply.`
       : '';

@@ -655,6 +655,11 @@ describe('an out-of-date table is diagnosed, not just refused (2026-09-08)', () 
     assert.match(result.msg.payload.error, /in service/i, 'states the discrepancy');
     assert.match(result.msg.payload.error, /joint table can look empty/i,
       'because the operator checked the joint table and saw nothing');
+    // Name the SLAVE, not just the joint. Which commissioned slave the table
+    // failed to render is the fact needed to diagnose it, and naming only the
+    // joint sent three separate hypotheses down the wrong path on 2026-09-08.
+    assert.match(result.msg.payload.error, /slave sl\w+/, 'names the slave_id');
+    assert.match(result.msg.payload.error, /unit \d+ on bus\d/, 'and its address and bus');
   });
 
   test('RELOAD ignores both the posted table and the saved draft', () => {

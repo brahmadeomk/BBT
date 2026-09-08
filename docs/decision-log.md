@@ -6873,3 +6873,40 @@ Both were caught by the test failing rather than passing vacuously, which is the
 difference from the earlier cases in this project where a fixture silently missed
 its target. **The live case was 2 rows against 12 joints — a fixture has to
 reproduce the shape, not just the direction.**
+
+### The slave that vanishes from the table — three hypotheses tested, all wrong
+
+After the RELOAD fix the operator got a much narrower failure: the table now
+loads **12 slaves but 13 are in service**, and the one missing is mapped to J49.
+So `stateFromApplied` renders every applied slave except one.
+
+Three mechanisms were proposed and **each was falsified by reproducing it**:
+
+| Hypothesis | Why it fails |
+|---|---|
+| Two applied slaves share a unit address, so grouping (`byAddress`, keyed on `unit_address` alone) collapses them | `readDomain` **validates**, so such a doc would not load at all — the table would be empty, not short by one |
+| A slave with no `channels` field renders zero rows (`for k < channels`) | `DEFAULTS.channels` is **4**, not undefined; a missing field yields four rows, not none |
+| The same address on two different buses — R4 keys on `(bus_id, unit_address)`, so it validates, while the UI groups on address alone | Real gap, but there is already a guard for it and it fires **first**, with its own message |
+
+That third one is worth keeping in mind — **R4 permits per-bus duplicates while the
+UI model requires panel-wide uniqueness** — but it is not this bug.
+
+**So the cause is still unknown, and the honest response is to stop proposing
+mechanisms.** Three wrong guesses in a row is the signal this session has already
+taught: reasoning about the shape of a system keeps producing plausible answers,
+and only measurement separates them.
+
+#### What was done instead: make the panel say which slave
+
+The error named the **joint** (J49) but not the **slave**, and which commissioned
+slave the table failed to render is exactly the fact needed to diagnose it. It now
+reads:
+
+```
+... still mapped to joint(s): J49 (slave sl07, unit 63 on bus2, 1 ch).
+```
+
+The slave_id, its unit address, its bus and its channel count are all in the
+message, so the next occurrence identifies itself instead of prompting a fourth
+hypothesis. If the slave is not in the applied config either, it says that too —
+a different fault entirely.
