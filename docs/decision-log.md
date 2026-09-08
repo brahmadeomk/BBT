@@ -6910,3 +6910,48 @@ The slave_id, its unit address, its bus and its channel count are all in the
 message, so the next occurrence identifies itself instead of prompting a fourth
 hypothesis. If the slave is not in the applied config either, it says that too —
 a different fault entirely.
+
+### R17 and revert-on-reject (user instructions 2026-09-08)
+
+Two changes, both from the Modbus Settings deadlock.
+
+#### R17: one unit address may not appear on two buses
+
+Modbus allows it — addresses are per-segment — and **R4 only requires
+`(bus_id, unit_address)` to be unique**, which is why such a document validates.
+The *panel* cannot represent it: the surviving legacy decode keys
+`sensorData[<unit_address>]` by address alone, the diagnostics reading cache keys
+`<unit>:<channel>`, ProcessLogic matches on unit address, and the Modbus Settings
+table groups rows by address with no bus in the key. Two slaves sharing an
+address collapse into one everywhere downstream. A UI pre-check existed; the
+validator did not enforce it, so a remote push or a hand-edited file could
+introduce what the UI forbids.
+
+**Enforced only when applying.** `readDomain` treats an invalid document as
+absent and falls through to the LKG snapshot — so an unconditional new rule could
+take a running panel's entire configuration away, no polling and no alarms, to
+punish a commissioning mistake. Verified both directions: a panel already
+carrying the collision still loads its config, while a new apply of the same
+shape is refused naming both buses and both slaves. `applyIfValid` now passes
+`applying: true`, which is the discriminator any future rule of this kind should
+use.
+
+R4 stays unconditional for same-bus duplicates — panel-wide uniqueness implies
+it, but gating R4 would have weakened an existing check.
+
+#### A rejected apply reverts the table
+
+*"Reject new changes and reload automatically once so the user sees what system
+is using actively."* The rejected rows used to be echoed back, so the operator
+sat looking at a table that had **not** been applied while believing it might
+have been — the confusion that started this whole thread. On a fire-safety panel
+the displayed configuration should always be the one in service.
+
+The draft is replaced too, not just the returned payload: `draft: null` would
+leave the rejected rows persisted and a page refresh would bring them straight
+back.
+
+**The trade-off is real and is stated in the error rather than left to be
+discovered**: the edits are discarded, so a typo in one field costs the whole
+edit. That is the deliberate choice — a table that always shows what is running
+is worth more on a safety system than preserving an edit that was refused.

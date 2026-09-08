@@ -66,7 +66,9 @@ across all of them.**
 
 - **Edge validation rules R1–R16** (`cfg/modbus` + `cfg/joints`, in
   `config/schemas/busduct_modbus_joint_config.schema.json`; R16 = RS-485
-  bus loading, added 2026-07-24 for the 110-device target) and **A1–A10**
+  bus loading, added 2026-07-24 for the 110-device target; **R17 = one
+  unit address may not appear on two buses**, added 2026-09-08 — enforced
+  only when APPLYING, so a config already in service keeps loading) and **A1–A10**
   (`cfg/alarms`, in `config/schemas/busduct_alarms_config.schema.json`)
   are mandatory. Every rule needs at least one passing and one failing
   unit test. Do not relax or bypass a rule without explicit instruction.

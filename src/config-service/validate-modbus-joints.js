@@ -361,6 +361,42 @@ function validateModbusJoints(doc, context = {}) {
     }
   }
 
+  // R17: one unit address may not appear on two different buses.
+  //
+  // Modbus itself allows it - addresses are per-segment - and R4 only requires
+  // (bus_id, unit_address) to be unique, which is why a doc like this validates.
+  // The PANEL cannot represent it: the surviving legacy decode keys
+  // `sensorData[<unit_address>]` by address alone, the diagnostics reading cache
+  // keys `<unit>:<channel>`, ProcessLogic matches on unit address, and the
+  // Modbus Settings table groups its rows by address with no bus in the key. Two
+  // slaves sharing an address collapse into one everywhere downstream.
+  //
+  // ENFORCED ONLY WHEN APPLYING (user instruction 2026-09-08). A config already
+  // in service that violates this must keep loading: `readDomain` treats an
+  // invalid document as absent and falls through to the LKG snapshot, so making
+  // this unconditional could take a panel's whole configuration away - no
+  // polling, no alarms - on a fire-safety monitor, to fix a commissioning
+  // mistake. New configs cannot introduce it; existing ones keep running until
+  // someone corrects them.
+  if (context.applying) {
+    const busByAddress = new Map();
+    for (const slave of slaves) {
+      const ua = slave.unit_address;
+      const bus = slave.bus_id;
+      if (busByAddress.has(ua) && busByAddress.get(ua).bus !== bus) {
+        const first = busByAddress.get(ua);
+        errors.push(
+          err(
+            'R17',
+            `unit_address ${ua} is used on '${first.bus}' (slave '${first.slave_id}') and '${bus}' (slave '${slave.slave_id}') - addresses must be unique across the whole panel`
+          )
+        );
+      } else if (!busByAddress.has(ua)) {
+        busByAddress.set(ua, { bus, slave_id: slave.slave_id });
+      }
+    }
+  }
+
   // R11: version monotonicity
   if (context.appliedVersions) {
     for (const domain of ['modbus', 'joints']) {

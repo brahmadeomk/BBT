@@ -140,7 +140,12 @@ class ConfigStore {
       versionContext = { appliedVersions: currentDoc?.config_domain_versions };
     }
 
-    const result = this.validators[domain](newDoc, { ...versionContext, ...context });
+    // `applying: true` distinguishes an APPLY from the bare validation readDomain
+    // runs. Rules that must not retroactively invalidate a config already in
+    // service key off this - R17 (panel-wide unit-address uniqueness) is the
+    // first: readDomain treats an invalid document as absent, so an
+    // unconditional new rule could take a running panel's configuration away.
+    const result = this.validators[domain](newDoc, { applying: true, ...versionContext, ...context });
 
     const auditBase = {
       ts: new Date().toISOString(),

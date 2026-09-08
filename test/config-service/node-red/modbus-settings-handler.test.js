@@ -677,3 +677,98 @@ describe('an out-of-date table is diagnosed, not just refused (2026-09-08)', () 
     assert.equal(result.msg.payload.slaves.length, applied.slaves.length);
   });
 });
+
+describe('a rejected apply reverts the table (user instruction 2026-09-08)', () => {
+  test('the table comes back as the applied config, not the rejected edits', () => {
+    // "reject new changes and reload automatically once so the user sees what
+    // system is using actively". Previously the rejected rows were echoed back,
+    // so the operator looked at a table that had NOT been applied.
+    const store = freshStore();
+    seedModbusJoints(store);
+    const applied = loadState(store);
+    const bad = applied.slaves.map((r) => ({ ...r, label: '' })); // fails "missing sensor name"
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'apply', slaves: bad, bus: applied.bus } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.ok(result.msg.payload.error, 'still rejected');
+    assert.equal(result.msg.payload.reverted, true);
+    assert.deepEqual(
+      result.msg.payload.slaves.map((r) => r.label),
+      applied.slaves.map((r) => r.label),
+      'the applied labels are back, not the blanked ones'
+    );
+  });
+
+  test('the discarded edits are stated, not left to be discovered', () => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const applied = loadState(store);
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'apply', slaves: applied.slaves.map((r) => ({ ...r, label: '' })), bus: applied.bus } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.match(result.msg.payload.error, /Nothing was applied/);
+    assert.match(result.msg.payload.error, /discarded/);
+  });
+
+  test('the persisted draft is replaced too', () => {
+    // draft:null would leave the rejected rows stored, and a page refresh would
+    // bring them straight back - the revert has to reach the draft as well.
+    const store = freshStore();
+    seedModbusJoints(store);
+    const applied = loadState(store);
+    const result = handleModbusSettingsMessage(
+      { payload: { action: 'apply', slaves: applied.slaves.map((r) => ({ ...r, label: '' })), bus: applied.bus } },
+      { store, legacySlaveList: legacySlaveList() }
+    );
+    assert.ok(result.draft, 'a draft is returned so the wrapper overwrites the stored one');
+    assert.deepEqual(result.draft.slaves.map((r) => r.label), applied.slaves.map((r) => r.label));
+  });
+});
+
+describe('R17: one unit address may not appear on two buses', () => {
+  const { validateModbusJoints: v } = require('../../../src/config-service/validate-modbus-joints');
+  const bus = (id, port) => ({ bus_id: id, type: 'rtu', port, baud: 9600, parity: 'N', stop_bits: 1, timeout_ms: 500, retries: 2, inter_frame_ms: 10 });
+  const sl = (id, ua, b) => ({ slave_id: id, bus_id: b, unit_address: ua, model: 'LEGACY-1CH', channels: 1, label: 's' + id,
+    registers: { function_code: 3, temp_base_addr: 3, temp_word_count: 1, temp_scale: 0.01 }, poll_interval_s: 30 });
+  const doc = () => ({
+    config_domain_versions: { modbus: 1, joints: 1 },
+    modbus: { buses: [bus('bus1', '/dev/a'), bus('bus2', '/dev/b')], slaves: [sl('sl01', 61, 'bus1'), sl('sl02', 61, 'bus2')] },
+    zones: [{ zone_id: 'z1', name: 'Zone1' }],
+    joints: [{ joint_id: 'J01', slave_id: 'sl01', channel: 1, zone_id: 'z1', enabled: true, threshold_profile: 'default' }],
+  });
+
+  test('rejected when applying, naming both buses and both slaves', () => {
+    const r = v(doc(), { applying: true });
+    const e = r.errors.find((x) => x.rule === 'R17');
+    assert.ok(e, 'R17 must fire');
+    assert.match(e.message, /bus1/);
+    assert.match(e.message, /bus2/);
+    assert.match(e.message, /sl01/);
+    assert.match(e.message, /sl02/);
+  });
+
+  test('NOT enforced on a bare read, so a panel already in service keeps its config', () => {
+    // readDomain treats an invalid document as absent and falls through to the
+    // LKG snapshot. An unconditional rule could take a running panel's whole
+    // configuration away - no polling, no alarms - to fix a commissioning
+    // mistake. New configs cannot introduce it; existing ones keep running.
+    const r = v(doc(), {});
+    assert.ok(!r.errors.some((x) => x.rule === 'R17'), 'must not fire without applying');
+  });
+
+  test('the same address on ONE bus is still R4, always', () => {
+    const d = doc();
+    d.modbus.slaves[1].bus_id = 'bus1';
+    for (const ctx of [{}, { applying: true }]) {
+      assert.ok(v(d, ctx).errors.some((x) => x.rule === 'R4'), 'R4 is unconditional');
+    }
+  });
+
+  test('distinct addresses across buses are fine', () => {
+    const d = doc();
+    d.modbus.slaves[1].unit_address = 62;
+    assert.ok(!v(d, { applying: true }).errors.some((x) => x.rule === 'R17'));
+  });
+});

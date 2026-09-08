@@ -398,7 +398,36 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
   const rows = state.slaves;
   const buses = normaliseBuses(state);
   const bus = buses[0];
-  const fail = (error) => ({ msg: withPayload(msg, { slaves: rows, buses, bus, error, action: 'apply' }), draft: null });
+  /**
+   * A rejected apply REVERTS the table to the applied configuration and says so
+   * (user instruction 2026-09-08: "reject new changes and reload automatically
+   * once so the user sees what system is using actively").
+   *
+   * WAS: the rejected rows were echoed back, so the operator sat looking at a
+   * table that had NOT been applied while believing it might have been - the
+   * confusion that started this. On a fire-safety panel the displayed
+   * configuration should always be the one in service.
+   *
+   * The trade-off is deliberate and worth stating: **the edits are discarded**,
+   * so a typo in one field costs the whole edit. The error text says so rather
+   * than letting the operator discover it. The draft is replaced too - returning
+   * `draft: null` would leave the rejected rows persisted, and a page refresh
+   * would bring them straight back.
+   */
+  const fail = (error) => {
+    const applied = stateFromApplied(store, legacySlaveList);
+    return {
+      msg: withPayload(msg, {
+        slaves: applied.slaves,
+        buses: applied.buses,
+        bus: applied.buses[0],
+        error: `${error}\n\nNothing was applied. The table has been reloaded from the configuration currently in service, so your edits were discarded.`,
+        action: 'apply',
+        reverted: true,
+      }),
+      draft: applied,
+    };
+  };
 
   if (rows.length === 0) return fail('At least one slave is required');
 
