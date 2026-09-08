@@ -118,14 +118,24 @@ describe('flows_BBT.json — bus2 alarm generation', () => {
   });
 
   test('the Diag status column expires instead of freezing on its last value', () => {
-    // global.Status is written only when a frame arrives, so a device that
-    // stopped being polled would keep reading "Connected" indefinitely — which
-    // is exactly what a downed segment looks like on the Diagnostics page.
+    // A device that stopped being polled must not keep reading "Connected" —
+    // that is exactly what a downed segment looks like on the Diagnostics page.
+    // The expiry moved into src/diagnostics/slave-table.js on 2026-09-08 when
+    // the table was cut over to the decoded readings; the property is the same
+    // and its unit tests live beside the module. What matters here is that the
+    // flow still routes through it.
     const sink = byId.get('8324c8bf9d9f9126');
     assert.match(sink.func, /statusTs\[sID\] = Date\.now\(\);/, 'each status write is stamped');
-    assert.match(sink.func, /global\.set\('StatusTs', statusTs\);/);
+
     const builder = byId.get('2aa9ec351622e3e9');
-    assert.match(builder.func, /return 'No Data';/, 'a stale entry reads No Data');
-    assert.doesNotMatch(builder.func, /Status:global\.get\('Status\[/, 'no unexpired raw read');
+    // Strip comments first. The builder's comment BLOCK names the legacy globals
+    // it replaced, so a naive search finds them and passes/fails on prose. This
+    // exact mistake has been made four times in this project - assert on code.
+    const code = builder.func.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.match(code, /diagTable\.buildSlaveRows\(/, 'rows come from the decoded readings');
+    assert.doesNotMatch(code, /global\.get\(\s*['"]Status\[/, 'no legacy Status read');
+    assert.doesNotMatch(code, /sensorData/, 'no legacy sensorData read');
+    assert.doesNotMatch(code, /parameterName|sregisterAddress|slaveLength/,
+      'attributes come from the applied config, not legacy globals');
   });
 });

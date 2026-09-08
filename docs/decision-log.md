@@ -6367,3 +6367,75 @@ history rather than guessing.
 
 **Recovery**: `git revert` this commit, or re-import the branch nodes from the
 previous flow revision. Nothing else references them.
+
+### Diagnostics table cut over to the new decode path (2026-09-08)
+
+User request: *"link debug window slave data connectivity and data view table to
+data coming from Scale Nano Reading output. Other slave attributes can be taken
+from Modbus settings table... We want to separate from legacy system."*
+
+**Before**, every field came from the legacy chain: `parameterName{i}` /
+`sID{i}` / `sregisterAddress{i}` for attributes, `sensorData[sID][addr]` for the
+value, `Status[sID]` + `StatusTs` for connectivity — all written by the decode
+branches hanging off `parameterForLoop`. So the operator's diagnostic view was
+reporting on a pipeline that no longer decides anything: alarms, the historian,
+the BMS image and the cloud all read `Scale Nano Reading`. **Two independent
+representations of the same measurement, and the one on screen was the one
+nothing else used.**
+
+**After**: values and connectivity from the decoded readings; attributes from the
+applied `cfg/modbus` document — the same document Modbus Settings edits,
+ProcessLogic matches against and the alarm sweep clears against.
+
+| Piece | Where |
+|---|---|
+| `recordReading` / `buildSlaveRows` (pure) | `src/diagnostics/slave-table.js`, on `busductConfigService.diagTable` |
+| Tap on `Scale Nano Reading` output | `link out` `d1a91e50c0000001` → `link in` `…02` (additive, Slice 4 pattern) |
+| Live cache | `Diag Reading Cache` `d1a91e50c0000003` |
+| Row builder | `2aa9ec351622e3e9`, rewritten as a thin call |
+| Dashboard template | **unchanged** — field names `Name/ID/Add/Data/Status` preserved |
+
+Verified end to end against the real node bodies: two readings in, three rows out
+(`Riser A` Connected 31.4, `MULTI ch1` **No Data**, `MULTI ch2` Connected 36.1),
+node status *"3 channels, 2 connected"*.
+
+#### Three decisions worth recording
+
+**Rows come from the CONFIG, not from traffic.** A commissioned channel that has
+never reported appears as "No Data" — precisely the case an engineer opens this
+page to find. Deriving rows from readings would make a dead device *vanish* from
+the table rather than show up as dead, which is this project's recurring failure
+shape.
+
+**The cache is FLOW context, not a global.** The cache node and the builder share
+tab `14fbe87aa2a163e8`, so flow scope reaches both, and flow context is
+memory-only. A global would land in the **default** store — localfilesystem on
+these panels — putting a write on the SD card for every reading, which is exactly
+what the historian investigation was about.
+
+**A stale row keeps its value but loses its status.** `Status` becomes "No Data"
+past `staleMs` while `Data` still shows the last reading plus `AgeSec`. An
+engineer wants the last value and its age; the status is what says not to trust
+it. `staleMs` (60 s default) **must exceed the bus sweep** — ~20 s at
+`inter_frame_ms` 250 with 71 slaves — which is why it is a parameter, not a
+constant.
+
+#### Not changed
+
+`global.Status` is still written, because **`Alert counter`, `Connection counter`
+and `testing` on the Alert system tab still read it**. `StatusTs` now has no
+reader — the expiry it existed for lives in the module. Left in place: it costs
+nothing and removing it is a separate cleanup.
+
+New fields `Ch`, `Bus`, `SlaveId`, `AgeSec` are in the payload but **not rendered**
+— the template was left alone to keep this change to one thing. A channel column
+would be worth adding now that a multi-channel module shows several rows with the
+same Slave ID.
+
+#### A note on the test that had to change
+
+`flows-bus2-alarms.test.js` pinned the old builder's inline expiry. Rewriting it
+exposed the trap again: the new builder's *comment block* names the legacy
+globals it replaced, so a naive `doesNotMatch` search hits prose and passes or
+fails on documentation. **The updated assertions strip comments first.** That is
+the fourth time in this project a check has matched a comment instead of code.
