@@ -227,6 +227,21 @@ event that may never arrive needs a deadline, not just a clearer.*
 
 **Thermography on the 1–2 joints currently at WATCH, against their neighbours.**
 
+**CORRECTION 2026-09-08.** An earlier version of this section claimed
+thermography would give the cover-to-joint transfer function. **It will not, if
+the survey is external.** An IR camera pointed at a closed busduct measures the
+*cover* — the same surface the sensor already measures. That validates the sensor
+and its mounting, which is worth having, but the conductor underneath is not in
+view.
+
+**Getting the transfer function requires seeing the joint itself**, which means
+one of: a survey during a planned shutdown with the cover off (safe, since the
+bus is dead — and the only option that needs no new hardware), an IR window
+fitted over a representative joint, or a contact sensor placed directly on the
+conductor during an outage and left in place to correlate against the cover
+sensor under load. **That should be planned into the next shutdown rather than
+expected from a live survey.**
+
 **Confirmed 2026-09-08: cover-to-joint has not been tested at all.** The two
 reference checks that day (Fluke at 131 °C, contact sensor within ±1 °C) both
 compare the sensor against another sensor on the same surface. They establish
@@ -239,9 +254,10 @@ It delivers three things at once and the opportunity disappears when the flags
 clear:
 
 1. **Validates the flag** — is the joint itself hotter, or only its cover?
-2. **Gives the cover-to-joint transfer function at two points** — a normal joint
-   and a warm one, so the *slope* is known and not just an offset. This is what
-   D3 needs.
+2. **Localises the hot spot** — is the warm patch centred on the joint, or is
+   something else (a cable, a neighbouring connection) heating that part of the
+   cover? A sensor reading a hot spot that is not the joint is measuring the
+   wrong thing entirely.
 3. **It is the closest available test of detection capability** without waiting
    for a real fault.
 

@@ -7085,3 +7085,44 @@ recorded yet:
 Recorded as a real result with its scope stated, in the same terms as the Fluke
 check — the failure mode this project keeps hitting is a true measurement quoted
 as evidence for a claim it does not actually support.
+
+### Correction: external thermography measures the cover, not the joint
+
+STATUS.md §6 claimed a thermography survey of the WATCH joints would yield the
+cover-to-joint transfer function. **That is wrong for an external survey**, and
+worth correcting before a site visit is spent on it.
+
+An IR camera pointed at a closed busduct measures the **cover** — the same
+surface the sensor already measures. Comparing the two validates the sensor, its
+mounting and the 0.25 mm gap, and it localises the hot spot; it does not see the
+conductor. The transfer function needs the joint itself in view.
+
+**What the live survey is still worth doing for:**
+
+1. **Independent confirmation of the flag** — is the flagged joint's cover really
+   warmer than its neighbours, measured by something that is not our sensor?
+2. **Localisation** — is the warm patch centred on the joint, or is a cable or
+   adjacent connection heating that part of the cover? A sensor reading a hot
+   spot that is not the joint is measuring the wrong thing.
+3. It is the closest available evidence of detection capability without a fault.
+
+**What the transfer function actually needs**, none of which is a live external
+survey: a shutdown survey with the cover off (safe on a dead bus, no new
+hardware); an IR window over a representative joint; or a contact sensor placed
+on the conductor during an outage and left to correlate against the cover sensor
+under load. Plan it into the next shutdown.
+
+**Practical notes for the live survey**, since the value depends on what gets
+recorded:
+
+- **Emissivity is the main error source.** Painted steel is ~0.9 and behaves;
+  bare or galvanised metal is low and variable, and readings on it are close to
+  meaningless. If the cover is unpainted, fix a patch of matt electrical tape at
+  the measurement spot and read that.
+- **Image flagged and healthy joints in the same frame** where possible. The
+  comparison is what matters and shared emissivity/angle errors largely cancel.
+- **Record the load current and ambient at the time.** ΔT scales with I²R; a
+  survey at 40 % load says little about the same joint at full load.
+- **Capture the panel's own reading at the same timestamp** — from the HMI or the
+  historian — so the pairs are directly comparable rather than approximately
+  contemporaneous.
