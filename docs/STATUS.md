@@ -5,7 +5,7 @@ position: what is running, what is built but unproven, what is blocked, and what
 needs a decision. Detail lives elsewhere (§7) — this is the summary that should
 be enough to hold a design conversation without reading the repository.
 
-**As of 2026-09-05.** Update this file when a slice changes state; it is only
+**As of 2026-09-07.** Update this file when a slice changes state; it is only
 useful if it is current.
 
 ---
@@ -105,39 +105,66 @@ semantics.
 
 ---
 
-## 3b. Open: HMI latency at 71 devices (2026-09-07)
+## 3b. HMI latency — root cause found and fixed (2026-09-07)
 
-Panel **ESBUSBBT06**, 71 devices, BMS tier 3 (1058 registers), all responding.
-Reported symptom: slow HMI button response. The Panel & Uplink tile shows
-**load 4.9 / 5.19 / 5.21 on 4 cores**, CPU 70.6 °C, uptime 53 m — RAM, disk and
-Wi-Fi all healthy. All three load averages agree, so this is steady state, not a
-boot transient; the machine is oversubscribed by roughly 30 % and every UI click
-queues behind it. **This is a Pi-side problem, not tablet rendering.**
+**The panel was sampling 297× faster than it was configured to.**
+`slaves[].poll_interval_s` (default 30 s) is set by the operator, shown on the
+dashboard and validated by R10 — but `compileNanoJob` never sends it. The only
+rate control reaching the Nano is `bus.inter_frame_ms`, applied as a delay
+between transactions while the firmware loops its read list continuously. There
+is no per-slave scheduling in the firmware at all.
 
-**Not yet established: which process owns the CPU.** Node-RED, InfluxDB, Grafana
-and any kiosk browser all run here, and Linux load counts uninterruptible disk
-wait, so an SD card shared by the historian, the outbox and the context store
-could produce this without the CPU being the constraint. 70.6 °C argues for real
-CPU work (an idle Pi 4 sits ~45–50 °C) but does not identify the owner. **No code
-has been changed** — measure first.
+Fixed on the 6-sensor panel by raising `inter_frame_ms` from 10 ms to 500 ms — a
+config change, no code:
 
-**Prime suspect if it is Node-RED**, visible in the source and scale-dependent:
-`buildOutputs` in the Alarm Manager runs on **every sensor reading** (both the
-joint and ambient outputs of ProcessLogic feed it) and unconditionally does
+| | Before | After |
+|---|---|---|
+| readings/min | 3558 | **304** |
+| node-red %CPU | 82 | **35** |
+| idle | 54-66 % | 82-84 % |
+| SD writes | 83 GB/day | ~7 GB/day |
 
-```js
-const currentHistoryJSON = JSON.stringify(historian);   // whole alarm history
+**Four candidates were eliminated by direct experiment before this one landed**,
+three of them mine: the Alarm Manager's history stringify (the history is capped
+at 100), the legacy InfluxDB feeder (already rate-limited), the historian write
+path (disabling it moved CPU by *nothing* — but by 86 % of the disk writes), and
+browser/editor websocket fan-out (4 points). Only the scan rate mattered.
+
+### What is still open
+
+- **~30 % of a core is a fixed cost**, independent of scan rate — the periodic
+  work (BMS refresh, blacklist tick, applied-joints publish, health nodes,
+  dashboard). Acceptable at 4 cores; it is the term that grows with panel size.
+- **The 71-device panel is NOT fixed, and must not be given the same value.**
+  `inter_frame_ms` is a *per-packet* delay, so 500 ms there means a **38 s
+  sweep** — past its configured interval, near the Diagnostics 60 s "No Data"
+  expiry, and pushing ambient age toward the 60 s `maxAgeSec` beyond which ΔT is
+  silently dropped. ~50-100 ms is its region. It also needs its own measurement:
+  at ifm=10 its sweep was already 3.3 s (~21 readings/s, *lower* than the small
+  panel's 59/s) yet its node-red was higher, so its cost is mostly the fixed
+  term.
+- **~8.7 ms of CPU per reading** is still far more than the ~57 µs the four
+  benchmarked function nodes account for. Harmless at 5 readings/s; it is why the
+  panel was ever in trouble, and it would return at higher device counts.
+
+### The proper fix (design chat — D7)
+
+Derive the delay from the configured interval in `compileNanoJob`:
+
+```
+perPacket = max(inter_frame_ms, (min(poll_interval_s) * 1000 / slaveCount) - txEstimate)
 ```
 
-purely to decide whether the history changed — which it does only on a raise or
-clear. Cost is O(history size) × O(readings per second), so it multiplies on
-**both** axes as a panel grows; at 9 joints with a short history it was
-invisible. The same function also writes the active-alarm map into the
-**persistent** context store on every reading. An O(1) revision counter would
-replace the stringify with identical semantics.
+**Compiler-only — no firmware reflash**; `comm[0]` is just microseconds between
+transactions, stored in a `long` with no firmware cap, and the 500 ms limit lives
+only in the JSON schema on a field named for the RS-485 inter-frame gap. Every
+fielded panel would be corrected by a config re-apply. The correct value is a
+function of slave count, which is precisely why no operator should be setting it
+by hand.
 
-Confirm before fixing: `top`/`vmstat` for the owner and for iowait, and the size
-of `busbartherm.alarmHistorian`.
+**And the target interval needs deciding, not defaulting.** 30 s interacts with
+`maxAgeSec` (60 s, beyond which ambient is rejected and ΔT silently stops) and
+with blacklist detection (3 sweeps). ~5-10 s looks right on the numbers.
 
 ---
 
@@ -151,6 +178,7 @@ of `busbartherm.alarmHistorian`.
 | D4 | **Cloud data pipeline** — IoT Rule → Timestream/S3, or alternative | Not started. Gates positional telemetry and any fleet view |
 | D5 | **OTA update approach** | A/B scheme depends on the Pi's OS/boot layout |
 | D6 | **HIRA sign-off** — `docs/hira-live-sensor-installation.md` | Needs a competent person and the duty holder. Currently a 9-revision draft; the electrical conclusion is settled (external cover mounting, intact enclosure), the open items are measurement questions |
+| D7 | **Enforce the poll interval in the compiler, and choose its value** — see §3b | `poll_interval_s` is validated, displayed and never actuated; the operator-facing knob that *does* work is a per-packet delay whose correct value depends on slave count. Compiler-only fix, no reflash. The interval itself interacts with `maxAgeSec` and blacklist detection, so it is a monitoring-policy decision, not a default |
 
 ---
 
@@ -161,6 +189,7 @@ of `busbartherm.alarmHistorian`.
 | **AWS policy push** — grant publish on `status/{c}/{s}/{p}` as a new active policy version | Site/AWS admin. Gates the LWT and confirming `device_health` receipt |
 | **Scale column → `0.01`** in Modbus Settings on the test panel | Site. Clears a standing warning and stops the config carrying a value the next reader would trust |
 | **Confirm what code version each deployment runs** | Site. Not currently known for the commercial building, and on 2026-09-05 an out-of-date *test* panel led to a field observation being read as current-code behaviour. Record the build before drawing conclusions from a screen |
+| **Apply the poll-interval fix to ESBUSBBT06 (71 devices)** — ~50-100 ms, not the 500 ms used on the small panel | Site. See §3b: the value does not transfer, and that panel needs its own before/after measurement |
 | **Re-check J09 / J19 after updating the test panel** | Site. Confirms the held plausibility-gate fix, and settles whether J09's zero is a sentinel or a fabricated default |
 | **Reference BACnet gateway hardware** | Procurement. Gates Slice 11's last acceptance criterion and the first real MGate CSV import |
 | **Thermography on the 1–2 flagged joints** | Site. See §6 — the single highest-value action available right now |
