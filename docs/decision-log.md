@@ -5980,3 +5980,40 @@ committed to, and why the answer there may be two panels rather than a different
 historian gave 936 running and 129 disabled. 336 is neither. The `influx` count
 query was not run in this capture, so the historian's state on this panel is not
 established — and `influxd` is still at 11 % CPU with 1.72 GB RSS.
+
+### Correction: closing the browser was not a fix — it removed the HMI
+
+Tested on the **on-board HMI**, and the response is largely unchanged after both
+the browser closure and `inter_frame_ms` 10 → 250.
+
+**The previous entry's framing was wrong and needs withdrawing.** It read the run
+queue falling from 6-9 to 1-2 as "the panel is no longer oversubscribed... that's
+your HMI symptom". On this panel **the on-board HMI *is* that Chromium**: it runs
+on the Pi's own display. Closing it did not remove a competing workload, it
+removed the thing under test. A measurement taken with the browser closed
+describes a configuration that never exists in service.
+
+So this panel has **two bottlenecks sharing four cores**, and they were never
+separated:
+
+- **server side** — node-red's single JS thread at ~106 %, which serves every
+  dashboard websocket message;
+- **client side** — Chromium at ~125 % across four processes, rendering a
+  node-red-dashboard page with 71-row tables on a Pi.
+
+Either alone could produce a sluggish HMI, and the numbers gathered so far cannot
+say which, because every capture had one or the other switched off.
+
+#### The two measurements that separate them
+
+1. **`top` with the on-board HMI running** — the real operating state, and the
+   only one worth tuning against. Wanted for both `node-red` and `chromium`,
+   now that the scan rate is 6× lower.
+2. **The same dashboard from a laptop or tablet on the LAN, with the on-board HMI
+   closed.** Snappy there and sluggish on-board ⇒ the client is the limit and the
+   levers are dashboard weight, update rate and Chromium's rendering flags — not
+   Node-RED at all. Sluggish in both ⇒ it is the server, and the fixed term is
+   the target.
+
+Neither has been done. Everything measured so far constrains the *machine*, not
+the *path a button press actually takes*.
