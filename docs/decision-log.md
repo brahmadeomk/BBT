@@ -7047,3 +7047,41 @@ Making the scan actually work per-segment means routing its job through the
 compiler rather than `paraRaw`, which is the same bus1-only legacy dependency
 that the Diagnostics cutover and the poll-interval work (D7) both ran into. Worth
 doing as one piece of work rather than three.
+
+### Second independent reference check: contact-type sensor, ±1 °C (2026-09-08)
+
+Reported: a separate bench setup compared the panel's readings against a
+**contact-type sensor**, agreeing to within **1 °C**.
+
+**What this adds to the Fluke check.** J10 at 131 °C against a Fluke 87V at
+132.0 °C tested one point, far above the working band, with a reference whose own
+combined uncertainty there is ±2.5–3 °C. This one is a different reference, a
+different technology, and — being a bench comparison rather than a spot check —
+presumably across the normal operating range. Two independent references
+agreeing is a materially stronger position on the **measurement chain** than
+either alone: sensor element, Modbus decode, sign handling, `0.01` scale, and the
+per-channel fan-out are all in the path being compared.
+
+**What it does not establish, and this matters for D3.** If both sensors sat on
+the same surface, the comparison validates the *sensor and its decode*. It says
+nothing about the **cover-to-joint transfer function** — how the temperature of
+the busduct cover, read through a 5 mm mounting plate across a 0.25 mm gap,
+relates to the temperature of the conductor joint underneath. That is the
+unknown D3 needs, and only a live thermography comparison against a loaded joint
+can supply it. A perfect sensor reading the wrong surface is still the wrong
+number for an alarm threshold.
+
+**Two things would make this citable rather than indicative**, and neither is
+recorded yet:
+
+1. **The temperature range covered.** ±1 °C at 30 °C and ±1 °C at 130 °C are very
+   different claims. The Fluke point is at 131 °C; if this bench run spans
+   ambient to ~60 °C, together they bracket the working band.
+2. **Whether the reference is genuinely independent.** A contact sensor of the
+   same class as the device under test can share a systematic bias, in which case
+   agreement demonstrates *consistency*, not *accuracy*. A calibrated reference,
+   or a different sensing technology, breaks that.
+
+Recorded as a real result with its scope stated, in the same terms as the Fluke
+check — the failure mode this project keeps hitting is a true measurement quoted
+as evidence for a claim it does not actually support.
