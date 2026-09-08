@@ -42,7 +42,7 @@ Two deployments exist:
 | 7 | Remote config channel | **Done**, live-verified end to end |
 | 8a | Security hardening (PINs from env, sudoers, kiosk) | **Done**, live-verified |
 | 9 | Device blacklisting + recovery | **Done**, live-verified |
-| 10 | Scale hardening (110 devices, 2 segments, ambient fallback) | **Done** except positional telemetry, which is built and **off by default** — no cloud consumer yet. **Re-opened then closed 2026-09-08**: HMI latency on both panels traced to two oversampling defects and fixed — node-red **106 % → ~19 %** at 71 devices, **82 % → 35 %** at 6. See §3b. Headroom at 110 is no longer in doubt; 240 is gated by schema caps, not CPU |
+| 10 | Scale hardening (110 devices, 2 segments, ambient fallback) | **Done** except positional telemetry, which is built and **off by default** — no cloud consumer yet. **Re-opened then closed 2026-09-08**: HMI latency on both panels traced to oversampling defects and fixed — node-red **106 % → ~23 %** at 71 devices, **82 % → 35 %** at 6. See §3b. Headroom at 110 is no longer in doubt; 240 is gated by schema caps, not CPU |
 | 11 | BMS integration (Modbus TCP + MGate CSV) | **Core done**, live on Modbus TCP. **Not verified against a real BACnet gateway** — needs the hardware |
 | 8b | Portability drill, pilot, rollout | **Not started** — deliberately last, so the pilot runs against the shipping configuration |
 
