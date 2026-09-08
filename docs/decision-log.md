@@ -6255,3 +6255,64 @@ no longer likely to be "two panels".
 headroom; whether the buttons respond is a separate observation, and the client
 side (Chromium rendering 71-row tables on the Pi) was never measured
 independently.
+
+### "Everything works with parameterForLoop disabled" — why that is not yet evidence
+
+Reported 2026-09-08. It may well be right, but the observation cannot distinguish
+working from frozen, and there is a safety consequence if it is wrong.
+
+**`sensorData` has exactly one source.** Every writer is a decode-branch
+conversion node (`/100`, `/10`, `/1000`, `pH Logic`, `Map`, `NTC`, …) — all
+downstream of `parameterForLoop`. Disable the loop and nothing writes it; the
+object simply **stops changing**, holding its last values.
+
+**A frozen `sensorData` is indistinguishable from a live one on screen.** The
+numbers are the last real readings, so they look plausible; nothing errors,
+nothing alarms, no node goes red. This is the same failure mode as J09 reading
+exactly 0, the ambient that answered a fresh in-band 0.0 °C for 20 minutes, and
+the stale blacklist exclude set. **In this codebase, "looks fine" has been wrong
+about stale data three times.**
+
+#### What still reads it
+
+| Reader | Tab | Enabled |
+|---|---|---|
+| **`SMS and Email for alerts`** | Alert system | **yes** |
+| `Alert counter` | Alert system | yes |
+| `2aa9ec351622e3e9`, `fd729d0af6e67cac`, `SetVal` | modbusMaster_V2 | yes |
+| legacy influx feeder `22f51bf8…` | modbusMaster_V2 | already disabled |
+
+`SMS and Email for alerts` evaluates **Low Critical / Low / High / High Critical**
+against the live value pulled straight out of `sensorData`, and sends **email and
+SMS**. Against a frozen value it can never cross a threshold again — so a joint
+that overheats *after* the freeze produces no legacy alert, silently and
+indefinitely.
+
+#### The part that makes this more than legacy cruft
+
+**The new alarm path has no absolute temperature threshold at all.**
+`busduct_alarms_config.schema.json` defines `deltaT` and `ror` thresholds plus
+`sensor_fault.sensor_error_above_c` — and that last one is the 300 °C
+plausibility bound, not an alarm level. So:
+
+> A joint can sit at a dangerous **absolute** temperature with a small ΔT and a
+> flat RoR — a panel-wide ambient rise, or a slow drift that has already
+> stabilised — and the Alarm Manager will say nothing.
+
+The legacy `SMS and Email for alerts` node is currently the **only** absolute-
+temperature alerting in the system. Deleting its data source without replacing
+that function would remove a safety net nobody has noticed is load-bearing.
+
+#### Two checks that settle it, both from the context sidebar
+
+1. **Is the legacy alert path configured?** Read flow `alertLength` on the Alert
+   system tab (`6bc810f3.e732e`). **0 ⇒ the node loops zero times and the whole
+   legacy chain really is dead code**, safe to delete.
+2. **Is `sensorData` actually frozen?** Read `global.sensorData` twice a minute
+   apart with the loop disabled. Identical values = frozen, which is what the
+   code says must happen; anything else means there is a writer this analysis
+   missed and the analysis is wrong.
+
+If (1) returns 0, delete the lot — the tick, `parameterForLoop`, all 21 branches
+and their conversion nodes — and **raise the absolute-threshold gap as an A-rule**
+rather than losing the capability by accident.
