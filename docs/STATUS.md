@@ -119,13 +119,22 @@ places: **work driven at a rate unrelated to the rate the data changes.**
 | Panel | Before | After |
 |---|---|---|
 | ESBUSBBT04 (6 sensors) | 82 % | **35 %** |
-| ESBUSBBT06 (71 sensors) | 106 % | **~19 %** |
+| ESBUSBBT06 (71 sensors) | 106 % | **~23 %** |
 
 **The two panels were limited by different halves.** The small one had a fast
 sweep, so its cost was per-reading and the scan fix transformed it. The large one
 already swept in 3.3 s, so its cost was the timer-driven dispatcher, which scales
 with sensor count and ignores the scan rate — the scan fix moved it by nothing.
 Same code, opposite bottlenecks.
+
+A third fix followed on the same day: the Diagnostics table was cut over from the
+legacy `sensorData` globals to the decoded readings plus the applied
+`cfg/modbus` document. That briefly regressed node-red to 53 % by caching the
+config in **node context** — which uses `contextStorage.default`, localfilesystem
+on these panels, so a ~100 KB document was read off the SD card every second.
+Moving it to module scope restored 23.4 %. **The rule: in this deployment
+"context" means the SD card unless a store is named** — node, flow and global
+scope are all the same store, and module scope is the only free memory.
 
 **Four candidates were eliminated by direct experiment first**, three of them
 mine: the Alarm Manager's history stringify (capped at 100), the legacy InfluxDB

@@ -6531,3 +6531,51 @@ deployment **"context" means the SD card unless a store is named**. Node, flow a
 global scope are all the same store. Module scope is the only free memory, which
 is why the blacklist tracker, the BMS service and now both diagnostics caches
 live there.
+
+### Confirmed: both symptoms resolved (5-sample steady state)
+
+`top -b -n 5 -d 5`, PID 1949411:
+
+| | Before the fix | Now |
+|---|---|---|
+| RSS drift | 24.0 MB/s | **0.067 MB/s** across the first 15 s |
+| node-red %CPU | ~53 | **23.4** (TIME+ 4.67 s over 20 s — cross-checks the 24.1 % sample mean) |
+
+The last sample steps RSS 34 MB in one interval and then the run ends; that is a
+GC growth step, not a resumption of the climb — the four samples before it are
+flat to within 1 MB. **The per-second document deserialisation was the whole of
+it**, for both the CPU and the allocation rate.
+
+Full arc on ESBUSBBT06:
+
+| Step | node-red |
+|---|---|
+| baseline | 106 % |
+| dispatcher routing (21 wires → 1) | 67.8 % |
+| decode tick 0.1 s → 2 s | 18.8 % |
+| **diagnostics cutover — my regression** | 53 % |
+| applied-doc cache moved to module scope | **23.4 %** |
+
+**4.5× lower than baseline**, with the panel at ~70-77 % idle.
+
+#### What the residual ~4-5 points above 18.8 % is
+
+The row builder runs on a 1 s tick and constructs 71+ row objects each time. That
+is the honest cost of the new table, and it is bounded and understood rather than
+mysterious.
+
+**There is an easy further saving available, not taken.** `function 12` already
+gates the stream on whether anyone has the Diagnostics page open ("UI Active -
+Data ON/OFF") — but it sits *downstream* of the builder, so the rows are built
+every second whether or not anyone is looking. Moving that gate upstream of the
+builder would drop the cost to near zero when the page is closed. Left alone
+because 23.4 % on four cores is not a problem, and this session has already shown
+what happens when a change goes in without a measurement to justify it.
+
+#### RSS baseline is higher than before and that is expected
+
+~600 MB now against ~300 MB earlier in the session. V8 does not readily return
+heap to the OS once its high-water mark rises, and the churn before this fix was
+substantial. It is **stable**, which is the property that matters, and a restart
+would show the true floor. Worth a glance after the next restart, not worth
+chasing now.
