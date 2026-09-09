@@ -7126,3 +7126,91 @@ recorded:
 - **Capture the panel's own reading at the same timestamp** — from the HMI or the
   historian — so the pairs are directly comparable rather than approximately
   contemporaneous.
+
+---
+
+## 2026-09-09 — Node-RED at 50 % of a core with nothing connected: the applied config was re-parsed and re-validated per message
+
+**Symptom.** ESBUSBBT06's HMI stayed sluggish after every fix so far. With the
+kiosk browser killed, no dashboard client connected, VNC costing 4.5 % and X
+4.4 %, Node-RED alone read **49.5 % of a core** — roughly double the 23.4 % the
+same panel measured after the diagnostics cache fix, with no code change in
+between.
+
+**The measurement that found it.** `/proc/<node-red pid>/io`:
+
+```
+rchar        1.98 MB/s     read syscalls
+read_bytes   0             physical reads from the SD card
+wchar        84.6 KB/s
+write_bytes  ~0.4 KB/s     (writeback timing; lifetime ratio says 92 % reach the card)
+```
+
+Two facts fall straight out. Both Nanos run 115200 8N1 — **11.5 KB/s per port,
+~23 KB/s for both, a hard physical ceiling** — so ~99 % of Node-RED's read
+traffic could not possibly be sensor data. And `read_bytes` never moved, so
+every one of those reads came from page cache: no flash wear, no disk wait, and
+therefore invisible in `vmstat`'s `wa` column or as run-queue pressure. The cost
+was pure CPU on the one thread that runs every function node.
+
+**A wrong turn, recorded because it was nearly acted on.** The obvious suspect
+was the localfilesystem context store — `global.json` is 466 KB, and 1.98 MB/s
+÷ 466 KB ≈ 4.25 whole-file reads per second, which fits suspiciously well. It is
+wrong: Node-RED's `localfilesystem` context module defaults `cache` to `true`
+(`runtime/lib/nodes/context/localfilesystem.js:153`,
+`config.hasOwnProperty('cache') ? config.cache : true`), and the panel's
+`contextStorage` sets no options, so `global` is served from RAM. A plausible
+arithmetic fit is not evidence; the source was.
+
+**Root cause.** `ConfigStore.readDomain()` does `existsSync` + `readFileSync` +
+`JSON.parse` + **a full R1-R17 validation pass**, with no caching, and three
+nodes called it on a per-message path: the **Alarm Manager** (once per KPI
+message), the **Blacklist Engine** (once per Nano frame), and **Scale Nano
+Reading** (which at least had a 10 s cache). At ~74 KB per document and
+~20-27 calls/s, that reconciles the whole 1.98 MB/s to a single file:
+`/var/busduct/cfg/modbus_joints.json`.
+
+Measured on a fixture scaled to the live panel (71 slaves, 200 joints — the
+schema's `joints` cap of 200 bites before 71x4=284, which is the same cap
+already flagged for the 240-sensor question):
+
+```
+document 73.8 KB     readDomain 464 us/call     readDomainCached 13.3 us/call     35x
+```
+
+**Fix: `ConfigStore.readDomainCached(domain)`**, memoised on the file's identity
+(`mtimeMs:size:inode`) rather than on a timer. A `stat` replaces a parse plus a
+full validation pass, and — the reason for identity over TTL — **an apply is
+visible on the very next message** instead of up to 10 s later, which on the
+alarm path is a race, not a latency. The LKG snapshot is part of the signature
+too, so a corrupt primary that is later repaired stops serving the fallback
+without a restart. The cache lives in **module** scope (the fourth time in this
+project that has been the right answer: `context`/`flow`/`global` all route
+through the localfilesystem store), and the returned document is **deep-frozen**
+— every current consumer treats it as read-only, checked, and freezing makes
+that a guarantee now that callers share one object.
+
+`Scale Nano Reading`'s 10 s cache is retired in favour of it. That cache was
+worse than it looked: besides delaying applies, it wrote the whole ~74 KB
+document into **flow** context, which the store then serialised to the SD card
+on every flush.
+
+**Honest bound on what this buys.** ~20-27 calls/s x ~451 us saved is ~1 % of a
+core on a dev machine, so roughly **6-15 % on a Pi** depending on how badly AJV's
+allocation behaviour scales down. That is a real improvement and it removes an
+I/O anomaly of two orders of magnitude — but it does **not** account for all of
+the 49.5 %. The remaining ~35-40 % is ordinary per-message flow work at ~20 msg/s
+and is a separate question. Predicted, not yet measured on the panel.
+
+**Guards.** `test/config-service/applied-cache.test.js` (memoisation, immediate
+invalidation on apply, same-size rewrite, deep freeze, LKG repair, absent
+document, two roots) and a `flows-integrity` test that fails if the Alarm
+Manager, Blacklist Engine or Scale Nano Reading regresses to the uncached call —
+the uncached form is the natural thing to reach for and its cost is invisible
+until a panel is large.
+
+**Method note.** The first benchmark run reported 464 us/call against a fixture
+that did not validate, so it was timing the reject path. It was caught by a
+`validates:` line printed before the timings — the same guard added to
+`tools/bench-hot-path.js` after it silently measured a never-invoked function.
+A benchmark must assert it is measuring the path it claims to measure.

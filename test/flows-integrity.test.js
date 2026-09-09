@@ -69,7 +69,10 @@ describe('Alarm Manager config sweep (2026-08-31)', () => {
       'the cleanup sweep must not READ the legacy draft global');
     assert.ok(cleanup.includes('sweepDecommissionedAlarms'),
       'it must use the library sweep');
-    assert.ok(cleanup.includes("readDomain('modbus_joints')"),
+    // Either accessor is fine here - what matters is that the SOURCE is the
+    // applied document. `readDomainCached` is the one to use on this path (it
+    // runs per message); see the hot-path test below, which pins that.
+    assert.match(cleanup, /readDomain(Cached)?\('modbus_joints'\)/,
       'which is fed from the applied cfg/modbus+joints document');
   });
 
@@ -424,6 +427,29 @@ describe('alarms raised against the applied configuration (2026-09-01)', () => {
     const block = fn.slice(fn.indexOf('APPLIED_JOINTS_KEY, "default"'));
     assert.match(block.slice(0, 300), /global\.get\(JOINT_MASTER_KEY\)/,
       'the draft must remain a fallback');
+  });
+
+  // Measured live on ESBUSBBT06 (2026-09-09): the Alarm Manager and the
+  // Blacklist Engine each called the UNCACHED readDomain once per message, so a
+  // 71-device panel re-parsed and re-ran the full R1-R17 validation over its
+  // whole commissioning document several times a second. Node-RED sat at ~50 %
+  // of a core with no dashboard client connected. This is a cheap guard against
+  // it coming back - the uncached form is easy to reach for and the cost is
+  // invisible until a panel is large.
+  test('no per-message node uses the uncached readDomain', () => {
+    const PER_MESSAGE = {
+      'de6fcc55794afd9e': 'Alarm Manager (runs per KPI message)',
+      'd9b1ac57e0f10002': 'Blacklist Engine (runs per Nano frame)',
+      '2390b9df3335021b': 'Scale Nano Reading (runs per Nano frame)',
+    };
+    for (const [id, why] of Object.entries(PER_MESSAGE)) {
+      const fn = byId(id).func;
+      // Checks the CALL, not a mention: the comments explaining the cache are
+      // worth keeping, and they name the uncached method.
+      assert.ok(!/\.readDomain\(/.test(fn),
+        `${why} must use readDomainCached - a parse + full validation per message`);
+      assert.match(fn, /\.readDomainCached\(/, `${why} must still read the applied doc`);
+    }
   });
 
   test('ProcessLogic never reads the config store itself', () => {

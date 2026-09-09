@@ -59,6 +59,48 @@ function readJsonIfExists(filePath) {
   }
 }
 
+/**
+ * Cheap identity of a file, for cache invalidation: one `stat`, no read, no
+ * parse, no validation. The atomic write path below is write-temp + rename, so
+ * an apply always changes the inode - a same-second, same-size rewrite cannot
+ * slip past this.
+ */
+function fileSignature(filePath) {
+  try {
+    const st = fs.statSync(filePath);
+    return `${st.mtimeMs}:${st.size}:${st.ino}`;
+  } catch {
+    return 'absent';
+  }
+}
+
+function deepFreeze(value) {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const k of Object.keys(value)) deepFreeze(value[k]);
+  }
+  return value;
+}
+
+/**
+ * MODULE scope, deliberately. Node-RED's `context`/`flow`/`global` all route
+ * through the configured context store, which on these panels is
+ * `localfilesystem`; a cache kept there would be the very cost it is meant to
+ * remove. Module scope is the only genuinely in-process memory available to a
+ * function node, and it survives a Deploy (the module stays `require`d) while
+ * being rebuilt on a restart - which is what we want, since a restart is also
+ * when the files may have been changed underneath us.
+ *
+ * Keyed by absolute domain path, so two stores with different roots (tests,
+ * a migration tool) never share an entry.
+ */
+const appliedCache = new Map();
+
+/** Test-only: drop every cached document. */
+function _resetAppliedCache() {
+  appliedCache.clear();
+}
+
 class ConfigStore {
   /**
    * @param {object} opts
@@ -96,6 +138,50 @@ class ConfigStore {
       return { doc: lkg, source: 'last-known-good' };
     }
     return { doc: null, source: 'none' };
+  }
+
+  /**
+   * `readDomain`, but memoised against the on-disk file identity.
+   *
+   * WHY THIS EXISTS (measured live on ESBUSBBT06, 2026-09-09). `readDomain`
+   * reads the file, `JSON.parse`s it and runs the FULL R1-R17 validation pass
+   * on every call. Two nodes were calling it on the hot path - the Alarm
+   * Manager once per KPI message and the Blacklist Engine once per Nano frame -
+   * so a 71-device panel re-parsed and re-validated its entire commissioning
+   * document several times a second, on the single thread that also runs every
+   * other function node. Node-RED sat at ~50 % of a core with no dashboard
+   * client connected at all, and `/proc/<pid>/io` showed ~2 MB/s of reads
+   * against serial ports physically incapable of delivering more than ~23 KB/s.
+   *
+   * The cost is real work, not I/O: `read_bytes` never moved, so every one of
+   * those reads was served from page cache. It was the parse and the validation
+   * burning the CPU.
+   *
+   * Correctness is preserved by invalidating on the file's identity rather than
+   * on a timer: a `stat` is orders of magnitude cheaper than parse + validate,
+   * and an apply is picked up on the very next message rather than after a TTL.
+   * The LKG snapshot is part of the signature because `readDomain` falls back
+   * to it - a corrupt primary that later gets repaired must not serve a stale
+   * fallback forever.
+   *
+   * The returned document is deep-frozen. Every current consumer treats it as
+   * read-only (checked), and freezing makes that a guarantee instead of a
+   * convention now that callers share one object.
+   *
+   * Use this for anything on a per-message path. Use `readDomain` where you
+   * specifically want an uncached read - `applyIfValid` does, since it is about
+   * to write.
+   */
+  readDomainCached(domain) {
+    const primaryPath = this._domainPath(domain);
+    const sig = `${fileSignature(primaryPath)}|${fileSignature(this._lkgPath(domain))}`;
+    const hit = appliedCache.get(primaryPath);
+    if (hit && hit.sig === sig) return hit.result;
+
+    const { doc, source } = this.readDomain(domain);
+    const result = Object.freeze({ doc: deepFreeze(doc), source });
+    appliedCache.set(primaryPath, { sig, result });
+    return result;
   }
 
   /** Currently applied config_domain_versions for a domain, or {} if nothing applied yet. */
@@ -171,4 +257,4 @@ class ConfigStore {
   }
 }
 
-module.exports = { ConfigStore, atomicWriteJson, readJsonIfExists };
+module.exports = { ConfigStore, atomicWriteJson, readJsonIfExists, _resetAppliedCache };
