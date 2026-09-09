@@ -606,6 +606,16 @@ source ~/.bashrc
 kiosk_cpu          # <- write this number down. It is the baseline.
 ```
 
+**Let a freshly-launched browser settle for three minutes before measuring.**
+Measured 45 s after launch on ESBUSBBT06, Chromium read 122-127 % and Node-RED
+70-76 %; the same panel's long-running kiosk read 62 % and 44 %. Nothing had
+changed — 45 s in, the browser is still parsing and laying out the page and the
+dashboard websocket is still replaying widget state, so the number is the
+startup transient, not the cost you are trying to reduce. Comparing two cases
+measured the same way is still valid, but the effect you are hunting can be
+buried under a transient twice its size, and the absolute figure cannot be
+compared with the baseline from Step 0.
+
 Back the script up before touching it:
 
 ```bash
@@ -658,13 +668,13 @@ No file edits; run each by hand and measure.
 # A: as it runs today
 /usr/bin/chromium --no-sandbox --disable-pinch --noerrdialogs --disable-infobars \
   --kiosk --force-device-scale-factor=1 http://127.0.0.1:1880/ui &
-sleep 45; kiosk_cpu
+sleep 180; kiosk_cpu
 pkill -f 'chromium.*--kiosk'; sleep 3
 
 # B: same, without the scale factor
 /usr/bin/chromium --no-sandbox --disable-pinch --noerrdialogs --disable-infobars \
   --kiosk http://127.0.0.1:1880/ui &
-sleep 45; kiosk_cpu
+sleep 180; kiosk_cpu
 pkill -f 'chromium.*--kiosk'; sleep 3
 ```
 
@@ -672,6 +682,13 @@ pkill -f 'chromium.*--kiosk'; sleep 3
 to read at the panel, set the display scale properly instead of forcing it in
 the browser — that gets both. If A and B are the same, the scale factor is not
 it: say so, and go to Step 3 without pretending otherwise.
+
+**Result on ESBUSBBT06 (2026-09-09): no effect.** A 122.4 % / B 126.5 % —
+B slightly *higher*, i.e. inside the noise of a 12-second sample. The flag was
+the hypothesis with a plausible mechanism (forcing a non-native scale makes the
+compositor rescale every frame, and with no GL acceleration that lands on the
+CPU), and it was wrong. It is kept in the script, since removing it changes the
+text size at the panel and buys nothing.
 
 #### Step 3 — dedicated profile and a RAM cache
 
@@ -681,7 +698,7 @@ mkdir -p /home/pi/.config/chromium-kiosk
   --user-data-dir=/home/pi/.config/chromium-kiosk \
   --disk-cache-dir=/dev/shm/chromium-cache --disk-cache-size=33554432 \
   http://127.0.0.1:1880/ui &
-sleep 45; kiosk_cpu
+sleep 180; kiosk_cpu
 ```
 
 The first run is slower — the profile and cache are cold. **Measure the second
@@ -699,7 +716,8 @@ pkill -f 'chromium.*--kiosk'; sleep 3
   --disable-default-apps --disable-extensions --disable-sync \
   --disable-session-crashed-bubble --no-first-run \
   http://127.0.0.1:1880/ui &
-sleep 45; kiosk_cpu; pgrep -c chromium     # process count should fall too
+sleep 180; kiosk_cpu
+pgrep -af chromium | grep -c -- '--type='   # helper count should fall too
 ```
 
 #### Step 5 — drop `--no-sandbox` (security, not speed)
@@ -720,7 +738,7 @@ Take §12b-bis, keeping whichever flags Steps 2–5 actually justified, then:
 
 ```bash
 sudo systemctl restart lightdm     # or reboot
-sleep 90; kiosk_cpu
+sleep 180; kiosk_cpu
 ```
 
 Revert at any point with `cp "$KIOSK.bak-<date>" "$KIOSK"`.
