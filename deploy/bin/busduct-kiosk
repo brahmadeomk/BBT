@@ -82,12 +82,27 @@ SCALE_ARG=""
 # A dedicated profile, NOT the default one. Chromium is single-instance per
 # profile, so with no --user-data-dir a desktop browser opened for a comparison
 # hands its URL to the running kiosk instead of starting its own process - which
-# invalidates any kiosk-vs-browser measurement (§12a-bis finding 2). It also
-# keeps the disk and GPU shader caches, which --incognito would throw away.
+# invalidates any kiosk-vs-browser measurement (§12a-bis finding 2).
 mkdir -p "$PROFILE"
+
+# --incognito is ON by default because it was MEASURED to help on these panels
+# (2026-09-09), which is the opposite of what §12a predicted. §12a counted the
+# lost disk and shader caches and ignored what the persistent profile costs on a
+# Pi: it lives on the SD card, and Chromium writes to it continuously (Cookies,
+# History, Favicons and the cache index are SQLite, plus session-restore state
+# and the dashboard's own localStorage). Small random writes are the worst case
+# for SD flash. A panel boots rarely and runs for months, so a one-off cold
+# cache at boot beats months of profile I/O.
+#
+# The cost is real but paid once per start: the first paint after a boot or a
+# respawn recompiles shaders. If a panel respawns often, fix the respawns.
+# Set BUSDUCT_KIOSK_INCOGNITO=0 to go back to a persisting profile.
+INCOGNITO_ARG="--incognito"
+[ "${BUSDUCT_KIOSK_INCOGNITO:-1}" = "0" ] && INCOGNITO_ARG=""
 
 "$CHROMIUM" \
   --kiosk \
+  $INCOGNITO_ARG \
   --user-data-dir="$PROFILE" \
   --disk-cache-dir=/dev/shm/chromium-cache --disk-cache-size=33554432 \
   --noerrdialogs --disable-infobars --disable-pinch \

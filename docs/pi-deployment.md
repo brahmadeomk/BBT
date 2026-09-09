@@ -411,7 +411,23 @@ which change the flow's behaviour:
 After re-importing this flow version, verify each dashboard gate denies
 access with no PIN set and admits with the correct PIN once configured.
 
-## 12. Making the kiosk light on resources
+## 12. The panel HMI (kiosk)
+
+> ### New panel? Do §12f and stop.
+>
+> **`§12f` is the standard build.** It installs a supervised kiosk that already
+> carries everything the rest of this section was written to discover — the lean
+> flag set, `--incognito`, the RAM disk cache, no `--no-sandbox`, no
+> `--force-device-scale-factor`, the splash dropped once the browser paints, and
+> `Restart=always` so the HMI cannot be exited onto the desktop. A new device
+> needs no tuning pass and no measurements.
+>
+> **§12a–§12e are for panels already in service** that were set up by hand
+> before §12f existed, and for diagnosing a panel that is slow *despite* §12f.
+> They record how each setting was arrived at, including the two occasions this
+> project reached a confident wrong answer. Also relevant on an existing panel:
+> **`inter_frame_ms`** is the single biggest lever on Node-RED's CPU and is not
+> a kiosk setting at all — see §12g.
 
 Observed live 2026-09-08: the HMI was noticeably faster in an ordinary Pi browser
 window than in kiosk mode. That is backwards — kiosk renders *less* than a
@@ -424,9 +440,30 @@ this project has repeatedly found the obvious explanation to be the wrong one.
 
 ### 12a. Two flags that cause almost every "kiosk is slow" case
 
-- **`--incognito`, or a throwaway `--user-data-dir`** — no disk cache and no GPU
-  shader cache, so every dashboard asset re-fetches and the compositor recompiles
-  shaders on each start.
+> **CORRECTION 2026-09-09 — the first bullet is wrong on these panels, and was
+> never measured.** `--incognito` was tried live and **improved** HMI
+> responsiveness. The reasoning below is sound in general and is why it was
+> written, but it weighs only one side: it counts the lost cache and ignores
+> what the persistent profile *costs* on a Raspberry Pi. The profile lives on
+> the SD card, and Chromium writes to it continuously — `Cookies`, `History`,
+> `Favicons` and the cache index are SQLite databases, plus session-restore
+> state and the dashboard's own `localStorage`. SD cards are poor at exactly
+> that kind of small random write. On a panel that boots rarely and then runs
+> for months, paying a one-off cold-cache cost at boot to avoid months of
+> profile I/O is the better trade, and the panel's own measurement says so.
+>
+> Keep the reasoning in mind for the *shader* cache specifically: the first
+> paint after a boot or a kiosk respawn is genuinely slower. If a panel
+> respawns often that cost is paid often — which is an argument for fixing the
+> respawns, not for the persistent profile.
+>
+> `--disable-gpu` (the second bullet) is untouched by this and remains a real
+> problem when present.
+
+- ~~**`--incognito`, or a throwaway `--user-data-dir`**~~ — see the correction
+  above. The original reasoning, kept because the shader-cache half still
+  applies: no disk cache and no GPU shader cache, so every dashboard asset
+  re-fetches and the compositor recompiles shaders on each start.
 - **`--disable-gpu`** (often with `--disable-software-rasterizer` or
   `--disable-gpu-compositing`) — all compositing falls to the CPU. On a Pi
   redrawing 70+ table rows that is a large hit, and it is a flag people add to
@@ -805,7 +842,12 @@ pkill -f 'chromium.*--kiosk'     # must come back within ~2 s
 sudo systemctl status busduct-kiosk
 ```
 
-**Three things the new launcher changes on purpose**, each reversible:
+**Four things the new launcher changes on purpose**, each reversible:
+
+- **`--incognito` is on.** Measured live 2026-09-09 to improve responsiveness —
+  the opposite of what §12a predicted, and the correction there explains why
+  (the persistent profile's SD-card writes cost more than the cached assets
+  save). `BUSDUCT_KIOSK_INCOGNITO=0` restores a persisting profile.
 
 - **`--no-sandbox` is gone.** The unit runs as `pi`, and that flag is almost
   always a workaround for running Chromium as root. It disables the renderer
@@ -835,6 +877,81 @@ browser's ~125 % CPU. Both need evaluating against the AngularJS dashboard on a
 real panel before they could be recommended. **And the strongest option remains
 the cheapest: a panel with no keyboard attached has no Alt+F4 and no VT switch
 to close in the first place.**
+
+### 12g. `inter_frame_ms` — the biggest lever, and it is not a kiosk setting
+
+Applies to **every** panel, new or existing, and it outweighs everything in §12.
+On a panel whose HMI is slow, check this **before** touching the browser.
+
+**The trap.** `poll_interval_s` is the number R10 validates and the Modbus
+Settings dashboard displays — and it **never reaches the Nano**.
+`compileNanoJob` emits `comm = [inter_frame_ms × 1000, baud, timeout_ms]` and
+nothing else. So the value that looks like the poll interval does nothing to the
+scan rate, and the value that actually sets it is presented as a link-layer
+timing detail. Setting `inter_frame_ms` to 20 ms on an 88-device panel pegged
+Node-RED's event loop at ~99 % of a core **with no dashboard client attached at
+all** (2026-09-09).
+
+Read the applied value, the resulting sweep and the R10 headroom:
+
+```bash
+sudo node -e '
+const D={poll_interval_s:30,inter_frame_ms:20,temp_word_count:1,channels:1,timeout_ms:1000,retries:2};
+const d=require("/var/busduct/cfg/modbus_joints.json");
+const m=d.modbus||d, slaves=m.slaves||[], buses=m.buses||[];
+const span=s=>{const w=s.registers?.temp_word_count??D.temp_word_count;const a=s.registers?.channel_addrs;
+  return (Array.isArray(a)&&a.length)?Math.max(...a)-Math.min(...a)+w:(s.channels??D.channels)*w;};
+const frame=(b,s)=>{const i=b.inter_frame_ms??D.inter_frame_ms;
+  return (b.type!=="rtu"||!b.baud)?i:i+(13+2*span(s))*(11/b.baud)*1000;};
+for(const b of buses){
+  const bs=slaves.filter(s=>s.bus_id===b.bus_id); if(!bs.length) continue;
+  const sum=bs.reduce((t,s)=>t+frame(b,s),0);
+  const total=sum+(b.timeout_ms??D.timeout_ms)*(b.retries??D.retries);
+  const minPoll=Math.min(...bs.map(s=>(s.poll_interval_s??D.poll_interval_s)*1000));
+  console.log(`[${b.bus_id}] inter_frame_ms=${b.inter_frame_ms} slaves=${bs.length} `+
+    `sweep=${(total/1000).toFixed(1)}s frames/s=${(1000/(sum/bs.length)).toFixed(1)} `+
+    `R10=${total>minPoll?"FAIL":Math.round((1-total/minPoll)*100)+"% headroom"}`);
+}'
+```
+
+**Choosing a value.** The per-frame cost is `inter_frame_ms + wire time`, and at
+9600 baud a 1-register read is ~17 ms on the wire — so 250 → 20 ms is ~7× the
+frame rate, not the ~12× the delay alone suggests. Node-RED's CPU scales with
+frames/s, so this number sets the panel's whole load.
+
+| devices | `inter_frame_ms` | sweep | verdict |
+|---|---|---|---|
+| 6 | 500 | ~3.1 s | fine |
+| 71 | 250 | ~21.0 s | fine, 30 % R10 headroom |
+| 88 | 250 | ~25.5 s | **15 % headroom — near the ceiling** |
+| 110 | 250 | ~31.4 s | **fails R10**; needs ≤ 237 ms or a longer poll interval |
+
+Faster than ~150 ms buys nothing physically: a busduct joint is a thermal mass,
+the RoR EMA runs on a 20-minute tau and ΔT persistence is in minutes. A 21 s
+sweep already gives ~60 samples per RoR window while clearing the constraints
+that matter — ambient `maxAgeSec` 60 s, blacklist detection 3 sweeps.
+
+**At ~90 devices on one bus you are near the wall**, and the fix is `bus2`, not a
+smaller delay: two Nanos on two ports halve the sweep and restore headroom
+(44 + 44 → 13.8 s, 54 %). See §5b. It does **not** cut CPU — two segments at
+3.7 frames/s each is 7.4 frames/s of per-message work.
+
+### 12h. Flow-side settings (come with the repo, no Pi change)
+
+These ship in `flows_BBT.json`, so an old panel gets them from a `git pull` plus
+a flow re-import (§6) — no configuration:
+
+- **The 1 Hz clock is gone.** Two `ui_text` "Date:" widgets fed by
+  `new Date().toLocaleString()` every second. Any push whose value is unchanged
+  costs a digest but no repaint; a clock changes every second *by construction*,
+  so an idle panel could never go static. Under VNC that was the whole cost —
+  the server re-encodes and ships a framebuffer region every second regardless.
+- **Six dashboard pushes moved 1 s → 10 s** (Alert list/table/target, download
+  button, "Modbus Last Update"). Their data changes on operator edit, not on a
+  timer. Sub-second dashboard pushes: ~9/s → 3/s.
+- The Diagnostics table is not built while its page is closed, its rows carry
+  ~4× fewer Angular watchers, and the audit viewers are capped at 20 rows
+  (§12d).
 
 ---
 

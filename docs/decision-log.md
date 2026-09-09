@@ -7271,3 +7271,50 @@ A benchmark must assert it is measuring the path it claims to measure.
   (`inter_frame_ms ≤ 237 ms`, less with multi-channel spans). `bus2` is built and
   live-verified but unused here; 44 + 44 gives 13.8 s and 54 % headroom. It does
   not cut CPU — two segments at 3.7 frames/s each is 7.4 frames/s of work.
+
+- **2026-09-09** — **`--incognito` improves HMI responsiveness on these panels,
+  which is the opposite of what the runbook predicted.** `docs/pi-deployment.md`
+  §12a listed it first among "two flags that cause almost every 'kiosk is slow'
+  case", on the reasoning that it discards the disk and GPU shader caches so
+  every asset re-fetches and shaders recompile on each start. That reasoning is
+  correct as far as it goes and it was never measured — it counts what the
+  persistent profile *saves* and not what it *costs*.
+
+  On a Pi the profile lives on the SD card, and Chromium writes to it
+  continuously: `Cookies`, `History`, `Favicons` and the cache index are SQLite
+  databases, plus session-restore state and the dashboard's own `localStorage`.
+  Small random writes are the worst case for SD flash — the same property that
+  drove the historian's write-path work and the `contextStorage.default`
+  findings. A panel boots rarely and then runs for months, so paying a one-off
+  cold-cache cost at start to avoid months of profile I/O is the better trade.
+
+  `--incognito` is now **on by default** in `deploy/bin/busduct-kiosk`
+  (`BUSDUCT_KIOSK_INCOGNITO=0` reverts). §12a carries the correction inline
+  rather than being rewritten, because the shader-cache half still applies: the
+  first paint after a boot or a respawn is genuinely slower, which is an
+  argument for keeping respawns rare, not for the persistent profile.
+
+  **This is the third time in this project that a confident mechanism turned out
+  to be the wrong one** — after the localfilesystem context store (a plausible
+  arithmetic fit that was not the cause) and the Nano firmware RAM theory (the
+  hang was the Pi's power supply). The pattern is the same each time: a
+  mechanism that is real, that would produce the observed symptom, and that was
+  reasoned to rather than measured. §12's own standing instruction - measure
+  `chromium` in `top` either side of every single change - exists because of it.
+
+- **2026-09-09** — **`docs/pi-deployment.md` §12 restructured so a new panel
+  needs no tuning pass.** §12f is now declared the standard build and the
+  section opens by saying so: it already carries the lean flag set,
+  `--incognito`, the RAM disk cache, no `--no-sandbox`, no
+  `--force-device-scale-factor` and `Restart=always`. §12a-§12e are re-framed as
+  material for panels already in service and for diagnosing a panel that is slow
+  despite §12f — they are kept in full rather than trimmed, because they record
+  how each value was arrived at and two of them record getting it wrong.
+
+  Two sections added for the installed base, which was the actual request -
+  making the improvements applicable to devices already in the field:
+  **§12g `inter_frame_ms`**, which is the largest single lever on Node-RED's CPU
+  and is not a kiosk setting at all (with the read-back command, the
+  device-count table and the trap that `poll_interval_s` never reaches the
+  Nano), and **§12h**, the flow-side changes that arrive with a `git pull` plus
+  a flow re-import and need no configuration.
