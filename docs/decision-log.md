@@ -7214,3 +7214,60 @@ that did not validate, so it was timing the reject path. It was caught by a
 `validates:` line printed before the timings — the same guard added to
 `tools/bench-hot-path.js` after it silently measured a never-invoked function.
 A benchmark must assert it is measuring the path it claims to measure.
+
+- **2026-09-09** — **`ea1e3cb`'s I/O half is confirmed on the panel; its CPU
+  half is not, and cannot be from this measurement.** `/proc/<pid>/io` on
+  ESBUSBBT06 now shows `rchar` at **69-79 KB/s** against the **1.98 MB/s**
+  recorded before the applied-config cache — a ~96 % reduction, and about what
+  one file read every ~20 s instead of ~25/s should look like. The predicted
+  **6-15 % of a core** is a different claim and remains unmeasured: between the
+  prediction and the measurement `inter_frame_ms` was changed on the panel
+  (below), which moved CPU by far more than the cache ever could and destroyed
+  the baseline. A prediction and its verification have to be taken on the same
+  configuration; this pair was not, so the CPU number stays open.
+
+- **2026-09-09** — **The slow HMI was on the client, and the cause was a clock.**
+  §3b of STATUS.md left open whether the server's headroom reaches the operator.
+  Per-thread `top` settled where the cost was: the Node-RED main thread at
+  **98.7 %** in `state R`, while the V8 worker threads had ~13 s of CPU *each*
+  over 3 h 15 m. JavaScript runs on one thread, so >100 % means work off it —
+  and idle workers rule out GC and the libuv pool in one reading. Not memory
+  either (RSS drift −749 kB/s, a sawtooth) and not disk (`read_bytes` 0).
+
+  Nine sub-second inject timers pushed into dashboard widgets on a fixed
+  schedule regardless of whether their data had changed. **Eight of those were
+  only wasteful; one was structurally different.** An Angular push whose value
+  is unchanged runs a digest and stops — no DOM change, no repaint, nothing on
+  the wire. But `new Date().toLocaleString()` into two "Date:" `ui_text` widgets
+  changes *every second by construction*, so it guaranteed a repaint every
+  second forever and an otherwise idle panel could never go static. Over VNC
+  that is the entire cost: the server re-encodes and ships a framebuffer region
+  every second whether or not anything happened. Removed (user chose deletion
+  over slowing it); six further pushes went 1 s → 10 s, with `once:true` added
+  to the four that lacked it so their views still populate on deploy instead of
+  sitting blank. Sub-second dashboard pushes ~9/s → 3/s.
+
+  **Operator-observed, not instrumented** — "speed is improved on HMI", no
+  before/after `kiosk_cpu` figures. The runbook's own §12a-bis findings 1 and 4
+  (`--force-device-scale-factor=1`; `feh` never exiting) are untested and
+  independent, and Chromium was previously measured at ~125 % against
+  Node-RED's ~23 %, so the browser is still the larger consumer.
+
+- **2026-09-09** — **D7 stopped being theoretical.** `inter_frame_ms` was
+  hand-set 250 → 20 ms on ESBUSBBT06 and pegged the event loop at ~99 % of a
+  core with no dashboard client attached. The trap is that this single number
+  sets the panel's whole CPU load while **`poll_interval_s` — the value R10
+  validates and the dashboard shows — never reaches the Nano**: `compileNanoJob`
+  emits `comm = [inter_frame_ms × 1000, baud, timeout_ms]`. An operator tuning
+  the number the UI presents as the poll interval changes nothing; the effective
+  knob is unlabelled. Also worth pinning: the per-frame cost is
+  `inter_frame_ms + wire time` (~17 ms for a 1-register read at 9600 baud), so
+  250 → 20 ms is ~7× the frame rate, not the ~12× the delay alone implies — an
+  arithmetic slip I made and corrected mid-investigation.
+
+  **And the panel is near R10's ceiling**: 88 slaves on one bus at 250 ms sweeps
+  in 25.5 s against a 30 s poll interval — 15 % headroom, so four or five more
+  devices fail on apply, and the 110-device target is unreachable in this layout
+  (`inter_frame_ms ≤ 237 ms`, less with multi-channel spans). `bus2` is built and
+  live-verified but unused here; 44 + 44 gives 13.8 s and 54 % headroom. It does
+  not cut CPU — two segments at 3.7 frames/s each is 7.4 frames/s of work.

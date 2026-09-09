@@ -143,12 +143,44 @@ feeder (already rate-limited), the historian write path (disabling it moved CPU
 by *nothing* — but by 86 % of the disk writes), and browser/editor websocket
 fan-out (4 points).
 
+## 3b-bis. The client side, answered (2026-09-09)
+
+**It was the client, and the cause was a clock.** §3b left open whether the
+server's headroom actually reaches the operator. It did not, and the reason was
+never on the server.
+
+Nine sub-second inject timers pushed into dashboard widgets on a fixed
+schedule, independent of whether their data had changed. Eight were merely
+wasteful — an Angular push whose value is unchanged runs a digest and stops, so
+it costs CPU but produces no DOM change, no repaint and nothing on the wire.
+The ninth fed `new Date().toLocaleString()` into two "Date:" `ui_text` widgets
+every second, and **a clock changes every second by construction**, so it
+guaranteed a repaint every second forever and an idle panel could never go
+static. Under VNC that is the whole cost: the server re-encodes and ships a
+framebuffer region every second whether or not anything happened.
+
+The clock chain was removed and six further pushes (the Alert list/table/target
+views, the download button, "Modbus Last Update") dropped from 1 s to 10 s —
+commit `04e3f78`. Background dashboard pushes from sub-second timers: **~9/s →
+3/s**, both survivors justified: the Diagnostics row builder is gated by
+`uiActive()` so it costs nothing unless that page is open, and "Password Error"
+at 0.5 s is interactive login feedback.
+
+**Confirmation is operator-observed, not instrumented** — "speed is improved on
+HMI", with no before/after `kiosk_cpu` figures. The two client-side items in
+`docs/pi-deployment.md` §12a-bis are still untested and independent of this:
+`--force-device-scale-factor=1` (finding 1, the runbook's own leading suspect)
+and `feh` never exiting because `kill $FEH_PID` only runs after Chromium does.
+
+**One diagnostic worth reusing.** Node-RED's main thread measured 98.7 % in
+`state R` while the V8 worker threads had ~13 s of CPU *each* over 3 h 15 m of
+uptime. On Node that split is decisive: JavaScript runs on one thread, so
+anything above 100 % is work off it — and the workers being idle ruled out GC
+and the libuv pool in a single reading. RSS drift was −749 kB/s (a normal
+sawtooth, not a leak) and `read_bytes` 0, so neither memory nor disk.
+
 ### Still open
 
-- **The HMI itself is unconfirmed.** Every number says the server has headroom;
-  whether the buttons respond is a separate observation. The client side —
-  Chromium rendering 71-row tables on the Pi — has never been measured
-  independently of the server.
 - **Deleting the 20 unused decode branches.** Not done: the type names come from
   `Parameter.txt` on the Pi, so which a panel uses cannot be decided from this
   repo. After the routing fix an unused branch is never sent a message and costs
@@ -158,12 +190,32 @@ fan-out (4 points).
   now ~2.5. The write path is one HTTP POST per point; batching remains an
   optional further fix.
 
-### D7 still stands
+### D7 still stands — and it bit (2026-09-09)
 
 The interim fix is a hand-set per-packet delay whose correct value depends on
 slave count — 500 ms suits 6 slaves and would give 71 slaves a 38 s sweep. The
 compiler should derive it from `poll_interval_s`, and the interval itself needs
 choosing against `maxAgeSec` (60 s) and blacklist detection (3 sweeps).
+
+**It bit on ESBUSBBT06.** `inter_frame_ms` was hand-set from 250 ms to 20 ms,
+which pegged the Node-RED event loop at ~99 % of a core with **no dashboard
+client attached at all**. Nothing in the UI says that this one number sets the
+panel's entire CPU load, and `poll_interval_s` — the value R10 validates and the
+dashboard displays — **never reaches the Nano**: `compileNanoJob` emits
+`comm = [inter_frame_ms × 1000, baud, timeout_ms]` and nothing else.
+
+Note the per-frame cost is `inter_frame_ms + wire time`, not `inter_frame_ms`.
+At 9600 baud a 1-register transaction is ~17 ms on the wire, so 250 → 20 ms is
+~7× more frames per second, not the ~12× a naive reading of the delay suggests.
+
+**The panel is also near R10's ceiling.** 88 slaves on **one** bus, 9600 baud,
+250 ms → sweep 25.5 s against a 30 s poll interval: **15 % headroom**. Four or
+five more devices fail the rule on apply, and the 110-device target (100 joints
++ 10 ambient) is unreachable in this layout — it needs `inter_frame_ms ≤ 237 ms`,
+less once multi-channel slaves widen their read spans. `bus2` is built and
+live-verified (2026-08-12) but unused on this panel; splitting 44 + 44 gives a
+13.8 s sweep and 54 % headroom, and halves data latency. It does **not** cut
+CPU — two segments at 3.7 frames/s each is 7.4 frames/s of per-message work.
 
 ---
 
