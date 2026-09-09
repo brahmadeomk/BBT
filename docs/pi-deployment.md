@@ -556,6 +556,141 @@ this project has repeatedly found the obvious explanation to be the wrong one,
 and a batch of five changes tells you nothing about which one mattered.
 
 
+### 12e. Step-by-step tuning runbook
+
+Every step is one change with a measurement either side, and every step is
+revertible. **Run these on the Pi.** Over SSH, export the display first or
+nothing will launch:
+
+```bash
+export DISPLAY=:0
+export XAUTHORITY=/home/pi/.Xauthority
+```
+
+#### Step 0 — a measurement you can repeat
+
+```bash
+cat >> ~/.bashrc <<'RC'
+kiosk_cpu() {
+  sudo top -b -n 4 -d 3 \
+  | awk '/chromium/{c+=$9} /node-red/{n+=$9} END{printf "chromium %.1f%%  node-red %.1f%%\n", c/4, n/4}'
+}
+RC
+source ~/.bashrc
+kiosk_cpu          # <- write this number down. It is the baseline.
+```
+
+Back the script up before touching it:
+
+```bash
+KIOSK=/home/pi/kiosk.sh                       # adjust to the real path
+cp "$KIOSK" "$KIOSK.bak-$(date +%F)"
+```
+
+#### Step 1 — make sure the kiosk-vs-browser comparison is real
+
+With no `--user-data-dir`, Chromium is single-instance per profile, so a
+desktop browser can attach to the kiosk's process instead of starting its own.
+
+```bash
+pkill -f 'chromium.*--kiosk'
+sleep 3
+pgrep -c chromium          # must print 0 before any comparison means anything
+```
+
+#### Step 2 — test the scale factor (the hypothesis with a mechanism)
+
+No file edits; run each by hand and measure.
+
+```bash
+# A: as it runs today
+/usr/bin/chromium --no-sandbox --disable-pinch --noerrdialogs --disable-infobars \
+  --kiosk --force-device-scale-factor=1 http://127.0.0.1:1880/ui &
+sleep 45; kiosk_cpu
+pkill -f 'chromium.*--kiosk'; sleep 3
+
+# B: same, without the scale factor
+/usr/bin/chromium --no-sandbox --disable-pinch --noerrdialogs --disable-infobars \
+  --kiosk http://127.0.0.1:1880/ui &
+sleep 45; kiosk_cpu
+pkill -f 'chromium.*--kiosk'; sleep 3
+```
+
+**If B is materially lower, that is the answer.** If B's text is then too small
+to read at the panel, set the display scale properly instead of forcing it in
+the browser — that gets both. If A and B are the same, the scale factor is not
+it: say so, and go to Step 3 without pretending otherwise.
+
+#### Step 3 — dedicated profile and a RAM cache
+
+```bash
+mkdir -p /home/pi/.config/chromium-kiosk
+/usr/bin/chromium --no-sandbox --disable-pinch --noerrdialogs --disable-infobars --kiosk \
+  --user-data-dir=/home/pi/.config/chromium-kiosk \
+  --disk-cache-dir=/dev/shm/chromium-cache --disk-cache-size=33554432 \
+  http://127.0.0.1:1880/ui &
+sleep 45; kiosk_cpu
+```
+
+The first run is slower — the profile and cache are cold. **Measure the second
+run**, and check the SD write rate has dropped: `vmstat 2 5`, `bo` column.
+
+#### Step 4 — the lean flag set
+
+```bash
+pkill -f 'chromium.*--kiosk'; sleep 3
+/usr/bin/chromium --no-sandbox --disable-pinch --noerrdialogs --disable-infobars --kiosk \
+  --user-data-dir=/home/pi/.config/chromium-kiosk \
+  --disk-cache-dir=/dev/shm/chromium-cache --disk-cache-size=33554432 \
+  --enable-low-end-device-mode --process-per-site --renderer-process-limit=2 \
+  --disable-background-networking --disable-component-update \
+  --disable-default-apps --disable-extensions --disable-sync \
+  --disable-session-crashed-bubble --no-first-run \
+  http://127.0.0.1:1880/ui &
+sleep 45; kiosk_cpu; pgrep -c chromium     # process count should fall too
+```
+
+#### Step 5 — drop `--no-sandbox` (security, not speed)
+
+Find out why it is there:
+
+```bash
+ps -o user= -p "$(pgrep -f 'chromium.*--kiosk' | head -1)"
+```
+
+`root` means the flag is a workaround for running as root. Run the kiosk as
+`pi` and remove the flag. If it prints `pi` already, just remove it — omit
+`--no-sandbox` from the Step 4 line and confirm the browser still starts.
+
+#### Step 6 — install the rewritten script
+
+Take §12b-bis, keeping whichever flags Steps 2–5 actually justified, then:
+
+```bash
+sudo systemctl restart lightdm     # or reboot
+sleep 90; kiosk_cpu
+```
+
+Revert at any point with `cp "$KIOSK.bak-<date>" "$KIOSK"`.
+
+#### Step 7 — the desktop pieces behind the kiosk
+
+```bash
+ls /etc/xdg/autostart/ | grep -i orca
+sudo mkdir -p /etc/xdg/autostart.disabled
+sudo mv /etc/xdg/autostart/orca-autostart.desktop /etc/xdg/autostart.disabled/
+```
+
+Reversible by moving it back. Confirm GL is available while you are here:
+
+```bash
+grep -n vc4 /boot/firmware/config.txt
+```
+
+Then reboot and take a final `kiosk_cpu`. Compare against Step 0 — if the total
+improvement is small, **say so and stop**; the remaining cost is the dashboard
+itself, and §12d lists what has already been done there.
+
 ### 12c. Free wins outside the browser
 
 `ps` on both panels showed a full LXDE desktop running behind the kiosk:
