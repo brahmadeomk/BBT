@@ -556,6 +556,32 @@ this project has repeatedly found the obvious explanation to be the wrong one,
 and a batch of five changes tells you nothing about which one mattered.
 
 
+### 12c. Free wins outside the browser
+
+`ps` on both panels showed a full LXDE desktop running behind the kiosk:
+
+- **`orca`** — the GNOME screen reader, measured at **5.5 % CPU**. A panel HMI has
+  no use for it: `sudo apt-get purge orca`, or disable it in the session.
+- **`lxpanel-pi`**, `pcmanfm` desktop, and other session pieces — a kiosk needs an
+  X server and a browser, not a desktop environment. Removing the panel and
+  desktop from the session removes their CPU, their memory and their redraws.
+- Check `dtoverlay=vc4-kms-v3d` is present in `/boot/firmware/config.txt`, or
+  Chromium has no GL to accelerate with regardless of its flags.
+
+### 12d. What has already been done on the page side
+
+These are in the flow and need no Pi change — listed so the same ground is not
+covered twice:
+
+- the Diagnostics table is **not built at all** while its page is closed, and its
+  rows carry ~4× fewer Angular watchers (no `ng-model` per cell, device state
+  precomputed server-side);
+- the audit viewers are capped at **20 rows**, sorted server-side rather than by
+  an `orderBy` filter re-running on every digest;
+- Node-RED itself went from ~106 % to ~23 % of a core.
+
+---
+
 ### 12e. Step-by-step tuning runbook
 
 Every step is one change with a measurement either side, and every step is
@@ -690,30 +716,6 @@ grep -n vc4 /boot/firmware/config.txt
 Then reboot and take a final `kiosk_cpu`. Compare against Step 0 — if the total
 improvement is small, **say so and stop**; the remaining cost is the dashboard
 itself, and §12d lists what has already been done there.
-
-### 12c. Free wins outside the browser
-
-`ps` on both panels showed a full LXDE desktop running behind the kiosk:
-
-- **`orca`** — the GNOME screen reader, measured at **5.5 % CPU**. A panel HMI has
-  no use for it: `sudo apt-get purge orca`, or disable it in the session.
-- **`lxpanel-pi`**, `pcmanfm` desktop, and other session pieces — a kiosk needs an
-  X server and a browser, not a desktop environment. Removing the panel and
-  desktop from the session removes their CPU, their memory and their redraws.
-- Check `dtoverlay=vc4-kms-v3d` is present in `/boot/firmware/config.txt`, or
-  Chromium has no GL to accelerate with regardless of its flags.
-
-### 12d. What has already been done on the page side
-
-These are in the flow and need no Pi change — listed so the same ground is not
-covered twice:
-
-- the Diagnostics table is **not built at all** while its page is closed, and its
-  rows carry ~4× fewer Angular watchers (no `ng-model` per cell, device state
-  precomputed server-side);
-- the audit viewers are capped at **20 rows**, sorted server-side rather than by
-  an `orderBy` filter re-running on every digest;
-- Node-RED itself went from ~106 % to ~23 % of a core.
 
 ---
 
