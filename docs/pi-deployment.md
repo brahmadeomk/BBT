@@ -437,6 +437,53 @@ slow** — and would give up the kiosk lockdown for nothing (see §11: the
 `BUSDUCT_KIOSK_PIN` exit gate only means anything while kiosk is the locked
 state).
 
+### 12a-bis. The actual panel script (2026-09-09) — neither usual suspect present
+
+The launch script in service is:
+
+```bash
+/usr/bin/feh --fullscreen --auto-zoom --hide-pointer /home/pi/Desktop/GODREJ.png &
+FEH_PID=$!
+sleep 30
+/usr/bin/chromium --no-sandbox --disable-pinch --noerrdialogs --disable-infobars \
+  --kiosk --force-device-scale-factor=1 http://127.0.0.1:1880/ui
+kill $FEH_PID
+```
+
+**No `--incognito`, no `--disable-gpu`** — so §12a does not explain this panel,
+and the slowness has a different cause. Four findings, in order of confidence.
+
+**1. `--force-device-scale-factor=1` is the leading suspect for the speed
+difference, and it is testable in a minute.** Raspberry Pi OS sets a display
+scale factor on many panels. Forcing it to 1 makes CSS pixels equal physical
+pixels, so the dashboard lays out at the panel's full resolution instead of the
+scaled one — a larger logical viewport, more paint area, and more of a 70-row
+table on screen at once. A browser opened from the desktop menu carries no such
+flag and gets the scaled viewport. **Check: is the kiosk's text visibly smaller
+than the desktop browser's?** If yes, that is the mechanism. Drop the flag and
+compare `chromium` in `top`.
+
+**2. The comparison itself may not be measuring two browsers.** There is no
+`--user-data-dir`, so the kiosk uses the **default profile** — and Chromium is
+single-instance per profile. Opening the desktop browser while the kiosk is
+running can hand the URL to the *existing* kiosk process rather than starting a
+new one. Before trusting any kiosk-vs-browser comparison, confirm with
+`pgrep -c chromium` that the kiosk process is actually stopped.
+
+**3. `--no-sandbox` is a security hole and should go.** It disables the renderer
+sandbox, so any browser-side compromise reaches the `pi` user directly. It is
+almost always added to work around running Chromium as **root**; the fix is to
+run the kiosk as the `pi` user and drop the flag, not to keep it. This sits
+directly against Slice 8a (§11), which hardened this panel's access control.
+
+**4. `feh` never exits during the session.** `kill $FEH_PID` runs only after
+Chromium *exits*, so a fullscreen image viewer holds its decoded bitmap behind
+the browser for the entire life of the panel. It should be killed once the
+browser has painted.
+
+Also: `sleep 30` is a fixed guess. If Node-RED has not finished starting,
+Chromium loads an error page and stays on it until someone notices.
+
 ### 12b. A leaner launch line
 
 ```bash
@@ -456,7 +503,58 @@ What each group is for:
 
 `--single-process` is deliberately **not** listed: it lowers memory but is the
 least-tested Chromium path and a renderer crash takes the whole browser with it.
-Not a trade to make on an HMI that must stay up.
+Not a trade to make on an HMI that must stay up. `--no-sandbox` is likewise
+absent on purpose — see §12a-bis item 3.
+
+### 12b-bis. The panel script, rewritten
+
+```bash
+#!/bin/bash
+set -u
+SPLASH=/home/pi/Desktop/GODREJ.png
+URL=http://127.0.0.1:1880/ui
+
+/usr/bin/feh --fullscreen --auto-zoom --hide-pointer "$SPLASH" &
+FEH_PID=$!
+
+# Wait for Node-RED to actually answer rather than guessing 30 s: too short
+# loads an error page that stays there, too long is dead time on every boot.
+for _ in $(seq 1 90); do
+  curl -sf -o /dev/null "$URL" && break
+  sleep 1
+done
+
+/usr/bin/chromium \
+  --user-data-dir=/home/pi/.config/chromium-kiosk \
+  --disk-cache-dir=/dev/shm/chromium-cache --disk-cache-size=33554432 \
+  --enable-low-end-device-mode \
+  --process-per-site --renderer-process-limit=2 \
+  --disable-background-networking --disable-component-update \
+  --disable-default-apps --disable-extensions --disable-sync \
+  --disable-session-crashed-bubble --no-first-run \
+  --disable-pinch --noerrdialogs --disable-infobars \
+  --kiosk "$URL" &
+CHROMIUM_PID=$!
+
+# Drop the splash once the browser has painted, NOT when it exits.
+sleep 8
+kill "$FEH_PID" 2>/dev/null
+
+wait "$CHROMIUM_PID"
+```
+
+Changed from the original: **`--no-sandbox` removed** (run this as `pi`, not
+root, or it will not start), **`--force-device-scale-factor=1` removed** (test it
+first — if the HMI is then too small for the panel, put it back and accept the
+cost, or set the display scale properly instead), a **dedicated profile** so the
+kiosk and any desktop browser are genuinely separate processes, the **cache in
+`/dev/shm`** so browser writes stop adding SD wear, a **readiness poll** instead
+of `sleep 30`, and **`feh` killed once the browser is up**.
+
+Change one thing at a time and measure `chromium` in `top` between each —
+this project has repeatedly found the obvious explanation to be the wrong one,
+and a batch of five changes tells you nothing about which one mattered.
+
 
 ### 12c. Free wins outside the browser
 
