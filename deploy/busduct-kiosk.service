@@ -1,0 +1,64 @@
+# BusductTherMo panel kiosk (Slice 8a lockdown).
+#
+# THE POINT OF THIS UNIT IS Restart=always. The kiosk's exit gate
+# (BUSDUCT_KIOSK_PIN) only means something while the kiosk is the state the
+# panel is in; if the browser dies the gate is not defeated, it is bypassed,
+# because the operator is looking at whatever is behind it. A supervised
+# process is what turns "hard to exit" into "cannot usefully be exited":
+# Alt+F4, a renderer crash and the OOM killer all end with the HMI back on
+# screen within RestartSec.
+#
+# This is a SYSTEM unit bound to the graphical session's display. It runs as
+# the desktop user (User=/Group= below) so the launcher can drop
+# --no-sandbox; a root-run browser is what that flag usually works around.
+#
+# Install (docs/pi-deployment.md §12f):
+#   sudo install -m 0755 deploy/bin/busduct-kiosk /usr/local/bin/busduct-kiosk
+#   sudo cp deploy/busduct-kiosk.service /etc/systemd/system/
+#   # confirm the desktop user and DISPLAY match this panel, then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now busduct-kiosk
+#
+# FIRST REMOVE THE OLD AUTOSTART, or two browsers race for the display:
+#   grep -rl kiosk /etc/xdg/autostart /home/pi/.config/autostart \
+#                  /etc/xdg/lxsession /home/pi/.config/lxsession* 2>/dev/null
+
+[Unit]
+Description=BusductTherMo panel HMI (Chromium kiosk)
+# Not Requires=: the HMI should come up and show its splash even if Node-RED is
+# slow or failed, because a panel showing "connecting" is diagnosable from the
+# front of the cabinet and a black screen is not. The launcher polls the
+# dashboard URL itself before starting the browser.
+After=graphical.target nodered.service
+Wants=graphical.target
+# Chromium can fail repeatedly on a genuinely broken display or GPU config.
+# Without this, systemd's default start limit gives up after 5 attempts in 10 s
+# and the panel stays dark - the exact failure this unit exists to prevent.
+# NOTE this belongs in [Unit], not [Service]: since systemd 230 it is parsed
+# here, and a copy under [Service] is ignored with only a log warning.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/pi/.Xauthority
+# Optional knobs, all documented in deploy/bin/busduct-kiosk:
+#   BUSDUCT_KIOSK_URL, BUSDUCT_KIOSK_SPLASH, BUSDUCT_KIOSK_PROFILE,
+#   BUSDUCT_KIOSK_SCALE (set to 1 to restore the retired script's
+#   --force-device-scale-factor=1), BUSDUCT_KIOSK_READY_TIMEOUT
+EnvironmentFile=-/etc/busduct/kiosk.env
+
+ExecStart=/usr/local/bin/busduct-kiosk
+
+Restart=always
+RestartSec=2
+
+# The browser is the whole session; take its children with it on restart so a
+# stranded renderer does not hold the display or the profile lock.
+KillMode=control-group
+TimeoutStopSec=10
+
+[Install]
+WantedBy=graphical.target

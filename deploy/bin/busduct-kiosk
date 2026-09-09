@@ -1,0 +1,108 @@
+#!/bin/sh
+# BusductTherMo panel kiosk launcher.
+#
+# WHY THIS EXISTS. The launcher previously in service ended when the browser
+# ended:
+#
+#     /usr/bin/chromium --no-sandbox ... --kiosk http://127.0.0.1:1880/ui
+#     kill $FEH_PID
+#
+# `kill` runs only AFTER Chromium exits, so Alt+F4, a renderer crash or the OOM
+# killer left the operator on the full LXDE desktop with a file manager, a
+# terminal and the Node-RED editor on :1880. The BUSDUCT_KIOSK_PIN exit gate was
+# not defeated in that case - it was bypassed, because the application was no
+# longer running. **Respawn is what makes the lockdown mean anything**, and it is
+# systemd's job: this script deliberately exits when the browser exits so the
+# unit's Restart=always brings it straight back (see busduct-kiosk.service).
+#
+# RUNS AS THE DESKTOP USER, NOT ROOT. That is what lets --no-sandbox go: the
+# flag is almost always added to work around running Chromium as root, and it
+# disables the renderer sandbox, so any browser-side compromise reaches the
+# account directly. Dropping it is a Slice 8a concern (docs/security-hardening.md).
+#
+# Install: see docs/pi-deployment.md §12f.
+set -eu
+
+URL="${BUSDUCT_KIOSK_URL:-http://127.0.0.1:1880/ui}"
+SPLASH="${BUSDUCT_KIOSK_SPLASH:-/home/pi/Desktop/GODREJ.png}"
+PROFILE="${BUSDUCT_KIOSK_PROFILE:-/home/pi/.config/chromium-kiosk}"
+READY_TIMEOUT="${BUSDUCT_KIOSK_READY_TIMEOUT:-120}"
+
+CHROMIUM=""
+for c in /usr/bin/chromium /usr/bin/chromium-browser; do
+  [ -x "$c" ] && { CHROMIUM="$c"; break; }
+done
+[ -n "$CHROMIUM" ] || { echo "no chromium binary found" >&2; exit 2; }
+
+# A panel HMI must never blank or sleep, and must not show a mouse pointer on a
+# touchscreen. Failures here are not fatal - a blanking screen is worse than no
+# kiosk, but no kiosk is worse still, so never let these abort the launch.
+if command -v xset >/dev/null 2>&1; then
+  xset s off || true
+  xset s noblank || true
+  xset -dpms || true
+fi
+
+# Splash while Node-RED comes up. Killed as soon as the browser is up (below),
+# NOT when it exits - holding a decoded fullscreen bitmap behind the browser for
+# the life of the panel was docs/pi-deployment.md §12a-bis finding 4.
+SPLASH_PID=""
+if [ -f "$SPLASH" ] && command -v feh >/dev/null 2>&1; then
+  feh --fullscreen --auto-zoom --hide-pointer "$SPLASH" &
+  SPLASH_PID=$!
+fi
+kill_splash() {
+  [ -n "$SPLASH_PID" ] || return 0
+  kill "$SPLASH_PID" 2>/dev/null || true
+  SPLASH_PID=""
+}
+
+# Wait for the dashboard to actually answer rather than sleeping a fixed 30 s.
+# A fixed sleep is wrong in both directions: too short after a cold boot (the
+# operator sees Chromium's error page and it never reloads) and pure dead time
+# on a warm restart, which matters because this path now runs on every respawn.
+if command -v curl >/dev/null 2>&1; then
+  i=0
+  while [ "$i" -lt "$READY_TIMEOUT" ]; do
+    curl -fsS -o /dev/null --max-time 2 "$URL" && break
+    i=$((i + 1))
+    sleep 1
+  done
+fi
+
+# --force-device-scale-factor is NOT passed here. The retired script passed 1,
+# and docs/pi-deployment.md §12a-bis finding 1 names that as the leading suspect
+# for the kiosk being slower than a desktop browser window: forcing 1 makes CSS
+# pixels equal physical pixels, so the dashboard lays out at the panel's full
+# resolution - more paint area, and more of a large table on screen at once.
+# Set BUSDUCT_KIOSK_SCALE=1 to restore the old behaviour exactly.
+SCALE_ARG=""
+[ -n "${BUSDUCT_KIOSK_SCALE:-}" ] && SCALE_ARG="--force-device-scale-factor=${BUSDUCT_KIOSK_SCALE}"
+
+# A dedicated profile, NOT the default one. Chromium is single-instance per
+# profile, so with no --user-data-dir a desktop browser opened for a comparison
+# hands its URL to the running kiosk instead of starting its own process - which
+# invalidates any kiosk-vs-browser measurement (§12a-bis finding 2). It also
+# keeps the disk and GPU shader caches, which --incognito would throw away.
+mkdir -p "$PROFILE"
+
+"$CHROMIUM" \
+  --kiosk \
+  --user-data-dir="$PROFILE" \
+  --disk-cache-dir=/dev/shm/chromium-cache --disk-cache-size=33554432 \
+  --noerrdialogs --disable-infobars --disable-pinch \
+  --no-first-run --disable-session-crashed-bubble --disable-features=Translate \
+  --disable-background-networking --disable-component-update \
+  --disable-default-apps --disable-extensions --disable-sync \
+  --enable-low-end-device-mode --process-per-site --renderer-process-limit=2 \
+  $SCALE_ARG \
+  "$URL" &
+BROWSER_PID=$!
+
+# Give it a moment to paint over the splash, then drop the splash regardless.
+sleep 8
+kill_splash
+
+# Exit with the browser so systemd restarts the whole thing.
+trap 'kill_splash' EXIT INT TERM
+wait "$BROWSER_PID"

@@ -761,6 +761,81 @@ Then reboot and take a final `kiosk_cpu`. Compare against Step 0 — if the tota
 improvement is small, **say so and stop**; the remaining cost is the dashboard
 itself, and §12d lists what has already been done there.
 
+### 12f. Making the kiosk un-exitable (supervised launch)
+
+Everything above is about making the kiosk *fast*. This section is about making
+it **stay**, which is a different problem and, on the panels as shipped, a more
+serious one.
+
+**The hole.** The launcher in service ends when the browser ends — `kill
+$FEH_PID` is the line after the `chromium` invocation, so it runs only once
+Chromium has exited. Alt+F4, a renderer crash or the OOM killer therefore leaves
+the operator on the LXDE desktop with `pcmanfm`, a terminal, and the Node-RED
+editor on :1880. Note what this does to §11: the `BUSDUCT_KIOSK_PIN` exit gate
+is not *defeated* here, it is **bypassed** — nobody guessed the PIN, the
+application simply stopped existing. A PIN gate is only as good as the
+guarantee that the gated thing is what is on screen.
+
+**The fix is supervision, not a better browser flag.** Three files:
+
+| file | installs to | does |
+|---|---|---|
+| `deploy/bin/busduct-kiosk` | `/usr/local/bin/` | launches the browser, waits for the dashboard to answer, drops the splash once painted |
+| `deploy/busduct-kiosk.service` | `/etc/systemd/system/` | `Restart=always` — the part that matters |
+| `deploy/xorg.conf.d/10-busduct-kiosk.conf` | `/etc/X11/xorg.conf.d/` | closes Ctrl+Alt+F1..F6 and Ctrl+Alt+Backspace |
+
+```bash
+sudo install -m 0755 deploy/bin/busduct-kiosk /usr/local/bin/busduct-kiosk
+sudo cp deploy/busduct-kiosk.service /etc/systemd/system/
+sudo install -d /etc/X11/xorg.conf.d
+sudo cp deploy/xorg.conf.d/10-busduct-kiosk.conf /etc/X11/xorg.conf.d/
+
+# REMOVE THE OLD AUTOSTART FIRST or two browsers race for the display:
+grep -rl kiosk /etc/xdg/autostart /home/pi/.config/autostart \
+               /etc/xdg/lxsession /home/pi/.config/lxsession* 2>/dev/null
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now busduct-kiosk
+```
+
+**Test it the way an operator would attack it**, not by reading the unit file:
+
+```bash
+pkill -f 'chromium.*--kiosk'     # must come back within ~2 s
+sudo systemctl status busduct-kiosk
+```
+
+**Three things the new launcher changes on purpose**, each reversible:
+
+- **`--no-sandbox` is gone.** The unit runs as `pi`, and that flag is almost
+  always a workaround for running Chromium as root. It disables the renderer
+  sandbox, so a browser-side compromise reaches the account directly (§11).
+- **`--force-device-scale-factor=1` is not passed.** §12a-bis finding 1 names it
+  the leading suspect for the kiosk being slower than a desktop window. This is
+  the one change that alters what the operator *sees* — text size changes. Set
+  `BUSDUCT_KIOSK_SCALE=1` in `/etc/busduct/kiosk.env` to restore the old
+  behaviour exactly.
+- **The splash is killed once the browser paints**, not when it exits — §12a-bis
+  finding 4. `feh` was holding a decoded fullscreen bitmap for the life of the
+  panel.
+
+**Before you install the Xorg file, confirm you can get in without the screen.**
+With `DontVTSwitch` on and the kiosk respawning, a panel whose HMI is broken is
+genuinely awkward to recover from the front. SSH is the normal route and
+`sudo systemctl stop busduct-kiosk` drops you to the desktop — verify both
+*first*. Also check the session is actually Xorg (`loginctl show-session
+$XDG_SESSION_ID -p Type`); on a Wayland session the file does nothing.
+
+**Stronger options, not adopted here.** If the lockdown needs to be structural
+rather than configured, `cage` (a Wayland kiosk compositor) runs exactly one
+application with no window manager and no key bindings to disable, and
+`cog`/WPE WebKit renders straight to DRM/KMS with no desktop stack at all — the
+latter is also the only option on this list that would meaningfully cut the
+browser's ~125 % CPU. Both need evaluating against the AngularJS dashboard on a
+real panel before they could be recommended. **And the strongest option remains
+the cheapest: a panel with no keyboard attached has no Alt+F4 and no VT switch
+to close in the first place.**
+
 ---
 
 ## Updating later
