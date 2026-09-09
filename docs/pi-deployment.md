@@ -621,7 +621,33 @@ desktop browser can attach to the kiosk's process instead of starting its own.
 ```bash
 pkill -f 'chromium.*--kiosk'
 sleep 3
-pgrep -c chromium          # must print 0 before any comparison means anything
+
+# 1a. anything still running on the kiosk command line?
+pgrep -af 'chromium.*--kiosk'
+
+# 1b. how many actual BROWSERS are up?
+pgrep -af chromium | grep -v -- '--type='
+```
+
+**Both must print nothing.** Do not count processes with `pgrep -c chromium`:
+one Chromium is normally 5-10 processes (browser, GPU, zygote, a renderer per
+site), so a count can never tell one browser from two. Only the top-level
+browser process lacks a `--type=` argument — that is the one to count, which is
+what 1b does. An earlier revision of this runbook said `pgrep -c chromium`
+"must print 0"; on a healthy panel it prints 9 and the check reads as a failure
+when nothing is wrong.
+
+If 1b lists a line, a browser is still up — usually the desktop one opened for
+the comparison. Close it and re-check.
+
+If 1a comes back populated a few seconds after the `pkill`, something is
+respawning the kiosk, and that must be stopped first or every A/B below
+measures a process you did not launch:
+
+```bash
+systemctl list-units --type=service | grep -i kiosk
+ls /etc/xdg/autostart /home/pi/.config/autostart 2>/dev/null
+grep -rl kiosk /etc/xdg/lxsession /home/pi/.config/lxsession* 2>/dev/null
 ```
 
 #### Step 2 — test the scale factor (the hypothesis with a mechanism)
