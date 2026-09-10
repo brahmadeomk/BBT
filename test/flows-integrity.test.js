@@ -370,9 +370,13 @@ describe('sensor plausibility band is two-sided (2026-09-05)', () => {
     assert.match(pl(), /SENSOR_MIN_C = -40\b/);
   });
 
-  test('the upper limit is unchanged at 300', () => {
-    // This completes an existing check; it must not retune an alarm threshold.
-    assert.match(pl(), /SENSOR_MAX_C = 300\b/);
+  test('the upper limit comes from the sensor (was 300, now 150)', () => {
+    // SUPERSEDED 2026-09-10. This test used to assert the ceiling was "unchanged
+    // at 300" - correct at the time, because that change was completing the LOW
+    // side and deliberately not retuning anything else. 300 was never derived
+    // from anything though, and the datasheet for the NTC element specifies
+    // -80..+150 degC, so 151-300 could not be a measurement at all.
+    assert.match(pl(), /SENSOR_MAX_C = 150\b/, 'the datasheet default');
     assert.match(gate(), /sensorVal > SENSOR_MAX_C/);
   });
 
@@ -389,15 +393,23 @@ describe('sensor plausibility band is two-sided (2026-09-05)', () => {
   // re-typed - a copy would keep passing after the flow changed.
   test('the extracted gate classifies the live readings correctly', () => {
     const body = gate();
+    // The band is resolved from config now, so the lifted code hits `global.get`
+    // and `CONFIG_KEY`, neither of which exists here - both throw and are caught
+    // by the gate's own try/catch, leaving the datasheet defaults. That is the
+    // library-missing path on a real panel, so this exercises it for free.
     const run = new Function('sensor', 'sensorVal', `let sensor_status = sensor.st ?? "OK";${
-      body.slice(body.indexOf('const SENSOR_MIN_C'))}\nreturn sensor_status;`);
+      body.slice(body.indexOf('let SENSOR_MIN_C'))}\nreturn sensor_status;`);
     // A healthy reading carries the frame's own lowercase "ok" through; only an
     // absent st defaults to "OK". What matters is that it is not a fault.
     const faulted = (v, st = 'ok') => run({ st }, v) === 'Sensor_Error';
     assert.equal(faulted(31.4), false, 'a normal joint');
-    assert.equal(faulted(131), false, 'J10 under a heat test - hot but real');
+    assert.equal(faulted(131), false, 'J10 under a heat test - hot but real, and still under 150');
     assert.equal(faulted(-273), true, 'J19 absolute-zero sentinel');
     assert.equal(faulted(382.36), true, 'the same value read unsigned');
+    // The case the old 300 ceiling let through: above the element's range, so
+    // it cannot be a measurement whatever it looks like.
+    assert.equal(faulted(200), true, 'beyond the sensor range - was accepted as real until 2026-09-10');
+    assert.equal(faulted(149.5), false, 'just inside the range is still a measurement');
     assert.equal(run({ st: 'err' }, 25), 'Communication_Error', 'comm errors still win');
     // NOT caught by the band, and deliberately so: 0 degC is a real temperature
     // in an unheated panel. Distinguishing a dead channel from a cold one needs
@@ -739,5 +751,50 @@ describe('thresholds are resolved per joint, not panel-wide (2026-09-10)', () =>
     };
     assert.ok(resolveThresholds({ ...complete, profiles: { default: complete } }, 'gone'));
     assert.ok(resolveThresholds(complete, 'gone'), 'a pre-profiles global must still resolve');
+  });
+});
+
+describe('the sensor plausibility ceiling comes from the sensor (2026-09-10)', () => {
+  // ProcessLogic hardcoded `SENSOR_MAX_C = 300` - a number inherited rather than
+  // derived - while cfg/alarms sensor_fault.sensor_error_above_c sat validated
+  // and unread. The element is an NTC thermistor specified -80..+150 degC, so a
+  // reading of 151-300 could never be a true measurement, yet it was accepted as
+  // one and passed to the alarms, the historian, the BMS image and the cloud:
+  // the one number the band exists to catch was the one it let through.
+  const flows = JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+  const processLogic = flows.find((n) => n.id === '39dad91df0c15744').func;
+
+  test('the ceiling is resolved, not hardcoded', () => {
+    assert.match(processLogic, /alarmThresholds\?\.resolveSensorLimits\(/);
+    assert.doesNotMatch(
+      processLogic,
+      /SENSOR_MAX_C\s*=\s*300/,
+      'the inherited 300 ceiling is back: readings above the sensor range would be trusted'
+    );
+  });
+
+  test('the resolved band is set before the fault check reads it', () => {
+    // Same temporal-dead-zone trap as the threshold set: `let` used above its
+    // declaration throws per message, and the only symptom is a joint losing its
+    // sensor-fault check.
+    const declared = processLogic.indexOf('let SENSOR_MAX_C');
+    const used = processLogic.indexOf('sensorVal > SENSOR_MAX_C');
+    assert.ok(declared >= 0 && used > declared, 'band used before it is resolved');
+  });
+
+  test('the datasheet default survives a config the flow cannot read', () => {
+    // The lookup is wrapped in try/catch precisely so a missing library cannot
+    // remove the fault check; this pins the value it falls back to.
+    const { resolveSensorLimits } = require('../src/alarms/threshold-resolver');
+    assert.equal(resolveSensorLimits(null).maxC, 150);
+    assert.equal(resolveSensorLimits(null).minC, -40);
+  });
+
+  test('the schema default matches the sensor, so a fresh panel is right', () => {
+    const schema = JSON.parse(
+      fs.readFileSync(path.join(__dirname, '..', 'config', 'schemas', 'busduct_alarms_config.schema.json'), 'utf8')
+    );
+    const sf = schema.definitions?.sensor_fault?.properties ?? schema.properties?.sensor_fault?.properties;
+    assert.equal(sf.sensor_error_above_c.default, 150);
   });
 });

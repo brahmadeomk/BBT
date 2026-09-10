@@ -124,3 +124,50 @@ test('buildRuntimeProfiles', async (t) => {
     assert.equal(buildRuntimeProfiles({ profiles: { broken: {} } }), null);
   });
 });
+
+test('sensor plausibility limits', async (t) => {
+  const { resolveSensorLimits, DEFAULT_SENSOR_MAX_C, DEFAULT_SENSOR_MIN_C } =
+    require('../../src/alarms/threshold-resolver');
+
+  await t.test('defaults come from the sensor datasheet, not the old hardcoded 300', () => {
+    // NTC element specified -80..+150 degC. 300 was inherited, never derived.
+    assert.equal(DEFAULT_SENSOR_MAX_C, 150);
+    const r = resolveSensorLimits(undefined);
+    assert.equal(r.maxC, 150);
+    assert.equal(r.configured, false);
+  });
+
+  await t.test('the floor is the application floor, not the sensor capability', () => {
+    // -80 is what the element can measure; -40 is what a busduct panel can
+    // plausibly be. The band wants the intersection, so -40 binds.
+    assert.equal(DEFAULT_SENSOR_MIN_C, -40);
+    assert.equal(resolveSensorLimits({ sensor_fault: { sensor_error_above_c: 200 } }).minC, -40);
+  });
+
+  await t.test('a configured ceiling inside the schema bounds is honoured', () => {
+    const r = resolveSensorLimits({ sensor_fault: { sensor_error_above_c: 200 } });
+    assert.equal(r.maxC, 200);
+    assert.equal(r.configured, true);
+  });
+
+  await t.test('an out-of-range ceiling falls back rather than being obeyed', () => {
+    // Read from a mutable global: a corrupt or hand-edited 99999 would silently
+    // disable sensor-fault detection on a fire-safety monitor.
+    for (const bad of [99999, 0, -1, 99, 501, NaN, Infinity, '200', null, {}]) {
+      const r = resolveSensorLimits({ sensor_fault: { sensor_error_above_c: bad } });
+      assert.equal(r.maxC, 150, `ceiling ${JSON.stringify(bad)} must not be obeyed`);
+      assert.equal(r.configured, false);
+    }
+  });
+
+  await t.test('the schema bounds are the ones enforced', () => {
+    assert.equal(resolveSensorLimits({ sensor_fault: { sensor_error_above_c: 100 } }).maxC, 100);
+    assert.equal(resolveSensorLimits({ sensor_fault: { sensor_error_above_c: 500 } }).maxC, 500);
+  });
+
+  await t.test('a config with no sensor_fault block still yields a usable band', () => {
+    const r = resolveSensorLimits({ deltaT: {}, ror: {}, persistence: {} });
+    assert.equal(r.maxC, 150);
+    assert.equal(r.minC, -40);
+  });
+});

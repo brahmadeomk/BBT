@@ -99,7 +99,7 @@
           "description": "No valid data from the Nano/bus for this long -> SYSTEM COMM_FAILURE alarm."
         },
         "sensor_error_above_c": {
-          "type": "number", "minimum": 100, "maximum": 500, "default": 300,
+          "type": "number", "minimum": 100, "maximum": 500, "default": 150,
           "description": "Reading above this value is treated as Sensor_Error and freezes KPI updates for that joint (matches ProcessLogic freeze)."
         },
         "freeze_kpis_on_fault": { "type": "boolean", "default": true }

@@ -118,4 +118,54 @@ function buildRuntimeProfiles(alarmsDoc) {
   return Object.keys(out).length > 0 ? out : null;
 }
 
-module.exports = { resolveThresholds, buildRuntimeProfiles };
+/**
+ * Sensor plausibility limits — the band that decides whether a reading is a
+ * MEASUREMENT or a FAULT.
+ *
+ * THE CEILING COMES FROM THE SENSOR, and until 2026-09-10 it did not. The flow
+ * hardcoded 300 °C, inherited rather than derived, while `sensor_fault
+ * .sensor_error_above_c` sat in the schema being validated and never read (the
+ * same write-only pattern as `threshold_profile` and `poll_interval_s`).
+ * The element is an NTC thermistor specified −80 … +150 °C, so a reading of
+ * 151–300 could never be a true measurement — yet it was accepted as one and
+ * passed to the alarms, the historian, the BMS image and the cloud. The one
+ * number the band exists to catch was the one it let through.
+ *
+ * THE FLOOR IS NOT THE SENSOR'S, deliberately. Sensor capability (−80) and
+ * application plausibility (what a busduct joint can actually be) are different
+ * quantities and the band wants their INTERSECTION. On the low side the
+ * application floor binds: no panel this ships into sees −40 °C, so −40 cannot
+ * reject a real reading, while −80 would accept 40 more degrees of nonsense for
+ * no gain. It is not configurable because the schema has no field for it —
+ * adding one is a schema change, and the design chat owns those.
+ *
+ * A CONFIGURED CEILING IS RANGE-CHECKED against the schema's own 100–500 bounds
+ * rather than trusted. This value is read from a mutable global, and a corrupt
+ * or hand-edited one setting it to 99999 would silently disable fault detection
+ * on a fire-safety monitor. Out-of-range means fall back, never obey.
+ */
+const DEFAULT_SENSOR_MAX_C = 150;
+const DEFAULT_SENSOR_MIN_C = -40;
+const CEILING_BOUNDS = { min: 100, max: 500 }; // mirrors the schema
+
+function resolveSensorLimits(runtimeCfg) {
+  const raw = runtimeCfg?.sensor_fault?.sensor_error_above_c;
+  const usable =
+    typeof raw === 'number' &&
+    Number.isFinite(raw) &&
+    raw >= CEILING_BOUNDS.min &&
+    raw <= CEILING_BOUNDS.max;
+  return {
+    maxC: usable ? raw : DEFAULT_SENSOR_MAX_C,
+    minC: DEFAULT_SENSOR_MIN_C,
+    configured: usable,
+  };
+}
+
+module.exports = {
+  resolveThresholds,
+  buildRuntimeProfiles,
+  resolveSensorLimits,
+  DEFAULT_SENSOR_MAX_C,
+  DEFAULT_SENSOR_MIN_C,
+};

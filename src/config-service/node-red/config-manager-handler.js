@@ -122,6 +122,11 @@ function applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, fla
   // running an older flow - or this one before its next apply - is unaffected.
   const runtimeProfiles = buildRuntimeProfiles(newDoc);
 
+  // sensor_fault carries the plausibility ceiling ProcessLogic uses to tell a
+  // measurement from a fault. It is preserved on newDoc across every apply, but
+  // was never published to the runtime, so the flow used a hardcoded 300.
+  const runtimeSensorFault = newDoc.sensor_fault;
+
   return {
     msg: withPayload(msg, { config: flatProfile, success: successMessage }),
     audit: {
@@ -131,7 +136,11 @@ function applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, fla
       oldConfig: currentFlatProfile,
       newConfig: flatProfile,
     },
-    runtimeConfig: runtimeProfiles ? { ...flatProfile, profiles: runtimeProfiles } : flatProfile,
+    runtimeConfig: {
+      ...flatProfile,
+      ...(runtimeProfiles ? { profiles: runtimeProfiles } : {}),
+      ...(runtimeSensorFault ? { sensor_fault: runtimeSensorFault } : {}),
+    },
   };
 }
 

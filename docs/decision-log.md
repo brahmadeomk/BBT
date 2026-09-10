@@ -7371,3 +7371,57 @@ A benchmark must assert it is measuring the path it claims to measure.
   thresholds — all schema changes, which CLAUDE.md puts in the design chat. The
   resolver's signature takes a profile NAME rather than a joint, so adding a
   zone rung is a change to what the caller passes, not to this module.
+
+- **2026-09-10** — **The sensor plausibility ceiling now comes from the sensor:
+  300 °C → 150 °C, and it is read from config instead of hardcoded.** Two
+  defects in one line. ProcessLogic carried `const SENSOR_MAX_C = 300` — a
+  number inherited rather than derived from anything — while
+  `sensor_fault.sensor_error_above_c` sat in `cfg/alarms` being validated and
+  never read. That is the **third** instance of the write-only pattern in two
+  days, after `poll_interval_s` and `threshold_profile`.
+
+  The operator supplied the element datasheet: an epoxy-coated NTC chip
+  thermistor, 100 kΩ ±1 %, **operating range −80 … +150 °C**. So a reading of
+  151–300 °C could never be a true measurement, and the band was accepting it as
+  one and passing it to the alarms, the historian, the BMS image and the cloud.
+  The one number the band exists to catch was the one it let through.
+
+  **The floor stays −40 and was deliberately NOT changed to the sensor's −80.**
+  Sensor capability and application plausibility are different quantities, and
+  the band wants their INTERSECTION. On the low side the application floor
+  binds: no panel this ships into sees −40 °C, so it cannot reject a real
+  reading, while −80 would accept 40 more degrees of nonsense for no gain. On
+  the high side the sensor ceiling binds, which is exactly what was missing. The
+  floor is not configurable because the schema has no field for it; adding one
+  is a schema change and belongs in the design chat.
+
+  **A configured ceiling is range-checked, not trusted.** It arrives from a
+  mutable global, and a corrupt or hand-edited value of 99999 would silently
+  disable sensor-fault detection on a fire-safety monitor. Out-of-range means
+  fall back to 150, never obey. The bounds enforced (100–500) are the schema's
+  own.
+
+  **Read at the band, not from the config loaded later in ProcessLogic**, which
+  sits behind `if (!cfg?.ror?.timeWindowMin) return` — a joint would otherwise
+  lose its sensor-fault check entirely whenever the alarm config were
+  incomplete. The lookup is wrapped in try/catch so a missing library keeps the
+  datasheet defaults rather than removing the check.
+
+  **A prior test asserted the ceiling "unchanged at 300" and was superseded, not
+  deleted.** It was correct when written — that change was completing the LOW
+  side of a one-sided gate and explicitly not retuning anything else. The
+  behavioural test that lifts the real gate out of the flow and runs it now also
+  pins `faulted(200) === true` and `faulted(149.5) === false`, so the case the
+  old ceiling let through is covered by execution rather than by a regex.
+
+  **Worth watching**: that same test records J10 reading **131 °C** under a heat
+  test — real, and only 19 °C below the new ceiling. A heat test driven past
+  150 °C will now classify as a sensor fault. That is correct (the element
+  cannot measure there, so the value would be fiction) but it is a visible
+  behaviour change for anyone running one.
+
+  **Caveat carried forward:** the datasheet is for the thermistor ELEMENT. The
+  joints are read through Modbus RTU transmitters with their own output range
+  and scaling. 150 is a hard physical ceiling regardless — the element cannot
+  exceed it — so it is sound as an upper bound on trust, but the transmitter's
+  own specification should be confirmed before treating 150 as exact.

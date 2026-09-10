@@ -108,7 +108,13 @@ function processRemoteConfig(payload, deps) {
     // widening the "after" into the full profiles map would change what an
     // operator sees in the trail for what is still a threshold change.
     const runtimeProfiles = buildRuntimeProfiles(payload.doc);
-    const runtimeConfig = runtimeProfiles ? { ...attemptedFlat, profiles: runtimeProfiles } : attemptedFlat;
+    const runtimeConfig = {
+      ...attemptedFlat,
+      ...(runtimeProfiles ? { profiles: runtimeProfiles } : {}),
+      // The plausibility ceiling ProcessLogic tells a measurement from a fault
+      // with - remotely tunable like the thresholds, and previously hardcoded.
+      ...(payload.doc?.sensor_fault ? { sensor_fault: payload.doc.sensor_fault } : {}),
+    };
     return {
       ack: ack('applied', { applied_versions: result.appliedVersions }),
       applied: true,
