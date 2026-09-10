@@ -1,6 +1,7 @@
 'use strict';
 
 const { validateAlarms } = require('../validate-alarms');
+const { buildRuntimeProfiles } = require('../../alarms/threshold-resolver');
 
 const DEFAULT_PROFILE = {
   deltaT: { watch: 15, warning: 25, critical: 35 },
@@ -112,6 +113,15 @@ function applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, fla
     };
   }
 
+  // The dashboard edits only the default profile, but the RUNTIME needs every
+  // profile: a joint whose threshold_profile names 'outdoor' has to find
+  // 'outdoor' in the global, and this apply is the only thing that rewrites it.
+  // Publishing just the edited profile would mean saving the panel-wide
+  // thresholds silently reverted every other joint to them.
+  // The flat {deltaT, ror, persistence} stays at the top level so a panel
+  // running an older flow - or this one before its next apply - is unaffected.
+  const runtimeProfiles = buildRuntimeProfiles(newDoc);
+
   return {
     msg: withPayload(msg, { config: flatProfile, success: successMessage }),
     audit: {
@@ -121,7 +131,7 @@ function applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, fla
       oldConfig: currentFlatProfile,
       newConfig: flatProfile,
     },
-    runtimeConfig: flatProfile,
+    runtimeConfig: runtimeProfiles ? { ...flatProfile, profiles: runtimeProfiles } : flatProfile,
   };
 }
 

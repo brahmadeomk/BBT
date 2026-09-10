@@ -109,6 +109,13 @@ function buildProcessLogicJoints(doc, { labelFallback } = {}) {
       zone_id: j.zone_id ?? null,
       zone_name: zoneName.get(j.zone_id) ?? 'Unknown',
       ambientKey: resolveAmbientKey(doc, j),
+      // Carried so the Alarm Manager can evaluate this joint against ITS
+      // thresholds. Until 2026-09-10 nothing read `threshold_profile` anywhere
+      // in the flow: it was in the schema, selected in cfg/joints and checked by
+      // A3, while every joint was in fact evaluated against one panel-wide set.
+      // Null rather than 'default' when unset - the resolver decides what unset
+      // means, and a default written in here would be a second place to change.
+      threshold_profile: j.threshold_profile ?? null,
     });
   }
 

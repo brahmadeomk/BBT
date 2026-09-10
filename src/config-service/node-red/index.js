@@ -16,6 +16,7 @@ const { resolveAmbient } = require('../ambient-resolver');
 const { planRecovery } = require('../bus-recovery');
 const alarmEmail = require('../../alarms/email-subject');
 const alarmSweep = require('../../alarms/config-sweep');
+const alarmThresholds = require('../../alarms/threshold-resolver');
 const processLogicJoints = require('../process-logic-joints');
 const channelDecode = require('../channel-decode');
 const diagTable = require('../../diagnostics/slave-table');
@@ -46,4 +47,4 @@ function createStore(root = DEFAULT_ROOT) {
   return new ConfigStore({ root, validators: { modbus_joints: validateModbusJoints, alarms: validateAlarms, integration: validateIntegration } });
 }
 
-module.exports = { createStore, sortAuditDesc, viewerRows, handleConfigManagerMessage, handleJointMasterMessage, handleModbusSettingsMessage, writeLegacyModbusGlobals, deriveLegacyBridge, appendLegacyAudit, processRemoteConfig, buildLegacyDrafts, buildNanoJobMessage, blacklist, resolveAmbient, planRecovery, alarmEmail, alarmSweep, processLogicJoints, channelDecode, diagTable, scanGate, wifi };
+module.exports = { createStore, sortAuditDesc, viewerRows, handleConfigManagerMessage, handleJointMasterMessage, handleModbusSettingsMessage, writeLegacyModbusGlobals, deriveLegacyBridge, appendLegacyAudit, processRemoteConfig, buildLegacyDrafts, buildNanoJobMessage, blacklist, resolveAmbient, planRecovery, alarmEmail, alarmSweep, alarmThresholds, processLogicJoints, channelDecode, diagTable, scanGate, wifi };

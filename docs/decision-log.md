@@ -7318,3 +7318,56 @@ A benchmark must assert it is measuring the path it claims to measure.
   device-count table and the trap that `poll_interval_s` never reaches the
   Nano), and **§12h**, the flow-side changes that arrive with a `git pull` plus
   a flow re-import and need no configuration.
+
+- **2026-09-10** — **Threshold profiles were a silent no-op: every joint on the
+  panel was evaluated against one panel-wide set.** `cfg/alarms` has had named
+  `profiles` since Slice 2, `cfg/joints` has had `joints[].threshold_profile` to
+  select one, and **A3 validates that the reference resolves**. Nothing read it.
+  The Alarm Manager loaded `busbartherm_system_config` — one flat
+  `{deltaT, ror, persistence}` — and used it for every joint; a grep of every
+  function node in the flow found **zero** references to `threshold_profile` or
+  `profiles`. An operator could set a per-joint profile, watch it validate, see
+  it written to the audit trail, and the panel would carry on using the
+  panel-wide numbers. Worse than a missing feature, because it looks like it
+  works.
+
+  **This is the second instance of the same shape in two days**, after
+  `poll_interval_s` never reaching the Nano (2026-09-09). Both are a field that
+  is validated, displayed and stored, but never read by the code that acts on
+  it. **Schema validation cannot catch this class of bug** — the document is
+  perfectly self-consistent; the defect is that nothing consumes the field. Only
+  a test asserting somebody *reads* it can, which is what
+  `test/flows-integrity.test.js` now does for this one. Worth a deliberate sweep
+  for other write-only config: a field nobody reads is indistinguishable from a
+  working feature right up until someone depends on it.
+
+  **The fix.** `src/alarms/threshold-resolver.js` (pure, 18 unit tests) resolves
+  a joint's thresholds: its own profile → the `default` profile → the flat
+  legacy shape. `buildProcessLogicJoints` now publishes `threshold_profile`,
+  ProcessLogic carries it on the KPI message, and the Alarm Manager resolves per
+  message instead of reading `cfg.deltaT`/`cfg.ror`/`cfg.persistence` directly
+  (12 references rewritten). `runtimeConfig` — written by both the local apply
+  and the remote drain — now carries the full `profiles` map **alongside** the
+  existing flat fields, so a panel running an older flow, or this one before its
+  next alarm apply, is unaffected.
+
+  **Fail-safe direction, as everywhere else on the alarm path**: every fallback
+  widens rather than narrows, and the last resort is the panel-wide set that was
+  in use before this change — so the worst case is exactly the old behaviour,
+  never silence. A missing library, a deleted profile name and a malformed
+  profile all end at the default rather than leaving a joint unwatched. `via`
+  records which rung answered, so a joint quietly running on the wrong
+  thresholds can be surfaced instead of being invisible.
+
+  **A partial profile is rejected whole, not merged.** The schema makes all
+  three groups required, so a profile missing one is malformed rather than a
+  request to inherit; half-applying it would produce thresholds no one wrote.
+
+  **Deliberately NOT done here: zone-wise binding.** The request that uncovered
+  this was per-zone alarm settings (up to 50 zones). That needs
+  `zones[].threshold_profile`, `zones.maxItems` raised from 16 to 50, A3 extended
+  to validate zone references, and a decision on whether 50 zones want named
+  profiles (`profiles.maxProperties` is capped at 16) or inline per-zone
+  thresholds — all schema changes, which CLAUDE.md puts in the design chat. The
+  resolver's signature takes a profile NAME rather than a joint, so adding a
+  zone rung is a change to what the caller passes, not to this module.

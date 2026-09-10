@@ -676,3 +676,68 @@ describe('every busductConfigService member a flow node calls actually exists', 
     assert.deepEqual([...new Set(missing)], []);
   });
 });
+
+describe('thresholds are resolved per joint, not panel-wide (2026-09-10)', () => {
+  // THE BUG THIS PINS. cfg/alarms has had named `profiles` since Slice 2,
+  // cfg/joints has had joints[].threshold_profile to select one, and A3 has
+  // always validated that the reference resolves. None of it reached the
+  // runtime: the Alarm Manager read one flat {deltaT, ror, persistence} out of
+  // `busbartherm_system_config` and evaluated EVERY joint against it, and no
+  // node in the flow mentioned threshold_profile at all. An operator could set
+  // a per-joint profile, watch it validate, see it audited - and nothing
+  // changed. It is the same shape as poll_interval_s never reaching the Nano
+  // (2026-09-09): validated, displayed, stored, never read.
+  //
+  // Validation cannot catch this class of bug, because the document IS
+  // self-consistent. Only a test that asserts somebody READS the field can.
+  const flows = JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+  const byId = (id) => flows.find((n) => n.id === id);
+  const ALARM_MANAGER = 'de6fcc55794afd9e';
+  const PROCESS_LOGIC = '39dad91df0c15744';
+
+  test('ProcessLogic carries each joint threshold_profile on its KPI message', () => {
+    const body = byId(PROCESS_LOGIC).func;
+    assert.match(
+      body,
+      /threshold_profile:\s*joint\.threshold_profile/,
+      'the Alarm Manager cannot resolve a profile it is never told about'
+    );
+  });
+
+  test('the Alarm Manager resolves thresholds instead of reading the flat set', () => {
+    const body = byId(ALARM_MANAGER).func;
+    assert.match(body, /alarmThresholds\?\.resolveThresholds\(/, 'must go through the resolver');
+    const flat = body.match(/\bcfg\.(deltaT|ror|persistence)\./g) || [];
+    assert.deepEqual(
+      flat,
+      [],
+      `Alarm Manager reads panel-wide thresholds directly (${flat.join(', ')}) - ` +
+        'that is the regression: every joint gets the default profile again'
+    );
+  });
+
+  test('the resolved set is declared before it is used', () => {
+    // A subtle one: hoisting means a `let TH` moved below the RoR/deltaT blocks
+    // would throw ReferenceError on the live alarm path, per message, and the
+    // only symptom would be alarms silently not being raised.
+    const body = byId(ALARM_MANAGER).func;
+    const declared = body.indexOf('let TH = cfg;');
+    const firstUse = body.search(/TH\.(deltaT|ror|persistence)\./);
+    assert.ok(declared >= 0, 'expected the resolved threshold set to be declared');
+    assert.ok(firstUse > declared, 'thresholds are used before they are resolved');
+  });
+
+  test('resolution falls back rather than leaving a joint unwatched', () => {
+    // The fail-safe direction is the whole point: a fire-safety monitor must
+    // never stop alarming because a profile name is wrong or the library is
+    // missing. Worst case is the panel-wide set - never silence.
+    const { resolveThresholds } = require('../src/alarms/threshold-resolver');
+    const complete = {
+      deltaT: { watch: 15, warning: 25, critical: 35 },
+      ror: { watch: 15, warning: 30, critical: 60, timeWindowMin: 20 },
+      persistence: { watchMin: 30, warningMin: 15, criticalMin: 5 },
+    };
+    assert.ok(resolveThresholds({ ...complete, profiles: { default: complete } }, 'gone'));
+    assert.ok(resolveThresholds(complete, 'gone'), 'a pre-profiles global must still resolve');
+  });
+});

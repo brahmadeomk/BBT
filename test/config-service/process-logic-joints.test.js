@@ -227,3 +227,27 @@ describe('joint name survives the move to the applied document', () => {
     }
   });
 });
+
+test('published joints carry threshold_profile (2026-09-10)', async (t) => {
+  // Without this the Alarm Manager has no way to know which profile a joint is
+  // on, and silently evaluates every joint against the panel-wide default -
+  // which is exactly the no-op this field was added to fix.
+  const withProfiles = doc({
+    joints: [
+      { joint_id: 'J01', slave_id: 'sl01', channel: 1, zone_id: 'z1', label: 'A', threshold_profile: 'outdoor' },
+      { joint_id: 'J02', slave_id: 'sl02', channel: 1, zone_id: 'z1', label: 'B' },
+    ],
+  });
+
+  await t.test('a joint on a named profile publishes that name', () => {
+    const { joints } = buildProcessLogicJoints(withProfiles);
+    assert.equal(joints.find((j) => j.joint_id === 'J01').threshold_profile, 'outdoor');
+  });
+
+  await t.test('an unset profile publishes null, not a fabricated default', () => {
+    // The resolver owns what "unset" means; writing 'default' here would be a
+    // second place to change it, and the two could disagree.
+    const { joints } = buildProcessLogicJoints(withProfiles);
+    assert.equal(joints.find((j) => j.joint_id === 'J02').threshold_profile, null);
+  });
+});

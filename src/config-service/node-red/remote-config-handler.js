@@ -3,6 +3,7 @@
 const { MESSAGE_TYPES, SCHEMA_VERSION } = require('../../cloud-gateway/message-types');
 
 const { nanoJobsEqual } = require('../nano-compiler');
+const { buildRuntimeProfiles } = require('../../alarms/threshold-resolver');
 
 /**
  * Slice 7: processes one message from the remote config channel
@@ -101,13 +102,19 @@ function processRemoteConfig(payload, deps) {
         audits: [remoteAudit('audit_busbartherm', user, 'REMOTE_REJECTED', beforeFlat, attemptedFlat)],
       };
     }
-    const runtimeConfig = attemptedFlat;
+    // A remote push replaces the whole alarms document, so its profiles are the
+    // ones the runtime must resolve against. The AUDIT keeps comparing the flat
+    // default before/after: the audit viewers render these two values, and
+    // widening the "after" into the full profiles map would change what an
+    // operator sees in the trail for what is still a threshold change.
+    const runtimeProfiles = buildRuntimeProfiles(payload.doc);
+    const runtimeConfig = runtimeProfiles ? { ...attemptedFlat, profiles: runtimeProfiles } : attemptedFlat;
     return {
       ack: ack('applied', { applied_versions: result.appliedVersions }),
       applied: true,
       domain,
       runtimeConfig,
-      audits: [remoteAudit('audit_busbartherm', user, 'REMOTE_APPLY', beforeFlat, runtimeConfig)],
+      audits: [remoteAudit('audit_busbartherm', user, 'REMOTE_APPLY', beforeFlat, attemptedFlat)],
     };
   }
 
