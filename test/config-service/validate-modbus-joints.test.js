@@ -452,3 +452,51 @@ describe('joint_id format (widened 2026-08-31 to 6 characters)', () => {
     assert.ok(errorsFor('R5', r).length > 0, 'duplicate joint ids must still fail R5');
   });
 });
+
+describe('A3 from the joints side - closing the ordering trap (2026-09-11)', () => {
+  // A3 lived only in the alarms validator, so a joints apply binding a zone to a
+  // non-existent profile SUCCEEDED - and every subsequent alarms apply was then
+  // blocked by A3 until someone corrected it. The operator's error appeared on a
+  // screen they were not using, about a document they had not touched.
+  const alarmsDoc = { profiles: { default: {}, outdoor: {} } };
+  const a3 = (result) => result.errors.filter((e) => e.rule === 'A3');
+
+  test('accepts a zone naming a profile that exists', () => {
+    const doc = validModbusJointsDoc();
+    doc.zones[0].threshold_profile = 'outdoor';
+    assert.equal(a3(validateModbusJoints(doc, { applying: true, alarmsDoc })).length, 0);
+  });
+
+  test('rejects a zone naming a profile that does not exist', () => {
+    const doc = validModbusJointsDoc();
+    doc.zones[0].threshold_profile = 'ghost';
+    const errs = a3(validateModbusJoints(doc, { applying: true, alarmsDoc }));
+    assert.equal(errs.length, 1);
+    assert.match(errs[0].message, new RegExp(`zone '${doc.zones[0].zone_id}'.*'ghost'`));
+  });
+
+  test('rejects a joint naming a profile that does not exist', () => {
+    const doc = validModbusJointsDoc();
+    doc.joints[0].threshold_profile = 'ghost';
+    assert.match(a3(validateModbusJoints(doc, { applying: true, alarmsDoc }))[0].message, /joint '.*'.*'ghost'/);
+  });
+
+  test('is NOT enforced on read, so a panel already carrying one keeps loading', () => {
+    // readDomain treats an invalid document as absent and falls through to LKG.
+    // Unconditional, this would take the whole configuration away from a running
+    // panel - no polling, no alarms - to fix a commissioning mistake. Same
+    // reasoning as R17.
+    const doc = validModbusJointsDoc();
+    doc.zones[0].threshold_profile = 'ghost';
+    assert.equal(a3(validateModbusJoints(doc, { alarmsDoc })).length, 0);
+  });
+
+  test('does not deadlock commissioning when cfg/alarms is not set up yet', () => {
+    // With no profiles at all every reference would dangle, and blocking the
+    // joints apply would mean neither document could be applied first.
+    const doc = validModbusJointsDoc();
+    doc.zones[0].threshold_profile = 'outdoor';
+    assert.equal(a3(validateModbusJoints(doc, { applying: true, alarmsDoc: { profiles: {} } })).length, 0);
+    assert.equal(a3(validateModbusJoints(doc, { applying: true })).length, 0, 'no alarms doc at all');
+  });
+});

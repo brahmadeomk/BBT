@@ -397,6 +397,52 @@ function validateModbusJoints(doc, context = {}) {
     }
   }
 
+  // A3 FROM THE JOINTS SIDE: a threshold_profile named here must exist in
+  // cfg/alarms. Same invariant the alarms validator has always enforced - this
+  // closes an enforcement GAP, it is not a new rule, which is why it keeps the
+  // A3 id rather than taking an R number. The invariant is symmetric (either
+  // document can break it) and giving one invariant two ids would mean two sets
+  // of tests and two messages for one operator problem.
+  //
+  // THE TRAP THIS CLOSES (observed live 2026-09-11). A3 lived only in the alarms
+  // validator, so a joints apply binding a zone to a non-existent profile
+  // SUCCEEDED - and then every subsequent alarms apply was blocked by A3 until
+  // someone corrected it. The operator's error appeared on a screen they were
+  // not using, about a document they had not touched.
+  //
+  // ENFORCED ONLY WHEN APPLYING, following R17 (user instruction 2026-09-08).
+  // `readDomain` treats an invalid document as absent and falls through to the
+  // LKG snapshot, so making this unconditional could take the whole
+  // configuration away from a panel that already carries a dangling reference -
+  // no polling, no alarms - to fix what is a commissioning mistake. New configs
+  // cannot introduce it; existing ones keep running until someone corrects them.
+  if (context.applying && context.alarmsDoc) {
+    const known = context.alarmsDoc.profiles;
+    // No profiles at all means cfg/alarms has not been commissioned yet. Every
+    // reference would "dangle" and blocking the joints apply would deadlock
+    // commissioning, since neither document could be applied first.
+    if (known && typeof known === 'object' && Object.keys(known).length > 0) {
+      const seen = new Map(); // name -> scope, first reference wins the message
+      for (const z of doc.zones ?? []) {
+        if (z.threshold_profile != null && !seen.has(z.threshold_profile)) {
+          seen.set(z.threshold_profile, `zone '${z.zone_id}'`);
+        }
+      }
+      for (const j of doc.joints ?? []) {
+        if (j.threshold_profile != null && !seen.has(j.threshold_profile)) {
+          seen.set(j.threshold_profile, `joint '${j.joint_id}'`);
+        }
+      }
+      for (const [name, scope] of seen) {
+        if (!Object.prototype.hasOwnProperty.call(known, name)) {
+          errors.push(
+            err('A3', `${scope} references threshold_profile '${name}', which does not exist in cfg/alarms`)
+          );
+        }
+      }
+    }
+  }
+
   // R11: version monotonicity
   if (context.appliedVersions) {
     for (const domain of ['modbus', 'joints']) {

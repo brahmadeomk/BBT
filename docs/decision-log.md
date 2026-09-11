@@ -7531,3 +7531,37 @@ A benchmark must assert it is measuring the path it claims to measure.
   Config, and the profile selectors on the zone and joint tables. All
   client-side Angular in the flow, which this repo's tests cannot exercise, so
   it needs live verification on the panel.
+
+- **2026-09-11** — **The A3 ordering trap is closed at source.** Recorded earlier
+  today and fixed the same day: A3 lived only in the alarms validator, so a
+  joints apply binding a zone to a non-existent profile **succeeded**, and every
+  subsequent alarms apply was then blocked by A3 until someone corrected it. The
+  operator's error surfaced on a screen they were not using, about a document
+  they had not touched.
+
+  **Reported as A3, not as a new R number.** The invariant — a
+  `threshold_profile` named in `cfg/joints` must exist in `cfg/alarms` — is
+  symmetric: either document can break it. What existed was an enforcement gap
+  on one side, not a second rule. Giving one invariant two ids would mean two
+  sets of tests and two messages for one operator problem. It also avoids
+  inventing an R number that the design chat owns and could assign elsewhere.
+  If that chat prefers a distinct id, it is a rename.
+
+  **Gated on `context.applying`, following R17 exactly.** `readDomain` treats an
+  invalid document as absent and falls through to the LKG snapshot, so an
+  unconditional check would take the whole configuration away from a panel that
+  already carries a dangling reference — no polling, no alarms, on a fire-safety
+  monitor — in order to fix a commissioning mistake. New configs cannot introduce
+  it; existing ones keep running until someone corrects them. `applyIfValid`
+  sets `applying: true` itself (`store.js:234`), so all three joints-apply paths
+  pick this up without a caller change, and all three already pass `alarmsDoc`.
+
+  **It does not deadlock commissioning.** With no profiles in `cfg/alarms` at
+  all, every reference would dangle and blocking the joints apply would mean
+  neither document could be applied first. So the check no-ops when the alarms
+  document is absent or carries no profiles, and engages once profiles exist.
+
+  Verified end to end against a real store, not only as units: applying a joints
+  document whose zone names `ghost` is refused with *"zone 'z2' references
+  threshold_profile 'ghost', which does not exist in cfg/alarms"*, while the same
+  document with no profile bound applies cleanly.
