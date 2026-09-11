@@ -2,6 +2,7 @@
 
 const { validateAlarms } = require('../validate-alarms');
 const { buildRuntimeProfiles } = require('../../alarms/threshold-resolver');
+const { precheckProfiles, buildProfilesDoc, profilesForUi } = require('../profile-manager');
 
 const DEFAULT_PROFILE = {
   deltaT: { watch: 15, warning: 25, critical: 35 },
@@ -55,6 +56,21 @@ function handleConfigManagerMessage(msg, store) {
     return applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, DEFAULT_PROFILE, user, 'Default configuration restored', 'RESTORE');
   }
 
+  // NAMED PROFILES (2026-09-11). The screen above edits `default` only, which is
+  // why zone-wise thresholds were inert - no profile for a zone to bind to could
+  // be created from the panel at all. These two actions manage the whole map.
+  if (action === 'profiles_load') {
+    return {
+      msg: withPayload(msg, { profiles: profilesForUi(currentAlarms, currentModbusJoints) }),
+      audit: null,
+      runtimeConfig: null,
+    };
+  }
+
+  if (action === 'profiles_apply') {
+    return applyProfiles(msg, store, currentAlarms, currentModbusJoints, msg.payload.profiles, user);
+  }
+
   // LOAD (no action): reflect the currently applied default profile, or the
   // built-in default if nothing has been applied yet.
   const config = currentAlarms?.profiles?.default
@@ -65,6 +81,85 @@ function handleConfigManagerMessage(msg, store) {
       }
     : DEFAULT_PROFILE;
   return { msg: withPayload(msg, { config }), audit: null, runtimeConfig: null };
+}
+
+/**
+ * Apply a complete profiles map from the editor.
+ *
+ * The client sends its WHOLE map on every action - add, rename and delete are
+ * all edits to the map it already holds - so there is one write path and no
+ * partial-update shapes. That is the JointMasterUI data-loss lesson: a UI that
+ * sends only what it touched lets the server answer from its own stale copy.
+ */
+function applyProfiles(msg, store, currentAlarms, currentModbusJoints, profiles, user) {
+  const problems = precheckProfiles(profiles, currentModbusJoints, currentAlarms);
+  if (problems.length > 0) {
+    // Refused before the store is touched, so the applied document is unchanged
+    // and the editor can keep the operator's in-progress map on screen.
+    return {
+      msg: withPayload(msg, {
+        profiles: profilesForUi(currentAlarms, currentModbusJoints),
+        error: problems.join(' '),
+      }),
+      audit: null,
+      runtimeConfig: null,
+    };
+  }
+
+  const newDoc = buildProfilesDoc(currentAlarms, profiles);
+  const result = store.applyIfValid(
+    'alarms',
+    newDoc,
+    { jointsDoc: currentModbusJoints, modbusDoc: currentModbusJoints },
+    user
+  );
+
+  if (!result.applied) {
+    return {
+      msg: withPayload(msg, {
+        profiles: profilesForUi(currentAlarms, currentModbusJoints),
+        error: result.errors.map((e) => `${e.rule}: ${e.message}`).join('; '),
+      }),
+      audit: {
+        ts: new Date().toISOString(),
+        user,
+        action: 'PROFILES_APPLY_REJECTED',
+        oldConfig: { profiles: Object.keys(currentAlarms?.profiles ?? {}) },
+        newConfig: { profiles: Object.keys(profiles) },
+      },
+      runtimeConfig: null,
+    };
+  }
+
+  // The runtime needs every profile, not just the edited one: a joint bound to
+  // 'outdoor' has to find 'outdoor' in the global. The flat default stays at the
+  // top level so an older flow, and this one before its next apply, still work.
+  const runtimeProfiles = buildRuntimeProfiles(newDoc);
+  const def = newDoc.profiles.default;
+
+  return {
+    msg: withPayload(msg, {
+      profiles: profilesForUi(newDoc, currentModbusJoints),
+      success: 'Threshold profiles saved',
+    }),
+    audit: {
+      ts: new Date().toISOString(),
+      user,
+      action: 'PROFILES_APPLY',
+      // Names, not every number: the audit viewers are capped at 20 rows and a
+      // 50-profile dump would make the entry unreadable. The full document is in
+      // the store's own versioned history if the values are ever needed.
+      oldConfig: { profiles: Object.keys(currentAlarms?.profiles ?? {}).sort() },
+      newConfig: { profiles: Object.keys(newDoc.profiles).sort() },
+    },
+    runtimeConfig: {
+      deltaT: def.deltaT,
+      ror: def.ror,
+      persistence: def.persistence,
+      ...(runtimeProfiles ? { profiles: runtimeProfiles } : {}),
+      ...(newDoc.sensor_fault ? { sensor_fault: newDoc.sensor_fault } : {}),
+    },
+  };
 }
 
 function applyDefaultProfile(msg, store, currentAlarms, currentModbusJoints, flatProfile, user, successMessage, auditAction) {

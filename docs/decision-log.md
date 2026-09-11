@@ -7477,3 +7477,57 @@ A benchmark must assert it is measuring the path it claims to measure.
   sharing profiles that should be ample, but 50 zones needing more than 16
   distinct sets would hit it. Raising it is a one-line schema change if the
   pilot shows it binding.
+
+- **2026-09-11** — **Named-profile editor (Phase 2 backend): zone-wise thresholds
+  are now authorable.** Profiles had been in `cfg/alarms` since Slice 2 and zones
+  could bind to one from earlier today, but nothing could CREATE a second
+  profile — `applyDefaultProfile` only ever writes `profiles.default`, so a zone
+  could only name a profile that arrived by remote push or a hand-edited file.
+  `src/config-service/profile-manager.js` (pure, 27 tests) plus two actions on
+  the existing Alarm Config node: `profiles_load` and `profiles_apply`.
+
+  **The client sends its WHOLE map on every action**, and the handler takes a
+  whole map, never a delta — add, rename and delete are all edits to the map the
+  client already holds. That is the `JointMasterUI` data-loss lesson: a UI that
+  sends only what it touched lets the server answer from its own last-persisted
+  copy, and the template's `$watch` then overwrites an in-progress edit. One
+  write path, one validation pass, no partial-update shapes.
+
+  **A hole that every unit test missed, found by running the handler against a
+  real store.** `readDomain` returns `null` for an unreadable or invalid
+  document. The "is this profile still in use?" check and **A3 are both gated on
+  having the joints document**, so with no document BOTH fail OPEN: a profile a
+  zone depends on could be deleted, and every joint in that zone would slide
+  onto the panel-wide default without a word. The 23 unit tests passed
+  throughout, because they all supplied a document.
+
+  The fix is asymmetric on purpose. Adding or editing a profile is safe without
+  the joints document, and a fresh panel legitimately has none — refusing every
+  edit would make the editor unusable at commissioning. Only a **delete** needs
+  the reference check, so only a delete is refused when it cannot be run. Same
+  rule as the config-change alarm sweep: refuse to act on absent information,
+  never read absence as "nothing is bound". Note "no document" and "document
+  says nothing is bound" are different statements and only the first refuses.
+
+  **Method note, and the second time this exact thing has happened.** The
+  applied-config cache (2026-09-09) was caught by a benchmark that asserted it
+  was measuring the path it claimed to. This was caught by an end-to-end run
+  against a real store rather than a mock. A unit test proves a function is
+  right about the inputs you thought to give it; only exercising the wiring
+  shows what the rest of the system actually hands it.
+
+  **An ordering trap, recorded not fixed.** `validateModbusJoints` does NOT check
+  `threshold_profile` references — only A3 does, on the alarms side. So a joints
+  apply carrying a zone bound to a non-existent profile SUCCEEDS, and every
+  subsequent alarms apply is then blocked by A3 until it is corrected. Observed
+  live in the end-to-end run. The UI makes it unreachable (the zone selector is a
+  dropdown of existing profiles) but a remote push or hand edit can still do it.
+  Two things make it survivable rather than baffling: A3's message now names the
+  zone (added this morning), and the block is on the alarms domain, so
+  monitoring continues throughout. Whether the joints validator should carry the
+  same cross-domain check is a design-chat question.
+
+  **Still to build: the UI itself** — the profile editor `ui_template` on Alarm
+  Config, and the profile selectors on the zone and joint tables. All
+  client-side Angular in the flow, which this repo's tests cannot exercise, so
+  it needs live verification on the panel.

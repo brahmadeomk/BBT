@@ -84,7 +84,7 @@
       "description": "Named threshold profiles. 'default' is mandatory and applies to every joint whose threshold_profile is 'default' or unset. Additional profiles are referenced by joints[].threshold_profile in cfg/joints.",
       "required": ["default"],
       "minProperties": 1,
-      "maxProperties": 16,
+      "maxProperties": 50,
       "propertyNames": { "pattern": "^[a-z][a-z0-9_]{0,23}$" },
       "additionalProperties": { "$ref": "#/definitions/profile" }
     },
