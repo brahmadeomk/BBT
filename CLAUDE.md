@@ -120,6 +120,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | Arduino Nano firmware | `firmware/Nano_IOT.ino` | present |
 | Licence management (remote + typed key, expiry gating) | `docs/licence-management-proposal.md` | **PROPOSAL, not built** (2026-09-01) |
 | Channel recovery in the decode path (incl. why `temp_scale` is report-only) | `docs/channel-decode-proposal.md` | steps 1-2 **built**, fan-out proposed (2026-09-01) |
+| Zone as the place both ambient and thresholds are set (declare, don't infer) | `docs/zone-ambient-proposal.md` | **PROPOSAL, not built** (2026-09-11) |
 | Edge device user manual (operator/technician HMI guide) | `docs/edge-user-manual.md` | present |
 | Nano 33 IoT field-replacement runbook | `docs/nano-replacement.md` | present |
 | HIRA — sensor installation on busducts | `docs/hira-live-sensor-installation.md` | **DRAFT, needs competent-person sign-off** (2026-09-01) |
