@@ -98,16 +98,37 @@ function validateAlarms(doc, context = {}) {
     errors.push(...checkHysteresisSanity(name, profile));
   }
 
-  // A3: every joints[].threshold_profile must resolve to a profile here
+  // A3: every threshold_profile referenced from cfg/joints must resolve to a
+  // profile here - from a JOINT or from a ZONE.
+  //
+  // Zones were added to this rule on 2026-09-10, when zone-wise alarm settings
+  // were introduced. A zone reference is the more dangerous of the two to leave
+  // unchecked: a joint names a profile for itself, but a zone names one on
+  // behalf of every joint in it, so one dangling zone reference silently drops a
+  // whole zone back to panel-wide thresholds. The resolver falls back rather
+  // than leaving those joints unwatched, but a fallback nobody was told about is
+  // how a zone ends up quietly mis-monitored - which is what this rule prevents.
+  //
+  // The scope is named in the message because the two live in different tables:
+  // "which zone?" is the first thing an operator asks, and the profile name
+  // alone does not answer it.
   if (context.jointsDoc) {
-    const referenced = new Set(
-      (context.jointsDoc.joints || [])
-        .map((j) => j.threshold_profile)
-        .filter((p) => p != null)
-    );
-    for (const name of referenced) {
+    const referenced = new Map(); // profile name -> human scope for the message
+    for (const j of context.jointsDoc.joints || []) {
+      if (j.threshold_profile != null && !referenced.has(j.threshold_profile)) {
+        referenced.set(j.threshold_profile, `joint '${j.joint_id}'`);
+      }
+    }
+    for (const z of context.jointsDoc.zones || []) {
+      if (z.threshold_profile != null && !referenced.has(z.threshold_profile)) {
+        referenced.set(z.threshold_profile, `zone '${z.zone_id}'`);
+      }
+    }
+    for (const [name, scope] of referenced) {
       if (!Object.prototype.hasOwnProperty.call(profiles, name)) {
-        errors.push(err('A3', `cfg/joints references threshold_profile '${name}', which does not exist in cfg/alarms`));
+        errors.push(
+          err('A3', `cfg/joints ${scope} references threshold_profile '${name}', which does not exist in cfg/alarms`)
+        );
       }
     }
   }

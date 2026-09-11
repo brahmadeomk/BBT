@@ -251,3 +251,54 @@ test('published joints carry threshold_profile (2026-09-10)', async (t) => {
     assert.equal(joints.find((j) => j.joint_id === 'J02').threshold_profile, null);
   });
 });
+
+test('zone-wise thresholds: joint -> zone -> unset (2026-09-10)', async (t) => {
+  // Same 3-level shape as the ambient chain, resolved in the same place so the
+  // two cannot drift into different precedence rules.
+  const zoned = (over = {}) => doc({
+    zones: [
+      { zone_id: 'z1', name: 'Riser AC', threshold_profile: 'indoor' },
+      { zone_id: 'z2', name: 'Outdoor', ...over },
+    ],
+    joints: [
+      { joint_id: 'J01', slave_id: 'sl01', channel: 1, zone_id: 'z1' },
+      { joint_id: 'J02', slave_id: 'sl02', channel: 1, zone_id: 'z1', threshold_profile: 'hot_riser' },
+    ],
+  });
+
+  await t.test('a joint with no profile of its own inherits its zone', () => {
+    const { joints } = buildProcessLogicJoints(zoned());
+    assert.equal(joints.find((j) => j.joint_id === 'J01').threshold_profile, 'indoor');
+  });
+
+  await t.test('a joint override beats its zone', () => {
+    const { joints } = buildProcessLogicJoints(zoned());
+    assert.equal(joints.find((j) => j.joint_id === 'J02').threshold_profile, 'hot_riser');
+  });
+
+  await t.test('neither set publishes null, leaving the fallback to the resolver', () => {
+    const plain = doc({
+      zones: [{ zone_id: 'z1', name: 'Zone1' }],
+      joints: [{ joint_id: 'J01', slave_id: 'sl01', channel: 1, zone_id: 'z1' }],
+    });
+    assert.equal(buildProcessLogicJoints(plain).joints[0].threshold_profile, null);
+  });
+
+  await t.test('a joint in an unknown zone falls through rather than throwing', () => {
+    const orphan = doc({
+      zones: [{ zone_id: 'z1', name: 'Zone1', threshold_profile: 'indoor' }],
+      joints: [{ joint_id: 'J01', slave_id: 'sl01', channel: 1, zone_id: 'zXX' }],
+    });
+    assert.equal(buildProcessLogicJoints(orphan).joints[0].threshold_profile, null);
+  });
+
+  await t.test('a joint explicitly on default is not overridden by its zone', () => {
+    // 'default' is a real selection, not an absence - the operator chose the
+    // panel-wide set for this joint and the zone must not take it back.
+    const d = doc({
+      zones: [{ zone_id: 'z1', name: 'Zone1', threshold_profile: 'indoor' }],
+      joints: [{ joint_id: 'J01', slave_id: 'sl01', channel: 1, zone_id: 'z1', threshold_profile: 'default' }],
+    });
+    assert.equal(buildProcessLogicJoints(d).joints[0].threshold_profile, 'default');
+  });
+});

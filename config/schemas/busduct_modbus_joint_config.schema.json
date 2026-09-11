@@ -127,14 +127,15 @@
 
     "zones": {
       "type": "array",
-      "maxItems": 16,
+      "maxItems": 50,
       "items": {
         "type": "object",
         "required": ["zone_id", "name"],
         "properties": {
           "zone_id": { "type": "string", "pattern": "^z[0-9]{1,2}$" },
           "name":    { "type": "string", "maxLength": 32 },
-          "ambient_sensor": { "$ref": "#/definitions/ambient_sensor_ref", "description": "Optional zone-level ambient reference override (e.g. this zone runs through an air-conditioned enclosure while others are open-air). Falls back to modbus.ambient_sensor when unset." }
+          "ambient_sensor": { "$ref": "#/definitions/ambient_sensor_ref", "description": "Optional zone-level ambient reference override (e.g. this zone runs through an air-conditioned enclosure while others are open-air). Falls back to modbus.ambient_sensor when unset." },
+          "threshold_profile": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,23}$", "description": "Optional zone-level alarm profile, named in cfg/alarms.profiles. Every joint in this zone uses it unless the joint sets its own threshold_profile. Falls back to 'default' when unset. A NAME, never embedded thresholds - all numbers live in cfg/alarms, which is remotely tunable with no maintenance-mode gate (R12 applies to this domain, and thresholds are not wiring reality). Validated by A3." }
         }
       }
     }

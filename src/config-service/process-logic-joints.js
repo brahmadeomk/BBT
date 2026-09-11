@@ -72,6 +72,11 @@ function buildProcessLogicJoints(doc, { labelFallback } = {}) {
   }
 
   const zoneName = new Map((doc?.zones ?? []).map((z) => [z.zone_id, z.name]));
+  // Only zones that actually name a profile go in, so a `get` miss is
+  // indistinguishable from "zone sets none" and both fall through to unset.
+  const zoneProfile = new Map(
+    (doc?.zones ?? []).filter((z) => z.threshold_profile != null).map((z) => [z.zone_id, z.threshold_profile])
+  );
   const byChannel = new Map();
 
   const ordered = joints
@@ -109,13 +114,22 @@ function buildProcessLogicJoints(doc, { labelFallback } = {}) {
       zone_id: j.zone_id ?? null,
       zone_name: zoneName.get(j.zone_id) ?? 'Unknown',
       ambientKey: resolveAmbientKey(doc, j),
-      // Carried so the Alarm Manager can evaluate this joint against ITS
-      // thresholds. Until 2026-09-10 nothing read `threshold_profile` anywhere
-      // in the flow: it was in the schema, selected in cfg/joints and checked by
-      // A3, while every joint was in fact evaluated against one panel-wide set.
-      // Null rather than 'default' when unset - the resolver decides what unset
-      // means, and a default written in here would be a second place to change.
-      threshold_profile: j.threshold_profile ?? null,
+      // The EFFECTIVE profile name, joint -> zone -> unset, resolved here where
+      // the document is in hand. Deliberately the same 3-level shape as the
+      // ambient chain above, and resolved in the same place, so the two cannot
+      // drift into different precedence rules.
+      //
+      // Resolving it here rather than in the Alarm Manager keeps the runtime
+      // resolver taking a single profile NAME: zones live in this document, not
+      // in the alarm config the resolver sees, so pushing the chain downstream
+      // would mean shipping the zone table to the runtime as well.
+      //
+      // Null rather than 'default' when neither is set - the resolver decides
+      // what unset means, and a default written in here would be a second place
+      // to change it. Until 2026-09-10 nothing read `threshold_profile` at all:
+      // it was in the schema, selected in cfg/joints and checked by A3, while
+      // every joint was evaluated against one panel-wide set.
+      threshold_profile: j.threshold_profile ?? zoneProfile.get(j.zone_id) ?? null,
     });
   }
 

@@ -89,6 +89,36 @@ describe('A3 - threshold_profile references resolve (cross-domain)', () => {
     const result = validateAlarms(validAlarmsDoc());
     assert.equal(errorsFor('A3', result).length, 0);
   });
+
+  // Zones joined this rule on 2026-09-10 with zone-wise alarm settings. A zone
+  // reference is the more dangerous of the two: a joint names a profile for
+  // itself, but a zone names one on behalf of every joint in it, so a single
+  // dangling zone reference drops a WHOLE zone back to panel-wide thresholds.
+  test('accepts a zone naming a profile that exists', () => {
+    const alarms = validAlarmsDoc();
+    alarms.profiles.outdoor = { ...alarms.profiles.default };
+    const joints = validModbusJointsDoc();
+    joints.zones[0].threshold_profile = 'outdoor';
+    assert.equal(errorsFor('A3', validateAlarms(alarms, { jointsDoc: joints })).length, 0);
+  });
+
+  test('rejects a zone referencing a deleted/unknown profile', () => {
+    const alarms = validAlarmsDoc();
+    const joints = validModbusJointsDoc();
+    joints.zones[0].threshold_profile = 'no_such_profile';
+    const result = validateAlarms(alarms, { jointsDoc: joints });
+    assert.equal(result.valid, false);
+    assert.equal(errorsFor('A3', result).length, 1);
+  });
+
+  test('names the zone, because the two references live in different tables', () => {
+    // "which zone?" is the first thing an operator asks, and the profile name
+    // alone does not answer it.
+    const joints = validModbusJointsDoc();
+    joints.zones[0].threshold_profile = 'ghost';
+    const result = validateAlarms(validAlarmsDoc(), { jointsDoc: joints });
+    assert.match(errorsFor('A3', result)[0].message, new RegExp(`zone '${joints.zones[0].zone_id}'`));
+  });
 });
 
 describe('A4 - default profile cannot be removed (defense-in-depth)', () => {

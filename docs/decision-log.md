@@ -7425,3 +7425,55 @@ A benchmark must assert it is measuring the path it claims to measure.
   and scaling. 150 is a hard physical ceiling regardless — the element cannot
   exceed it — so it is sound as an upper bound on trust, but the transmitter's
   own specification should be confirmed before treating 150 as exact.
+
+- **2026-09-11** — **Zone-wise alarm thresholds: zones bind to a named profile,
+  joint beats zone, and no numbers move.** User decisions (2026-09-10/11): zones
+  mostly SHARE threshold sets, so named profiles are the right model; a
+  joint-level override beats its zone; `default` is explicitly selectable; up to
+  **50 zones**.
+
+  **All thresholds stay in `cfg/alarms.profiles`; `cfg/joints` holds references
+  only.** The alternative considered was letting a joint or zone embed literal
+  `deltaT`/`ror`/`persistence` values. Rejected for a reason found while
+  scoping it: `joints[]`/`zones[]` live in the **`cfg/modbus+joints` domain,
+  which R12 gates to maintenance mode for remote pushes**, while `cfg/alarms` is
+  deliberately ungated because thresholds are not wiring reality. Embedding
+  numbers in a zone row would therefore have made a remote threshold change
+  require maintenance mode — inverting an explicit design decision from Slice 2.
+  Keeping numbers in one domain also means a fleet-wide retune touches one
+  document rather than every joint that embedded values.
+
+  **Built**: `zones[].threshold_profile` (same `^[a-z][a-z0-9_]{0,23}$` key
+  pattern as the profile map, so a name is spelled identically wherever it
+  appears); `zones.maxItems` **16 → 50**. `zone_id` needed no change — the
+  existing `^z[0-9]{1,2}$` already spans z1–z99.
+
+  **A3 now covers zone references, not just joint ones.** A zone reference is
+  the more dangerous of the two to leave unchecked: a joint names a profile for
+  itself, but a zone names one on behalf of every joint in it, so one dangling
+  zone reference silently drops a WHOLE zone back to panel-wide thresholds. The
+  error names the scope (`zone 'z2'`) because the two references live in
+  different tables and "which zone?" is the first thing an operator asks.
+
+  **The chain is resolved at publish time, in `buildProcessLogicJoints`,
+  deliberately beside `resolveAmbientKey`.** The ambient chain is already joint →
+  zone → panel there; putting the threshold chain in the same function with the
+  same shape is what stops the two drifting into different precedence rules.
+  It also keeps the runtime resolver taking a single profile NAME — zones live
+  in the joints document, not in the alarm config the resolver sees, so pushing
+  the chain downstream would have meant shipping the zone table to the runtime.
+  A joint explicitly set to `default` is a real selection and is NOT overridden
+  by its zone; only an absent value falls through.
+
+  **STILL INERT, and this is the gating item: there is no way to author a second
+  profile.** `applyDefaultProfile` only ever writes `profiles.default`, so the
+  Alarm Config tab cannot create `indoor` or `hot_riser`. Until a profile editor
+  exists, a zone can only be bound to a profile that arrived by remote config
+  push or a hand-edited file. **Phase 2 is that editor plus the per-zone and
+  per-joint selectors on the Joint Config table** — all `ui_template` work, which
+  needs live verification on the panel and cannot be tested in this repo.
+
+  **Noted, not changed:** `profiles.maxProperties` is still **16**. With zones
+  sharing profiles that should be ample, but 50 zones needing more than 16
+  distinct sets would hit it. Raising it is a one-line schema change if the
+  pilot shows it binding.
