@@ -202,7 +202,13 @@ describe('buildLegacyDrafts', () => {
     doc.joints[0].ambient_sensor = { slave_id: 'sl02', channel: 1 }; // joint-level override
     const { joints, zones } = buildLegacyDrafts(doc);
 
-    assert.deepEqual(zones, [{ zone_id: 'Z1', zone_name: 'Zone1', editing: false }]);
+    // threshold_profile joined both shapes on 2026-09-11. An absent binding is
+    // "no override", which the table shows as 'default' - without it the
+    // dropdown would render empty on reload and the next apply would write that
+    // emptiness back as a cleared selection.
+    assert.deepEqual(zones, [
+      { zone_id: 'Z1', zone_name: 'Zone1', threshold_profile: 'default', editing: false },
+    ]);
     assert.deepEqual(joints[0], {
       joint_name: 'J01',
       joint_id: 'J01',
@@ -213,6 +219,7 @@ describe('buildLegacyDrafts', () => {
       zone_id: 'Z1',
       zone_name: 'Zone1',
       ambientSlaveID: 5, // the joint-level override wins over the panel default
+      threshold_profile: 'default',
       editing: false,
     });
     // multi-channel joint: channel label + panel-default ambient

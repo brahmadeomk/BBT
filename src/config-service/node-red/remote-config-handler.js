@@ -244,6 +244,10 @@ function buildLegacyDrafts(doc) {
   const zones = (doc.zones || []).map((z) => ({
     zone_id: z.zone_id.toUpperCase(),
     zone_name: z.name,
+    // An absent binding is "no zone override", which the table shows as
+    // 'default'. Without this the dropdown would render empty on reload and the
+    // next apply would write that emptiness back as a cleared selection.
+    threshold_profile: z.threshold_profile ?? 'default',
     editing: false,
   }));
 
@@ -266,6 +270,7 @@ function buildLegacyDrafts(doc) {
       zone_id: j.zone_id.toUpperCase(),
       zone_name: zone?.name ?? 'Unknown',
       ambientSlaveID: ambientSlave ? ambientSlave.unit_address : '',
+      threshold_profile: j.threshold_profile ?? 'default',
       editing: false,
     };
   });

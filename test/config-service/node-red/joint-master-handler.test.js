@@ -399,3 +399,49 @@ describe('appendLegacyAudit', () => {
     assert.equal(log[VIEWER_CAP - 1].timestamp, `t${n - 1}`, 'the newest is kept');
   });
 });
+
+describe('threshold_profile survives a joint-table apply (2026-09-11)', () => {
+  // It did not. `threshold_profile: 'default'` was HARDCODED in applyJoints, so
+  // every apply reset every joint's profile, and zones carried none at all - a
+  // binding set by a remote push or a hand edit survived only until the next
+  // time anyone touched this table. With the zone chain live that is worse than
+  // it sounds: the operator sees the joint they edited, not the other joints in
+  // that zone whose thresholds just moved with it.
+  const apply = (jointOver = {}, zoneOver = {}) => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    const joints = [
+      { joint_name: 'J01', joint_id: 'J01', slaveID: 1, ambientSlaveID: 101, zone_id: 'Z1', editing: false, threshold_profile: 'default', ...jointOver },
+    ];
+    const zones = legacyZones().map((z) => ({ ...z, ...zoneOver }));
+    handleJointMasterMessage(
+      { payload: { action: 'apply' } },
+      { joints, slaveList: legacySlaveList(), zones, store }
+    );
+    return store.readDomain('modbus_joints').doc;
+  };
+
+  test('a joint keeps the profile its row carries', () => {
+    assert.equal(apply({ threshold_profile: 'hot_riser' }).joints[0].threshold_profile, 'hot_riser');
+  });
+
+  test('a zone keeps the profile its row carries', () => {
+    assert.equal(apply({}, { threshold_profile: 'indoor' }).zones[0].threshold_profile, 'indoor');
+  });
+
+  test("a zone set to 'default' stores no binding at all", () => {
+    // An absent zone binding means "no zone-level override", which is what lets
+    // a joint's own 'default' stay meaningful against a zone that sets one.
+    // Writing 'default' onto every zone would itself be a binding.
+    assert.equal('threshold_profile' in apply({}, { threshold_profile: 'default' }).zones[0], false);
+  });
+
+  test('a row from a draft predating the column still applies, as default', () => {
+    const doc = apply({ threshold_profile: undefined });
+    assert.equal(doc.joints[0].threshold_profile, 'default');
+  });
+
+  test('a cleared dropdown means default, not an empty name the schema rejects', () => {
+    assert.equal(apply({ threshold_profile: '   ' }).joints[0].threshold_profile, 'default');
+  });
+});

@@ -12,7 +12,20 @@ function findZone(zones, id) {
   return zones.find((z) => z.zone_id == id); // eslint-disable-line eqeqeq
 }
 
-const EMPTY_ROW = () => ({ joint_name: '', joint_id: '', slaveID: '', channel: 1, ambientSlaveID: '', zone_id: '', editing: true });
+const EMPTY_ROW = () => ({ joint_name: '', joint_id: '', slaveID: '', channel: 1, ambientSlaveID: '', zone_id: '', threshold_profile: 'default', editing: true });
+
+/**
+ * A profile selection from a draft row.
+ *
+ * Drafts predating the column carry nothing, and a cleared dropdown carries an
+ * empty string; both mean "the panel-wide set", which is spelled 'default'
+ * everywhere else. Trimmed because the value reaches a schema pattern that has
+ * no room for stray whitespace.
+ */
+function normaliseProfile(value) {
+  const name = typeof value === 'string' ? value.trim() : '';
+  return name === '' ? 'default' : name;
+}
 
 /** Legacy draft rows predate the channel column - treat a missing/blank channel as 1. */
 function rowChannel(j) {
@@ -230,14 +243,32 @@ function applyJoints(msg, joints, zones, slaveList, store, user) {
     channel: rowChannel(j),
     zone_id: j.zone_id.toLowerCase(),
     enabled: true,
-    threshold_profile: 'default',
+    // WAS HARDCODED 'default' (fixed 2026-09-11). Every joint-table apply reset
+    // every joint's profile, so a binding set anywhere else - a remote config
+    // push, a hand edit - survived only until the next time someone touched this
+    // table. With the zone chain live that is worse than it sounds: the operator
+    // sees the joint they edited, not the 80 others whose thresholds just moved.
+    // An empty selection is stored as 'default' rather than omitted so the
+    // draft, the applied document and the dropdown all say the same thing.
+    threshold_profile: normaliseProfile(j.threshold_profile),
   }));
 
   const chainInput = joints.map((j) => ({ joint_id: j.joint_id, zone_id: j.zone_id.toLowerCase(), legacyAmbientId: j.ambientSlaveID }));
   const legacyAmbientIdToNewSlaveId = new Map(
     currentModbusJoints.modbus.slaves.map((s) => [s.unit_address, s.slave_id])
   );
-  const newZones = zones.map((z) => ({ zone_id: z.zone_id.toLowerCase(), name: z.zone_name }));
+  // A zone's profile is carried the same way, and omitted when it is 'default':
+  // the schema treats an absent zone binding as "no zone-level override", which
+  // is what lets a joint's own 'default' stay meaningful against a zone that
+  // sets one. Writing 'default' explicitly on every zone would be a binding.
+  const newZones = zones.map((z) => {
+    const profile = normaliseProfile(z.threshold_profile);
+    return {
+      zone_id: z.zone_id.toLowerCase(),
+      name: z.zone_name,
+      ...(profile !== 'default' ? { threshold_profile: profile } : {}),
+    };
+  });
   const { panelDefaultSlaveId, zoneOverrides, jointOverrides } = resolveAmbientChain(chainInput, newZones, legacyAmbientIdToNewSlaveId);
   for (const zone of newZones) {
     if (zoneOverrides.has(zone.zone_id)) zone.ambient_sensor = { slave_id: zoneOverrides.get(zone.zone_id), channel: 1 };
