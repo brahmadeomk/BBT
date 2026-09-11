@@ -39,6 +39,30 @@ function withPayload(msg, payload) {
 }
 
 /**
+ * Every reply carries the profile names the zone and joint dropdowns offer.
+ *
+ * Attached here rather than in each of the handler's many return points, and
+ * NOT in the function node, which stays thin. Sent on every reply because the
+ * table re-renders from whatever the last message carried: omit it on one path
+ * and the dropdowns empty themselves the moment an operator saves a row.
+ *
+ * Read from cfg/alarms, so it is always the set A3 will actually accept - a
+ * dropdown that offered a name the validator then rejected would be worse than
+ * a free-text box.
+ */
+function availableProfileNames(store) {
+  try {
+    const names = Object.keys(store?.readDomain?.('alarms')?.doc?.profiles ?? {});
+    // 'default' always offered, even on a panel with no alarms document yet:
+    // it is what an unbound joint resolves to, so it must be selectable.
+    if (!names.includes('default')) names.unshift('default');
+    return names.sort((a, b) => (a === 'default' ? -1 : b === 'default' ? 1 : a.localeCompare(b)));
+  } catch {
+    return ['default'];
+  }
+}
+
+/**
  * Thin Node-RED handler replacing "JointMasterBackEndNode". add/edit/
  * delete/save-one-row keep operating on the legacy draft shape exactly
  * as before (they're UI-side bookkeeping on an intentionally-incomplete
@@ -76,6 +100,14 @@ function withPayload(msg, payload) {
  *   joint/zone-only edit leaves modbus.slaves/buses untouched, so it does NOT trigger a resend
  */
 function handleJointMasterMessage(msg, deps) {
+  const out = handleJointMasterMessageInner(msg, deps);
+  if (out && out.msg && out.msg.payload && typeof out.msg.payload === 'object') {
+    out.msg.payload.profile_names = availableProfileNames(deps?.store);
+  }
+  return out;
+}
+
+function handleJointMasterMessageInner(msg, deps) {
   const { slaveList, zones, store, user = 'UI' } = deps;
   const action = msg.payload?.action;
   const index = msg.payload?.index;

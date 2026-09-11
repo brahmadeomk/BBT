@@ -858,3 +858,60 @@ describe('threshold profile editor (2026-09-11)', () => {
     assert.match(byId(BACKEND).func, /global\.set\('busbartherm_system_config', runtimeConfig, 'default'\)/);
   });
 });
+
+describe('profile selectors on the zone and joint tables (2026-09-11)', () => {
+  // The editor could create profiles but nothing could assign them. These two
+  // dropdowns are the assignment half - added to the tables where the
+  // JointMasterUI data-loss bug happened, so the properties that bug taught us
+  // are pinned alongside the new column.
+  const flows = JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+  const byName = (n) => flows.find((x) => x.name === n);
+
+  test('both tables offer the profile dropdown', () => {
+    assert.match(byName('ZoneMasterUI').format, /ng-model="z\.threshold_profile"/);
+    assert.match(byName('JointMasterUI').format, /ng-model="j\.threshold_profile"/);
+  });
+
+  test('headers and cells still line up after the added column', () => {
+    // A table whose <th> count drifts from its <td> count renders every later
+    // column under the wrong heading - silently, and this is a config screen.
+    for (const name of ['ZoneMasterUI', 'JointMasterUI']) {
+      const fmt = byName(name).format;
+      const th = (fmt.match(/<th>/g) || []).length;
+      const td = (fmt.match(/<td>/g) || []).length;
+      assert.equal(th, td, `${name}: ${th} headers vs ${td} cells`);
+    }
+  });
+
+  test('the dropdown never renders empty, even before a reply arrives', () => {
+    // ng-options over an undefined list yields an empty select, and interacting
+    // with one nulls the model - which the next apply would write back as a
+    // cleared selection.
+    for (const name of ['ZoneMasterUI', 'JointMasterUI']) {
+      assert.match(byName(name).format, /msg\.payload\.profile_names \|\| \['default'\]/);
+    }
+  });
+
+  test('the options can only be names the validator will accept', () => {
+    // Sourced from cfg/alarms, so A3 cannot reject what the dropdown offered.
+    assert.match(byName('ZoneMasterBackEnd').func, /readDomain\("alarms"\)/);
+    assert.match(
+      fs.readFileSync(path.join(__dirname, '..', 'src', 'config-service', 'node-red', 'joint-master-handler.js'), 'utf8'),
+      /function availableProfileNames/
+    );
+  });
+
+  test('every zone reply carries the options, not just the load', () => {
+    // The table re-renders from whatever the last message held, so omitting them
+    // on one path empties the dropdowns the moment an operator saves a row.
+    const fn = byName('ZoneMasterBackEnd').func;
+    const returns = fn.match(/return \{payload:\{zones[^}]*\}/g) || [];
+    assert.ok(returns.length >= 3, 'expected the save-error and save-success returns');
+    for (const r of returns) assert.match(r, /profile_names/, r);
+    assert.match(fn, /msg\.payload = \{ zones, profile_names \}/);
+  });
+
+  test('a new zone row starts on the panel-wide set', () => {
+    assert.match(byName('ZoneMasterBackEnd').func, /threshold_profile:"default", editing:true/);
+  });
+});
