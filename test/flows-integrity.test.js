@@ -798,3 +798,63 @@ describe('the sensor plausibility ceiling comes from the sensor (2026-09-10)', (
     assert.equal(sf.sensor_error_above_c.default, 150);
   });
 });
+
+describe('threshold profile editor (2026-09-11)', () => {
+  // Zone-wise thresholds were inert without this: profiles existed in the schema
+  // and zones could bind one, but the Alarm Config screen only ever wrote
+  // profiles.default, so there was no way to create the profile a zone would
+  // name. This is the editor.
+  const flows = JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+  const byId = (id) => flows.find((n) => n.id === id);
+  const UI = 'a1c3f5e7b9d1a002';
+  const BACKEND = 'a1c3f5e7b9d1a003';
+
+  test('the editor loop is closed: UI -> backend -> UI', () => {
+    assert.deepEqual(byId(UI).wires, [[BACKEND]]);
+    assert.deepEqual(byId(BACKEND).wires, [[UI]]);
+  });
+
+  test('it has its own backend, separate from the thresholds screen', () => {
+    // Sharing "BusbarTherm Config Manager" would push every profile reply
+    // through the existing screen's $watch too. This change must not be able to
+    // break the screen that already works.
+    const configManager = 'ebbf810a01b0f9a6';
+    assert.notEqual(BACKEND, configManager);
+    assert.ok(!byId(configManager).wires.some((w) => w.includes(UI)), 'profiles must not ride the thresholds loop');
+  });
+
+  test('a boot inject seeds it, and the widget can also heal itself', () => {
+    // The inject fires ONCE. Re-deploying with the dashboard open re-creates the
+    // widget with an empty scope and nothing to replay - a permanently blank
+    // table - which is why the template asks for its own data too.
+    assert.ok(flows.some((n) => n.type === 'inject' && (n.wires || []).some((w) => w.includes(BACKEND))));
+    assert.match(byId(UI).format, /setTimeout\(function\(\)\{ if \(!loaded\) scope\.reload\(\); \}, 700\)/);
+  });
+
+  test('every action ships the full table, never a single row', () => {
+    // The JointMasterUI data-loss bug: a server reply built from its own
+    // last-persisted copy silently overwrote an unsaved in-progress edit.
+    const fmt = byId(UI).format;
+    assert.match(fmt, /action: 'profiles_apply', profiles: map/);
+    assert.doesNotMatch(fmt, /index:/, 'a per-row action is the shape that lost data');
+  });
+
+  test('handlers tolerate an undefined scope.msg', () => {
+    // Real JS, not a forgiving Angular expression: `scope.msg.payload.profiles`
+    // on an undefined msg throws and the click does nothing, which is what made
+    // ADD BUS dead on a freshly-deployed widget.
+    assert.match(byId(UI).format, /var p = \(scope\.msg && scope\.msg\.payload\) \|\| \{\}/);
+  });
+
+  test('duplicate and unnamed profiles are refused before they are sent', () => {
+    // The server takes a MAP, so two rows sharing a name would collapse into one
+    // and the operator would lose a profile without being told which.
+    const fmt = byId(UI).format;
+    assert.match(fmt, /Duplicate profile name/);
+    assert.match(fmt, /Give every profile a name/);
+  });
+
+  test('the backend writes the runtime global, or a profile change does nothing', () => {
+    assert.match(byId(BACKEND).func, /global\.set\('busbartherm_system_config', runtimeConfig, 'default'\)/);
+  });
+});
