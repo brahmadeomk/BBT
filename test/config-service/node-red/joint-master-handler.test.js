@@ -465,3 +465,64 @@ describe('threshold_profile survives a joint-table apply (2026-09-11)', () => {
     assert.equal(named.threshold_profile, 'hot_riser');
   });
 });
+
+describe('a lost draft rebuilds from the applied document (2026-09-12)', () => {
+  // Reported twice from the panel: the joint table came up COMPLETELY BLANK
+  // while 88 joints were commissioned and being monitored. The table renders
+  // from the legacy DRAFT global, not the applied configuration, so an empty
+  // draft is an empty screen - and only this node ever writes that draft, so a
+  // context-store reset or a restore leaves no route back.
+  const load = (draft) => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    return handleJointMasterMessage(
+      { payload: {} },
+      { joints: draft, slaveList: legacySlaveList(), zones: legacyZones(), store }
+    );
+  };
+
+  test('an empty draft is rebuilt from the applied config rather than shown blank', () => {
+    const rows = load([]).msg.payload.joints;
+    assert.ok(rows.length > 0, 'a commissioned panel must never show an empty joint table');
+    assert.ok(rows.every((r) => r.joint_id), 'and the rebuilt rows must be real joints');
+  });
+
+  test('the rebuild is NOT persisted - a refresh poll must not write the draft', () => {
+    // Writing from a read would make a refresh a side effect. Not needed: the
+    // template sends its full array back on the first real edit.
+    assert.equal(load([]).draft, null);
+  });
+
+  test('a populated draft is left completely alone', () => {
+    const mine = [{ joint_id: 'MINE', joint_name: 'mine', editing: false }];
+    assert.deepEqual(load(mine).msg.payload.joints, mine);
+  });
+
+  test('a mid-edit draft still suppresses the refresh entirely', () => {
+    // The pre-existing guard against clobbering an in-progress edit on a poll.
+    // The rebuild must not have weakened it - a row being edited is not empty,
+    // so it never reaches the rebuild anyway, but this pins the ordering.
+    assert.equal(load([{ joint_id: 'MINE', editing: true }]).msg, null);
+  });
+
+  test('an empty draft with nothing applied stays empty, not invented', () => {
+    const store = freshStore(); // no seed: nothing commissioned
+    const out = handleJointMasterMessage(
+      { payload: {} },
+      { joints: [], slaveList: legacySlaveList(), zones: legacyZones(), store }
+    );
+    assert.deepEqual(out.msg.payload.joints, []);
+  });
+
+  test('only a plain load rebuilds - an action carries the client\'s own array', () => {
+    // Second-guessing the array an action carries is exactly how the data-loss
+    // bug worked.
+    const store = freshStore();
+    seedModbusJoints(store);
+    const out = handleJointMasterMessage(
+      { payload: { action: 'add', joints: [] } },
+      { joints: [], slaveList: legacySlaveList(), zones: legacyZones(), store }
+    );
+    assert.equal(out.msg.payload.joints.length, 1, 'just the added blank row');
+  });
+});

@@ -3,6 +3,9 @@
 const { validateModbusJoints } = require('../validate-modbus-joints');
 const { resolveAmbientChain } = require('../ambient-resolution');
 const { nanoJobsEqual } = require('../nano-compiler');
+// Same reverse-map the remote-config path uses to rebuild dashboard drafts.
+// No cycle: remote-config-handler does not require this module.
+const { buildLegacyDrafts } = require('./remote-config-handler');
 
 function findSlave(slaveList, id) {
   return slaveList.find((s) => s.slaveID == id); // eslint-disable-line eqeqeq -- legacy draft rows store slaveID as either string or number
@@ -119,6 +122,44 @@ function handleJointMasterMessage(msg, deps) {
   return out;
 }
 
+/**
+ * Rebuild the editing draft from the APPLIED document when the draft is empty.
+ *
+ * WHY (live 2026-09-12, twice): the joint table renders from the legacy DRAFT
+ * global, not from the applied configuration. If that draft is ever empty - and
+ * only this node writes it, so a context-store reset, a fresh panel, or a
+ * restore leaves it so - the operator sees a COMPLETELY BLANK table while the
+ * panel is happily monitoring 88 commissioned joints. Nothing is wrong with the
+ * configuration; only the editing copy of it is missing, and there is no button
+ * that rebuilds it.
+ *
+ * `buildLegacyDrafts` already does exactly this reverse-map for the remote-config
+ * path, so the same rows the operator would see after a cloud push are what they
+ * get here.
+ *
+ * FOR DISPLAY ONLY - this deliberately does NOT persist. Writing the draft from
+ * a read would be a side effect on a refresh poll, and it is not needed: the
+ * template sends its full array back on every action, so the first real edit
+ * carries these rows and the normal persistence path takes over.
+ *
+ * TRADE-OFF, accepted: an operator who deletes every row and does NOT apply will
+ * see them come back on the next refresh, because the applied document still has
+ * them. An unapplied mass-deletion is not a committed intent, and the
+ * Configuration Status banner names saved-but-not-applied differences - whereas a
+ * permanently blank config screen has no route out at all.
+ */
+function draftFromAppliedIfEmpty(joints, store) {
+  if (Array.isArray(joints) && joints.length > 0) return joints;
+  try {
+    const applied = store?.readDomain?.('modbus_joints')?.doc;
+    if (!applied?.joints?.length) return joints;
+    return buildLegacyDrafts(applied).joints;
+  } catch {
+    // A blank table is bad; a thrown config screen is worse.
+    return joints;
+  }
+}
+
 function handleJointMasterMessageInner(msg, deps) {
   const { slaveList, zones, store, user = 'UI' } = deps;
   const action = msg.payload?.action;
@@ -130,6 +171,10 @@ function handleJointMasterMessageInner(msg, deps) {
   }
 
   let joints = [...(Array.isArray(msg.payload?.joints) ? msg.payload.joints : deps.joints)];
+
+  // Only on a plain load: an action carries the client's own array, and second-
+  // guessing that is how the data-loss bug worked.
+  if (!action) joints = draftFromAppliedIfEmpty(joints, store);
 
   if (action === 'add') {
     joints.push(EMPTY_ROW());

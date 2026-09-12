@@ -7649,3 +7649,34 @@ A benchmark must assert it is measuring the path it claims to measure.
   JavaScript. These are hand-edited JSON strings: a broken script fails silently
   in the browser and the entire table simply never renders, which is
   indistinguishable at a glance from the blank-table fault above.
+
+- **2026-09-12 (third live report)** — **The joint table renders from the DRAFT,
+  not the applied configuration, so a lost draft is a blank config screen with
+  no way back.** Reported twice: an empty joint table on a panel that was happily
+  monitoring 88 commissioned joints. Nothing was wrong with the configuration —
+  only the editing *copy* of it was missing.
+
+  `JointMasterBackEndNode` is the **only** writer of `joint_master_zone_A`, and
+  it writes solely on a mutating action. So there is no path that repopulates it:
+  a context-store reset, a fresh panel, a restore, or any panel whose draft was
+  never written leaves the screen permanently empty, and the operator has no
+  button that would rebuild it. The zone table kept working throughout, which
+  made it look like a rendering fault rather than a missing-data one.
+
+  `draftFromAppliedIfEmpty` now rebuilds it via **`buildLegacyDrafts`** — the same
+  reverse-map the remote-config path already uses for exactly this purpose, so
+  the rows are identical to what a cloud push would produce.
+
+  Three deliberate constraints:
+  - **Display only, never persisted.** Writing the draft from a read would make a
+    refresh poll a side effect. It is also unnecessary: the template returns its
+    full array on the first real edit, and normal persistence takes over.
+  - **Plain loads only.** An action carries the client's own array, and
+    second-guessing that array is precisely how the 2026-08 data-loss bug worked.
+  - **Never invents rows.** An empty draft with nothing applied stays empty.
+
+  **Trade-off, accepted and written down:** an operator who deletes every row and
+  does *not* apply will see them return on the next refresh, because the applied
+  document still holds them. An unapplied mass-deletion is not a committed
+  intent, the Configuration Status banner names saved-but-not-applied
+  differences, and a permanently blank config screen has no route out at all.
