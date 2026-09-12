@@ -244,10 +244,10 @@ function buildLegacyDrafts(doc) {
   const zones = (doc.zones || []).map((z) => ({
     zone_id: z.zone_id.toUpperCase(),
     zone_name: z.name,
-    // An absent binding is "no zone override", which the table shows as
-    // 'default'. Without this the dropdown would render empty on reload and the
-    // next apply would write that emptiness back as a cleared selection.
-    threshold_profile: z.threshold_profile ?? 'default',
+    // An absent binding is "no zone override", and the dropdown shows that as
+    // its empty option. It must NOT render as 'default': that would read as a
+    // deliberate binding, and the next apply would write it back as one.
+    threshold_profile: z.threshold_profile ?? '',
     editing: false,
   }));
 
@@ -270,7 +270,10 @@ function buildLegacyDrafts(doc) {
       zone_id: j.zone_id.toUpperCase(),
       zone_name: zone?.name ?? 'Unknown',
       ambientSlaveID: ambientSlave ? ambientSlave.unit_address : '',
-      threshold_profile: j.threshold_profile ?? 'default',
+      // Empty is the dropdown's "inherit from zone" option. Defaulting this to
+      // 'default' would pin every joint to the panel-wide set on the next apply
+      // and silently disable the zone chain - the bug fixed on 2026-09-12.
+      threshold_profile: j.threshold_profile ?? '',
       editing: false,
     };
   });

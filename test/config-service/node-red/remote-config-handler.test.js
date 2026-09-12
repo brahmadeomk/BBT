@@ -202,12 +202,13 @@ describe('buildLegacyDrafts', () => {
     doc.joints[0].ambient_sensor = { slave_id: 'sl02', channel: 1 }; // joint-level override
     const { joints, zones } = buildLegacyDrafts(doc);
 
-    // threshold_profile joined both shapes on 2026-09-11. An absent binding is
-    // "no override", which the table shows as 'default' - without it the
-    // dropdown would render empty on reload and the next apply would write that
-    // emptiness back as a cleared selection.
+    // threshold_profile joined both shapes on 2026-09-11; the value it round-trips
+    // was CORRECTED on 2026-09-12. An absent binding is "no override" and must
+    // render as the dropdown's EMPTY option, not as 'default': 'default' reads as
+    // a deliberate binding, and on a joint it beats the zone - which is precisely
+    // how every joint came to be pinned and the zone chain silently disabled.
     assert.deepEqual(zones, [
-      { zone_id: 'Z1', zone_name: 'Zone1', threshold_profile: 'default', editing: false },
+      { zone_id: 'Z1', zone_name: 'Zone1', threshold_profile: '', editing: false },
     ]);
     assert.deepEqual(joints[0], {
       joint_name: 'J01',
@@ -219,6 +220,8 @@ describe('buildLegacyDrafts', () => {
       zone_id: 'Z1',
       zone_name: 'Zone1',
       ambientSlaveID: 5, // the joint-level override wins over the panel default
+      // The fixture PINS this joint to 'default', so it round-trips as 'default'.
+      // Only an ABSENT binding renders as '' (inherit) - see the zone above.
       threshold_profile: 'default',
       editing: false,
     });
@@ -226,5 +229,23 @@ describe('buildLegacyDrafts', () => {
     assert.equal(joints[1].slaveName, 'U5-B');
     assert.equal(joints[1].channel, 2);
     assert.equal(joints[1].ambientSlaveID, 101);
+  });
+});
+
+describe('buildLegacyDrafts - inherit round-trips as empty (2026-09-12)', () => {
+  // The distinction the dropdown exposes, and the one that makes zones work at
+  // all: an ABSENT binding must come back as '' so the next apply omits it
+  // again. Rendering it as 'default' would pin every joint on the next save and
+  // silently disable the zone chain.
+  test('a joint with no binding renders as inherit, not default', () => {
+    const doc = modbusDoc(1);
+    delete doc.joints[0].threshold_profile;
+    assert.equal(buildLegacyDrafts(doc).joints[0].threshold_profile, '');
+  });
+
+  test('a zone with a binding renders that binding', () => {
+    const doc = modbusDoc(1);
+    doc.zones[0].threshold_profile = 'outdoor';
+    assert.equal(buildLegacyDrafts(doc).zones[0].threshold_profile, 'outdoor');
   });
 });

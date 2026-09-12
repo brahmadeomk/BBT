@@ -436,12 +436,32 @@ describe('threshold_profile survives a joint-table apply (2026-09-11)', () => {
     assert.equal('threshold_profile' in apply({}, { threshold_profile: 'default' }).zones[0], false);
   });
 
-  test('a row from a draft predating the column still applies, as default', () => {
-    const doc = apply({ threshold_profile: undefined });
-    assert.equal(doc.joints[0].threshold_profile, 'default');
+  // CORRECTED 2026-09-12 (live report). These two used to assert that an empty
+  // selection became 'default', and in doing so they ENCODED the bug: applyJoints
+  // writes that value onto every joint, and an explicit value beats the joint's
+  // zone in the resolution chain - so every joint carried 'default', no zone
+  // profile could ever apply, and the zone column was decorative. Empty must mean
+  // ABSENT, which is the only thing that lets the chain fall through to the zone.
+  test('a cleared dropdown omits the field, so the joint inherits its zone', () => {
+    assert.equal('threshold_profile' in apply({ threshold_profile: '   ' }).joints[0], false);
   });
 
-  test('a cleared dropdown means default, not an empty name the schema rejects', () => {
-    assert.equal(apply({ threshold_profile: '   ' }).joints[0].threshold_profile, 'default');
+  test('a row from a draft predating the column inherits rather than pinning default', () => {
+    assert.equal('threshold_profile' in apply({ threshold_profile: undefined }).joints[0], false);
+  });
+
+  test("'default' is still an explicit choice that overrides the zone", () => {
+    // The distinction the dropdown now exposes: blank inherits, 'default' pins
+    // the panel-wide set even when the zone names something else.
+    assert.equal(apply({ threshold_profile: 'default' }).joints[0].threshold_profile, 'default');
+  });
+
+  test('the three states really are distinct', () => {
+    const inherit = apply({ threshold_profile: '' }).joints[0];
+    const pinned = apply({ threshold_profile: 'default' }).joints[0];
+    const named = apply({ threshold_profile: 'hot_riser' }).joints[0];
+    assert.equal('threshold_profile' in inherit, false);
+    assert.equal(pinned.threshold_profile, 'default');
+    assert.equal(named.threshold_profile, 'hot_riser');
   });
 });

@@ -7565,3 +7565,52 @@ A benchmark must assert it is measuring the path it claims to measure.
   document whose zone names `ghost` is refused with *"zone 'z2' references
   threshold_profile 'ghost', which does not exist in cfg/alarms"*, while the same
   document with no profile bound applies cleanly.
+
+- **2026-09-12** — **Zone thresholds were dead on arrival, and two tables lost
+  their Actions column. Both from the same change, both found live.**
+
+  **1. The zone chain could never fire.** `normaliseProfile` mapped an empty
+  selection to `'default'`, and `applyJoints` wrote that onto **every** joint. An
+  explicit value beats the zone in the resolution chain, so every joint carried
+  an explicit `'default'` and no zone profile was ever consulted — the Alarm
+  Profile column on the zone table was decorative from the moment it shipped.
+  The operator spotted it as a missing option ("there should be a provision to
+  select no override"), which is exactly what it was: **the absence of a value is
+  the only thing that makes inheritance possible, and nothing could produce one.**
+
+  Empty now means absent. `applyJoints` attaches the key only when a name is
+  chosen — deliberately after building the object, because spreading `undefined`
+  into the literal still creates the key, which is how this happened. Three
+  distinct, reachable states: **omitted** → inherit the zone; **`'default'`** →
+  the panel-wide set, explicitly, ignoring the zone; **`'<name>'`** → that
+  profile. Drafts round-trip an absent binding as `''` rather than `'default'`,
+  or the next save would re-pin it.
+
+  **Two unit tests had ENCODED the bug** — they asserted an empty selection
+  became `'default'` and passed throughout. A test that pins the wrong behaviour
+  is worse than no test: it makes the defect look deliberate. Corrected, plus one
+  that asserts the three states really are distinct.
+
+  **2. Both tables lost their Actions column.** `JointMasterUI` sized columns
+  with a hand-maintained `nth-child(1..8)` list under `table-layout:fixed`,
+  `width:100%` and no `min-width`. Adding the 9th column (Alarm Profile) left
+  Actions unsized → zero width, and with no `min-width` there was nothing to
+  scroll to either, so EDIT/DELETE became **unreachable**. `ZoneMasterUI` broke
+  identically (4 columns, 3 rules).
+
+  Fixed as the operator suggested — columns size to content:
+  `table-layout:auto` + `width:max-content` + `min-width:100%`, and the
+  per-column width list is gone. Adding a column can no longer squeeze another
+  out of existence, which is the actual defect; the missing 9th rule was only the
+  trigger. The Actions cell is also pinned (`position:sticky; right:0`) so it
+  stays reachable on a 9-column table without scrolling.
+
+  **`display:table-cell` on that cell deliberately overrides an earlier
+  `display:flex`**: a flex `td` leaves table layout, and `sticky` then has no
+  column to stick to. The buttons stay inline via `white-space:nowrap` and a
+  margin instead of the flex gap.
+
+  Verified end to end against a real store, not only as units: with the zone on
+  `outdoor`, a blank joint resolves to `outdoor` and a joint pinned to `default`
+  resolves to `default` while its neighbour still inherits. Before the fix all
+  three read `default`.

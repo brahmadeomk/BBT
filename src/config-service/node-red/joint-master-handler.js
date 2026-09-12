@@ -12,19 +12,31 @@ function findZone(zones, id) {
   return zones.find((z) => z.zone_id == id); // eslint-disable-line eqeqeq
 }
 
-const EMPTY_ROW = () => ({ joint_name: '', joint_id: '', slaveID: '', channel: 1, ambientSlaveID: '', zone_id: '', threshold_profile: 'default', editing: true });
+// A new row inherits from its zone - '' is the dropdown's inherit option.
+const EMPTY_ROW = () => ({ joint_name: '', joint_id: '', slaveID: '', channel: 1, ambientSlaveID: '', zone_id: '', threshold_profile: '', editing: true });
 
 /**
- * A profile selection from a draft row.
+ * A profile selection from a draft row, or `null` for "inherit".
  *
- * Drafts predating the column carry nothing, and a cleared dropdown carries an
- * empty string; both mean "the panel-wide set", which is spelled 'default'
- * everywhere else. Trimmed because the value reaches a schema pattern that has
- * no room for stray whitespace.
+ * CORRECTED 2026-09-12 (live report). This used to map an empty selection to
+ * 'default', which killed the whole zone feature: `applyJoints` writes what this
+ * returns onto EVERY joint, and an explicit value beats the joint's zone in the
+ * resolution chain. So every joint carried an explicit 'default' and no zone
+ * profile could ever take effect - the zone column was decorative.
+ *
+ * Empty now means **absent**, and the caller omits the field. The three states
+ * are distinct and all reachable:
+ *
+ *   omitted    -> inherit from the zone (the dropdown's "inherit" option)
+ *   'default'  -> the panel-wide set, explicitly, IGNORING the zone
+ *   '<name>'   -> that profile, ignoring the zone
+ *
+ * Trimmed because the value reaches a schema pattern with no room for stray
+ * whitespace.
  */
 function normaliseProfile(value) {
   const name = typeof value === 'string' ? value.trim() : '';
-  return name === '' ? 'default' : name;
+  return name === '' ? null : name;
 }
 
 /** Legacy draft rows predate the channel column - treat a missing/blank channel as 1. */
@@ -275,15 +287,15 @@ function applyJoints(msg, joints, zones, slaveList, store, user) {
     channel: rowChannel(j),
     zone_id: j.zone_id.toLowerCase(),
     enabled: true,
-    // WAS HARDCODED 'default' (fixed 2026-09-11). Every joint-table apply reset
-    // every joint's profile, so a binding set anywhere else - a remote config
-    // push, a hand edit - survived only until the next time someone touched this
-    // table. With the zone chain live that is worse than it sounds: the operator
-    // sees the joint they edited, not the 80 others whose thresholds just moved.
-    // An empty selection is stored as 'default' rather than omitted so the
-    // draft, the applied document and the dropdown all say the same thing.
-    threshold_profile: normaliseProfile(j.threshold_profile),
   }));
+
+  // The profile is attached separately because "inherit from the zone" is the
+  // ABSENCE of the key, and spreading `undefined` into the literal above would
+  // still create it - which is how the zone feature came to be dead on arrival.
+  for (let i = 0; i < newJoints.length; i += 1) {
+    const profile = normaliseProfile(joints[i].threshold_profile);
+    if (profile !== null) newJoints[i].threshold_profile = profile;
+  }
 
   const chainInput = joints.map((j) => ({ joint_id: j.joint_id, zone_id: j.zone_id.toLowerCase(), legacyAmbientId: j.ambientSlaveID }));
   const legacyAmbientIdToNewSlaveId = new Map(
@@ -295,10 +307,14 @@ function applyJoints(msg, joints, zones, slaveList, store, user) {
   // sets one. Writing 'default' explicitly on every zone would be a binding.
   const newZones = zones.map((z) => {
     const profile = normaliseProfile(z.threshold_profile);
+    // Both "no override" and an explicit 'default' store nothing: an absent zone
+    // binding IS "no zone-level override", and writing 'default' would be a
+    // redundant binding that reads as a deliberate choice.
+    const bind = profile !== null && profile !== 'default';
     return {
       zone_id: z.zone_id.toLowerCase(),
       name: z.zone_name,
-      ...(profile !== 'default' ? { threshold_profile: profile } : {}),
+      ...(bind ? { threshold_profile: profile } : {}),
     };
   });
   const { panelDefaultSlaveId, zoneOverrides, jointOverrides } = resolveAmbientChain(chainInput, newZones, legacyAmbientIdToNewSlaveId);
