@@ -37,10 +37,10 @@ function initialState() {
 function describe(lv) {
   const raw = lv.raw ? ` (vcgencmd throttled=${lv.raw})` : '';
   if (lv.now) {
-    return `Raspberry Pi UNDER-VOLTAGE detected${raw} - check the PSU and cable. ` +
-      'A sagging supply can wedge USB devices (the Nano link) and corrupt the SD card.';
+    return `Edge controller UNDER-VOLTAGE detected${raw} - check the PSU and cable. ` +
+      'A sagging supply can wedge USB devices (the bus controller link) and corrupt the SD card.';
   }
-  return `Raspberry Pi is being THROTTLED${raw} - check supply and cooling.`;
+  return `Edge controller is being THROTTLED${raw} - check supply and cooling.`;
 }
 
 /**
@@ -85,7 +85,7 @@ function derivePowerAlarm(health, prev = initialState(), { clearSamples = DEFAUL
   } else {
     state.goodStreak = (state.goodStreak || 0) + 1;
     if (state.active && state.goodStreak >= clearSamples) {
-      alarm = { action: 'clear', key: POWER_KEY, description: 'Raspberry Pi power back to normal' };
+      alarm = { action: 'clear', key: POWER_KEY, description: 'Edge controller power back to normal' };
       state.active = false;
       state.level = null;
     }

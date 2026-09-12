@@ -26,7 +26,7 @@ sensors, computes safety KPIs, raises alarms, keeps a local history, and
 (when connected) forwards summaries to the cloud.
 
 ```
-  Temperature sensors ──RS-485──▶  Arduino Nano  ──USB──▶  Raspberry Pi (edge device)
+  Temperature sensors ──RS-485──▶ Bus controller ──USB──▶  Edge controller
    (one or more channels                (Modbus RTU            • HMI dashboard (this manual)
     per sensor unit)                      master)              • alarm engine
                                                                • local historian (7 days + trends)
@@ -198,9 +198,10 @@ Config):
 
 - **RS-485 Buses table — one row per segment.** Each segment has its own
   port, baud, parity, stop bits, timeout, retries and inter-frame gap.
-  **A segment is a physical Arduino Nano**: the firmware drives exactly
-  one RS-485 port, so a second bus means a second Nano on its own serial
-  port. Use **ADD BUS** to add one, **DEL** to remove an empty one (DEL
+  **A segment is a physical bus controller**: a bus controller drives
+  exactly one RS-485 port, so a second bus means a second bus controller
+  on its own serial port.
+  Use **ADD BUS** to add one, **DEL** to remove an empty one (DEL
   is greyed out on the last remaining bus — a panel always needs one).
   A large panel is normally split into two segments so each carries about
   half the devices; see §6.5.

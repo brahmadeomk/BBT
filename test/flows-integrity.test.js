@@ -169,7 +169,7 @@ describe('alarm descriptions lead with the joint id (2026-08-31)', () => {
     // They belong to no joint - "SYSTEM: ..." would be noise, and the blacklist
     // alarm already names its device and the joints it affects.
     const fn = mgr();
-    for (const marker of ['No data received from', 'Slave ${b.slave_id} blacklisted', 'Raspberry Pi power fault']) {
+    for (const marker of ['No data received from', 'Slave ${b.slave_id} blacklisted', 'Edge controller power fault']) {
       const i = fn.indexOf(marker);
       assert.ok(i > 0, `${marker} still present`);
       const line = fn.slice(fn.lastIndexOf('\n', i) + 1, fn.indexOf('\n', i));
