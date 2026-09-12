@@ -7614,3 +7614,38 @@ A benchmark must assert it is measuring the path it claims to measure.
   `outdoor`, a blank joint resolves to `outdoor` and a joint pinned to `default`
   resolves to `default` while its neighbour still inherits. Before the fix all
   three read `default`.
+
+- **2026-09-12 (second live report)** — **The joint table came up completely
+  empty. Two independent faults, one symptom, and only one of them was mine.**
+
+  **1. Neither config table could load itself.** `storeOutMessages` is `false` on
+  `JointMasterUI` and `ZoneMasterUI`, so `resendOnRefresh` has nothing to replay,
+  and the only other source is a **once**-inject that fires at deploy. Any page
+  opened after that moment — a browser refresh, a Node-RED restart, a flow
+  re-import — creates the widget with an empty scope and **nothing ever arrives**.
+  The table stays blank forever.
+
+  This is **not new** and not caused by the profile work; it is the exact failure
+  `ModbusSettingsUI` documents and fixes for itself ("*re-deploying while the
+  dashboard is open re-creates this widget with an empty scope, and if it
+  registers after the inject has already fired there is nothing to replay — a
+  permanently blank table*"). That fix was never carried across to the two older
+  tables. It surfaced now because the deploy sequence — restart, re-import, then
+  open a fresh page — is precisely the order that loses the inject. Both tables
+  now ask for their own data (700 ms, and again at 2.5 s in case the socket was
+  still connecting), sending no rows so the server answers from the persisted
+  draft rather than echoing the client's own state back.
+
+  **2. `profile_names` was being thrown away — that one was mine.** Both `$watch`
+  handlers **rebuild** `scope.msg.payload` field by field rather than assigning
+  it, so anything not explicitly named is dropped. The dropdown options were
+  added to the server reply and never listed in the rebuild, so they never
+  reached the template: the Alarm Profile dropdown fell back to its
+  `['default']` literal and **no other profile could be selected on either
+  table**. A field-by-field rebuild is a silent allow-list, and adding a field to
+  the message is not enough — it has to be named in two places.
+
+  **Guards added** for both, plus one that parses each template's `<script>` as
+  JavaScript. These are hand-edited JSON strings: a broken script fails silently
+  in the browser and the entire table simply never renders, which is
+  indistinguishable at a glance from the blank-table fault above.

@@ -915,3 +915,49 @@ describe('profile selectors on the zone and joint tables (2026-09-11)', () => {
     assert.match(byName('ZoneMasterBackEnd').func, /threshold_profile:"default", editing:true/);
   });
 });
+
+describe('the config tables load themselves and keep their dropdown options (2026-09-12)', () => {
+  // TWO live failures, one symptom: the joint table came up completely EMPTY.
+  //
+  // 1. storeOutMessages is false, so resendOnRefresh has nothing to replay, and
+  //    the only other source is a ONCE inject that fires at deploy. Any page
+  //    opened afterwards - a refresh, a restart, a re-import - creates the
+  //    widget with an empty scope and nothing ever arrives. ModbusSettingsUI has
+  //    carried a self-healing load for this since it was written; these two
+  //    never got one.
+  // 2. Their $watch REBUILDS scope.msg.payload field by field, so anything not
+  //    named there is silently dropped - which is what happened to the
+  //    profile_names the Alarm Profile dropdowns need. The dropdown then falls
+  //    back to ['default'] and no other profile can ever be selected.
+  const flows = JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+  const fmt = (name) => flows.find((n) => n.name === name).format;
+
+  for (const name of ['JointMasterUI', 'ZoneMasterUI']) {
+    test(`${name} asks for its own data rather than relying on the deploy inject`, () => {
+      assert.match(fmt(name), /selfHealLoad/, 'without this the table is blank on any later page load');
+      assert.match(fmt(name), /setTimeout\(selfHealLoad/);
+    });
+
+    test(`${name} carries profile_names through its $watch rebuild`, () => {
+      assert.match(
+        fmt(name),
+        /profile_names: angular\.copy/,
+        'dropped here, the Alarm Profile dropdown only ever offers default'
+      );
+    });
+
+    test(`${name} still parses as JavaScript`, () => {
+      // These templates are hand-edited JSON strings; a broken script fails
+      // silently in the browser and the whole table simply never renders.
+      const body = fmt(name).slice(fmt(name).indexOf('<script')).replace(/^<script>/, '').replace(/<\/script>\s*$/, '');
+      assert.doesNotThrow(() => new (require('node:vm').Script)(`(function(scope,angular,alert,confirm){${body}})`));
+    });
+  }
+
+  test('the joint table still renders one cell per header', () => {
+    // The Actions column vanished once before, when a 9th column was added to a
+    // table whose widths were a hand-maintained nth-child list.
+    const t = fmt('JointMasterUI');
+    assert.equal((t.match(/<th>/g) || []).length, (t.match(/<td>/g) || []).length);
+  });
+});
