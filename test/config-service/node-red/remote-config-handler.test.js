@@ -249,3 +249,17 @@ describe('buildLegacyDrafts - inherit round-trips as empty (2026-09-12)', () => 
     assert.equal(buildLegacyDrafts(doc).zones[0].threshold_profile, 'outdoor');
   });
 });
+
+describe('buildLegacyDrafts survives a joint with no slave (2026-09-12)', () => {
+  // R5/R6 make this unreachable in a validated document, but this function also
+  // rebuilds the dashboard draft, and there the cost is asymmetric: throwing
+  // blanks the entire joint table, skipping loses one already-unusable row.
+  test('skips the orphan instead of throwing away every row', () => {
+    const doc = modbusDoc(1);
+    doc.joints.push({ joint_id: 'ORPH', slave_id: 'sl99', channel: 1, zone_id: 'z1', enabled: true });
+    let out;
+    assert.doesNotThrow(() => { out = buildLegacyDrafts(doc); });
+    assert.ok(out.joints.length >= 2, 'the real joints must survive');
+    assert.equal(out.joints.some((j) => j.joint_id === 'ORPH'), false);
+  });
+});

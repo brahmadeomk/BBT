@@ -254,7 +254,13 @@ function buildLegacyDrafts(doc) {
   const channelLabel = (slave, channel) =>
     slave.registers.channel_labels?.[channel - 1] ?? slave.label ?? slave.model;
 
-  const joints = doc.joints.map((j) => {
+  // A joint whose slave is not in modbus.slaves is skipped, not thrown on.
+  // R5/R6 make that unreachable in a VALIDATED document, but this also rebuilds
+  // the dashboard draft, and there the cost of being wrong is asymmetric: a
+  // throw blanks the ENTIRE joint table (the caller catches and shows nothing),
+  // while skipping loses one row that was already unusable. A commissioning
+  // panel with slaves being added and removed is exactly where this happens.
+  const joints = doc.joints.filter((j) => slaveById.has(j.slave_id)).map((j) => {
     const slave = slaveById.get(j.slave_id);
     const zone = zoneById.get(j.zone_id);
     const effAmbient = j.ambient_sensor ?? zone?.ambient_sensor ?? doc.modbus.ambient_sensor ?? null;
