@@ -7706,3 +7706,26 @@ A benchmark must assert it is measuring the path it claims to measure.
   in `src/`, and `functionGlobalContext` only `require()`s the library when
   `settings.js` loads at startup. A Deploy would have left the fix on disk and
   the table still blank.
+
+- **2026-09-12 — zone-wise threshold UI live-verified on ESBUSBBT04, three of
+  four checks.** Confirmed on the panel:
+
+  1. **Multichannel renders correctly** — `sl06` (4 channels) shows as four rows
+     with `Ch` 1-4, each carrying its own channel label. This is the part of
+     `buildLegacyDrafts` most likely to have been wrong in a reverse-map.
+  2. **The Actions column is reachable on both tables** — EDIT/ADD/DEL on joints,
+     EDIT/DELETE on zones. The content-sized columns replaced the hand-maintained
+     `nth-child` width list that had silently collapsed it to zero width.
+  3. **The `(inherit from zone)` option renders**, and — more usefully than the
+     option itself — two joints read `default` while three read
+     `(inherit from zone)` **in the same table**. That is the three-state
+     distinction surviving a full round trip through apply, storage and draft
+     rebuild. It is precisely what was broken on 2026-09-11, when every joint
+     collapsed to an explicit `default` and the zone chain could never fire.
+
+  **Still unverified: the behaviour itself.** Only `default` exists on this
+  panel, so the dropdown cannot yet show that *named* profiles reach it, and no
+  joint can inherit anything distinguishable. Creating a second profile on the
+  Alarm Config tab, binding the zone to it and leaving a joint blank settles both
+  at once — that is the check that proves zone-wise thresholds actually work,
+  rather than that the plumbing renders.
