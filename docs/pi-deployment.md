@@ -985,6 +985,90 @@ A symptom of skipping the re-import is a dashboard that shows *some* of a
 change but not all of it — e.g. new column headers appear (they came with an
 earlier import) while a newly added button does not.
 
+### What a `git pull` never carries (host state)
+
+A pull updates **one directory**: the clone at `~/busduct-cloud-edge`. Everything
+the Pi actually boots from lives outside it, and several of those files have a
+*source* in this repo under `deploy/` — so a pull updates the source and leaves
+the installed copy exactly as it was. Nothing warns you; the panel keeps running
+the old one.
+
+The check to run after every pull, alongside "did `flows_BBT.json` change?":
+
+```bash
+cd ~/busduct-cloud-edge
+git log --stat -1 -- deploy/ src/config-service/node-red/settings.js.example
+```
+
+Anything listed there means a host file below needs re-installing.
+
+| Host file | Source in repo | Re-install with |
+|---|---|---|
+| `~/.node-red/settings.js` | `src/config-service/node-red/settings.js.example` | **by hand** — it is an example, never copied over a live file |
+| `/etc/busduct/nodered.env` | `deploy/nodered.env.example` | by hand (it holds this panel's real PINs) |
+| `/etc/sudoers.d/busduct-nodered` | `deploy/sudoers.d/busduct-nodered` | `sudo install -m 0440 …` |
+| `/etc/udev/rules.d/99-busduct-nano.rules` | `deploy/udev/99-busduct-nano.rules` | `sudo cp …` + `udevadm control --reload-rules` |
+| `/usr/local/bin/busduct-kiosk` | `deploy/bin/busduct-kiosk` | `sudo install -m 0755 …` |
+| `/etc/systemd/system/busduct-kiosk.service` | `deploy/busduct-kiosk.service` | `sudo cp …` + `daemon-reload` |
+| `/etc/X11/xorg.conf.d/10-busduct-kiosk.conf` | `deploy/xorg.conf.d/10-busduct-kiosk.conf` | `sudo cp …` |
+| `/usr/local/sbin/busduct-wifi` | `deploy/bin/busduct-wifi` | `sudo install -m 0755 …` (§5c — note `sbin`, and it is called through sudo) |
+
+The whole set, safe to re-run on a panel that already has them:
+
+```bash
+cd ~/busduct-cloud-edge
+sudo install -m 0755 deploy/bin/busduct-kiosk     /usr/local/bin/busduct-kiosk
+sudo install -o root -g root -m 0755 deploy/bin/busduct-wifi /usr/local/sbin/busduct-wifi
+sudo install -m 0440 deploy/sudoers.d/busduct-nodered /etc/sudoers.d/busduct-nodered
+sudo install -d /etc/X11/xorg.conf.d
+sudo cp deploy/xorg.conf.d/10-busduct-kiosk.conf  /etc/X11/xorg.conf.d/
+sudo cp deploy/udev/99-busduct-nano.rules         /etc/udev/rules.d/
+sudo cp deploy/busduct-kiosk.service              /etc/systemd/system/
+
+sudo visudo -cf /etc/sudoers.d/busduct-nodered    # NEVER skip: a bad file locks out sudo
+sudo udevadm control --reload-rules && sudo udevadm trigger
+ls -l /dev/busduct-bus*                            # both symlinks must appear
+sudo systemctl daemon-reload
+sudo systemctl restart busduct-kiosk               # only if §12f is installed
+```
+
+#### State that has no file in this repo at all
+
+None of this is recoverable from a pull — it is per-panel, and re-imaging a Pi
+means recreating it from the sections above:
+
+| What | Where it lives | Section |
+|---|---|---|
+| `functionGlobalContext` entries (4), `adminAuth`, `credentialSecret` | `~/.node-red/settings.js` | §4, §11 |
+| `EnvironmentFile=/etc/busduct/nodered.env` on the service | `systemctl edit nodered` drop-in | §11 |
+| Dashboard/kiosk PINs, `BUSDUCT_UHUBCTL_BUS*`, `BUSDUCT_CERT_ROTATION` | `/etc/busduct/nodered.env` | §11 |
+| Kiosk overrides (`BUSDUCT_KIOSK_SCALE`, `…_INCOGNITO`) | `/etc/busduct/kiosk.env` | §12f |
+| The applied configuration — including **`inter_frame_ms`**, the single biggest HMI-speed lever | `/var/busduct/cfg/` | §12g |
+| Node-RED's running flow | `~/.node-red/flows_<hostname>.json` | §6 (re-import) |
+| AWS operational cert + key | paths in `/etc/busduct/edge-config.yaml` | §8 |
+| InfluxDB `busduct` database + retention policies + continuous queries | InfluxDB itself | §10 |
+| npm dependencies, and optional `jsmodbus` | `node_modules/` | `npm ci` |
+| Desktop pieces removed for speed (orca, LXDE autostart), `dtoverlay=vc4-kms-v3d` | `/etc/xdg/autostart`, `/boot/firmware/config.txt` | §12c, §12e step 7 |
+| The old kiosk autostart entry, which must be **removed** or two browsers race | `/etc/xdg/autostart`, `~/.config/lxsession*` | §12f |
+
+Two of these are easy to get wrong on an existing panel:
+
+- **The kiosk-speed work was mostly not settings at all.** The 1 Hz clock removal
+  and the six 1 s → 10 s dashboard pushes (§12h) ship *in the flow*, so they
+  arrive with a pull **plus a re-import** — a pull alone changes nothing. The
+  measured `inter_frame_ms` lever (§12g) is in the config store and is changed
+  from the Modbus Settings screen, not from git.
+- **`settings.js` is never copied over.** `settings.js.example` gains entries as
+  slices land (`busductHistorian`, `busductIntegration`); a panel commissioned
+  before one of those was added will not have it, and the symptom is a function
+  node throwing *"Cannot read properties of undefined"* rather than anything
+  naming the missing entry. Diff them after a pull:
+
+  ```bash
+  diff <(grep -o 'busduct[A-Za-z]*:' ~/.node-red/settings.js | sort -u) \
+       <(grep -o 'busduct[A-Za-z]*:' ~/busduct-cloud-edge/src/config-service/node-red/settings.js.example | sort -u)
+  ```
+
 ### Deploying the cloud message contract + device health (2026-08-27)
 
 This release changes what the panel PUBLISHES, so the order matters more
