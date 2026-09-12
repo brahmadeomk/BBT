@@ -7680,3 +7680,29 @@ A benchmark must assert it is measuring the path it claims to measure.
   document still holds them. An unapplied mass-deletion is not a committed
   intent, the Configuration Status banner names saved-but-not-applied
   differences, and a permanently blank config screen has no route out at all.
+
+- **2026-09-12 — LIVE-VERIFIED on ESBUSBBT04 (7 sensors incl. ambient, `sl06`
+  4-channel): the joint table rebuilds from the applied document.** The panel had
+  **9 applied joints and 7 slaves** with an empty editing draft, and showed a
+  completely blank config screen. After the rebuild reached it, **all 9 rows
+  render**.
+
+  Worth recording about the diagnosis, because two rounds were spent in the wrong
+  place: the symptom was a blank *table*, so the first two fixes went at the
+  rendering (a collapsed Actions column, then a widget that could not load
+  itself). Both were real and both needed fixing, but neither was this. The
+  actual fault was that **the table renders from the legacy draft, not the
+  applied configuration**, and nothing in the system could repopulate that draft.
+  The tell was available earlier than it was used: the zone table worked
+  throughout, which should have pointed at per-table *data* rather than shared
+  *rendering*.
+
+  Also of note, the panel under test changed mid-investigation from the 88-device
+  ESBUSBBT06 to this 7-sensor ESBUSBBT04. Several assumptions in flight were
+  sized to the wrong panel. Confirm which hardware a report comes from before
+  reasoning about scale.
+
+  Deploy required a **`systemctl restart nodered`**, not a Deploy: the change was
+  in `src/`, and `functionGlobalContext` only `require()`s the library when
+  `settings.js` loads at startup. A Deploy would have left the fix on disk and
+  the table still blank.
