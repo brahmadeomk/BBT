@@ -1,4 +1,12 @@
-// Add this to the Pi's Node-RED settings.js (usually ~/.node-red/settings.js)
+// Add this to the Pi's Node-RED settings.js. The path is the HOME OF THE USER
+// NODE-RED RUNS AS, which is not the same on every panel: /home/pi/.node-red/
+// settings.js where it runs as pi, /root/.node-red/settings.js where it runs as
+// root. Editing the wrong one is a silent no-op - the entries are never loaded,
+// and the symptom is a function node throwing "Cannot read properties of
+// undefined" that names nothing. Check with `ps -o user= -C node-red`.
+// (The require() paths below are the CLONE path, which is unrelated - a root
+// Node-RED reads a clone under /home/pi perfectly well.)
+//
 // so the "BusbarTherm Config Manager" and "JointMasterBackEndNode" function
 // nodes in flows/flows_BBT.json can resolve global.get('busductConfigService').
 //

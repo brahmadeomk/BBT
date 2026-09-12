@@ -66,6 +66,23 @@ Then **remove any pre-existing broad `NOPASSWD: ALL`** entry for the
 Node-RED user. The flow already calls `sudo uhubctl` with no password (no
 `sudo -S`, no piped password), so nothing in the flow changes.
 
+> **Check who Node-RED actually runs as before ticking this off.**
+> `ps -o user= -C node-red`. Some panels run it as **root** (their
+> `settings.js` is `/root/.node-red/settings.js`). On those, this rule
+> grants nothing root does not already have — the control is installed but
+> **inert**, and the checklist item in §5 is not really met. Two things
+> follow, and both are worth stating plainly rather than discovering during
+> the pilot: the editor on :1880 is a root-level surface, so `adminAuth`
+> (§3) is the only thing in front of arbitrary root code execution rather
+> than one layer of two; and a browser- or dashboard-side compromise
+> reaches root directly.
+>
+> The fix is to run the service as an unprivileged user — it touches the
+> service unit, the ownership of `/var/busduct/{cfg,outbox}` and
+> `/dev/busduct-bus*` group access, so it is a maintenance-window change,
+> not a live one. Until then, record it as a known gap rather than a
+> passing check.
+
 ## 2b. Wi-Fi screen: a wrapper, not `sudo nmcli`
 
 The Slave Config tab's **Wi-Fi Network** screen lets a technician pick the site

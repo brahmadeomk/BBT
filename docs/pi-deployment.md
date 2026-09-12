@@ -228,11 +228,38 @@ something to re-run routinely.
 
 ## 4. Wire the library into Node-RED's settings.js
 
-Open Node-RED's `settings.js` (usually `~/.node-red/settings.js`) and
-add a `functionGlobalContext` entry pointing at the path you cloned to
-in step 1 - see `src/config-service/node-red/settings.js.example` in
-this repo for the exact snippet. Using the path from step 1, the
-`require()` line is:
+### Find the real settings.js first
+
+`~/.node-red/settings.js` is only right if you are logged in as the user
+Node-RED runs as. **Panels in the field are not all the same**: some run
+Node-RED as `pi` (`/home/pi/.node-red/settings.js`), others as **root**
+(`/root/.node-red/settings.js`). Editing the wrong one is a silent no-op —
+the entries are simply never loaded, and the symptom is a function node
+throwing *"Cannot read properties of undefined"*.
+
+```bash
+ps -o user= -C node-red                       # who runs it
+sudo systemctl show -p User --value nodered   # or, if it is a systemd unit
+sudo lsof -p "$(pgrep -n node-red)" 2>/dev/null | grep settings.js   # definitive
+```
+
+Set these once and every command below works on either layout:
+
+```bash
+NR_USER=$(ps -o user= -C node-red | head -1)
+NR_HOME=$(getent passwd "$NR_USER" | cut -d: -f6)/.node-red
+echo "$NR_USER -> $NR_HOME"
+```
+
+### Add the entries
+
+Open `$NR_HOME/settings.js` and add a `functionGlobalContext` entry
+pointing at the path you cloned to in step 1 — see
+`src/config-service/node-red/settings.js.example` in this repo for the
+exact snippet. **The `require()` path is the CLONE path**, not the
+Node-RED user's home, and the two are unrelated: a Node-RED running as
+root reads a clone under `/home/pi` perfectly well. Using the path from
+step 1:
 
 ```js
 busductConfigService: require('/home/pi/busduct-cloud-edge/src/config-service/node-red'),
@@ -241,6 +268,15 @@ busductCloudGateway: require('/home/pi/busduct-cloud-edge/src/cloud-gateway/node
 
 If `settings.js` already has a `functionGlobalContext` block, add these
 as more keys inside it rather than replacing the block.
+
+> **If Node-RED runs as root**, note what that costs before the pilot: the
+> scoped sudoers rule in §11 grants nothing root does not already have, so
+> that control is inert, and the editor on :1880 becomes a root-level
+> surface — `adminAuth` is then the only thing standing in front of
+> arbitrary root code execution, not a second layer. Moving the service to
+> an unprivileged user is the fix; it is a change to the service unit and
+> the ownership of `/var/busduct`, so it belongs in a maintenance window,
+> not mid-session. See `docs/security-hardening.md` §2.
 
 ## 5. Restart Node-RED (not just Deploy)
 
@@ -1004,7 +1040,7 @@ Anything listed there means a host file below needs re-installing.
 
 | Host file | Source in repo | Re-install with |
 |---|---|---|
-| `~/.node-red/settings.js` | `src/config-service/node-red/settings.js.example` | **by hand** — it is an example, never copied over a live file |
+| `$NR_HOME/settings.js` (`/home/pi/…` or `/root/…` — see §4) | `src/config-service/node-red/settings.js.example` | **by hand** — it is an example, never copied over a live file |
 | `/etc/busduct/nodered.env` | `deploy/nodered.env.example` | by hand (it holds this panel's real PINs) |
 | `/etc/sudoers.d/busduct-nodered` | `deploy/sudoers.d/busduct-nodered` | `sudo install -m 0440 …` |
 | `/etc/udev/rules.d/99-busduct-nano.rules` | `deploy/udev/99-busduct-nano.rules` | `sudo cp …` + `udevadm control --reload-rules` |
@@ -1039,12 +1075,12 @@ means recreating it from the sections above:
 
 | What | Where it lives | Section |
 |---|---|---|
-| `functionGlobalContext` entries (4), `adminAuth`, `credentialSecret` | `~/.node-red/settings.js` | §4, §11 |
+| `functionGlobalContext` entries (4), `adminAuth`, `credentialSecret` | `$NR_HOME/settings.js` | §4, §11 |
 | `EnvironmentFile=/etc/busduct/nodered.env` on the service | `systemctl edit nodered` drop-in | §11 |
 | Dashboard/kiosk PINs, `BUSDUCT_UHUBCTL_BUS*`, `BUSDUCT_CERT_ROTATION` | `/etc/busduct/nodered.env` | §11 |
 | Kiosk overrides (`BUSDUCT_KIOSK_SCALE`, `…_INCOGNITO`) | `/etc/busduct/kiosk.env` | §12f |
 | The applied configuration — including **`inter_frame_ms`**, the single biggest HMI-speed lever | `/var/busduct/cfg/` | §12g |
-| Node-RED's running flow | `~/.node-red/flows_<hostname>.json` | §6 (re-import) |
+| Node-RED's running flow | `$NR_HOME/flows_<hostname>.json` | §6 (re-import) |
 | AWS operational cert + key | paths in `/etc/busduct/edge-config.yaml` | §8 |
 | InfluxDB `busduct` database + retention policies + continuous queries | InfluxDB itself | §10 |
 | npm dependencies, and optional `jsmodbus` | `node_modules/` | `npm ci` |
@@ -1065,9 +1101,15 @@ Two of these are easy to get wrong on an existing panel:
   naming the missing entry. Diff them after a pull:
 
   ```bash
-  diff <(grep -o 'busduct[A-Za-z]*:' ~/.node-red/settings.js | sort -u) \
-       <(grep -o 'busduct[A-Za-z]*:' ~/busduct-cloud-edge/src/config-service/node-red/settings.js.example | sort -u)
+  NR_USER=$(ps -o user= -C node-red | head -1)
+  NR_HOME=$(getent passwd "$NR_USER" | cut -d: -f6)/.node-red
+  sudo diff <(grep -o 'busduct[A-Za-z]*:' "$NR_HOME/settings.js" | sort -u) \
+            <(grep -o 'busduct[A-Za-z]*:' ~/busduct-cloud-edge/src/config-service/node-red/settings.js.example | sort -u)
   ```
+
+  `sudo` because on a root install the file is `0600 root:root` and the
+  diff otherwise fails with *"No such file or directory"* — which reads
+  like the entries are missing rather than unreadable.
 
 ### Deploying the cloud message contract + device health (2026-08-27)
 
