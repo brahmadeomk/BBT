@@ -1021,6 +1021,55 @@ A symptom of skipping the re-import is a dashboard that shows *some* of a
 change but not all of it — e.g. new column headers appear (they came with an
 earlier import) while a newly added button does not.
 
+### Editing the config from the command line (testing)
+
+`tools/config-edit.js` edits the applied configuration without the dashboard.
+It goes through the **same** validators and the same `ConfigStore.applyIfValid`
+the dashboard uses, so a rejection here is the rejection the dashboard would
+give, with the same rule ids, the same audit entry and the same LKG snapshot.
+Writing `/var/busduct/cfg` by hand instead would bypass R1-R17 *and* the schema
+— the mistake the legacy commissioning screens were removed for.
+
+```bash
+cd ~/busduct-cloud-edge
+node tools/config-edit.js help
+sudo node tools/config-edit.js show        # sudo: the store is root-owned on most panels
+```
+
+`show` prints each joint's **effective** profile beside the one stored on it, so
+a joint inheriting from its zone does not read as unconfigured.
+
+```bash
+# the zone-threshold check, end to end, without touching the HMI
+node tools/config-edit.js profile set hot_riser --dt=8,12,18 --persist=10,5,2
+node tools/config-edit.js zone set z1 --profile=hot_riser
+node tools/config-edit.js joint set J01 --profile=-        # inherit the zone
+node tools/config-edit.js joint set J02 --profile=default  # pin, ignoring the zone
+
+# anything larger: dump, edit in an editor, apply back
+node tools/config-edit.js export /tmp/cfg.json
+node tools/config-edit.js import /tmp/cfg.json
+
+node tools/config-edit.js bus set bus1 --inter-frame=250 --dry-run
+```
+
+**What converges by itself, and what does not.** A separate process cannot write
+Node-RED's globals, so three of the dashboard's side effects do not happen:
+
+| | |
+|---|---|
+| joints, zones, effective profiles | **automatic**, within 10 s — "Publish Applied Joints" re-reads the applied doc |
+| the Nano read job | **needs a resend** — the tool says so, and only when the *compiled* job actually changed |
+| legacy decode globals (`SlaveIDList`, `parameterName{i}`) | re-apply the **Modbus Settings** screen once after adding or renaming a slave |
+| live alarm thresholds (`busbartherm_system_config`) | press **SAVE** on Alarm Config once after a `profile set` |
+
+That asymmetry is why this is a testing aid and not a second commissioning path:
+a joint, zone or threshold edit is complete when the command returns; a bus or
+slave edit is not complete until the flow resends. The dashboard drafts are also
+not rewritten, so the **Configuration Status** banner will report drift against
+what you changed until the operator next applies that table — expected, not a
+fault.
+
 ### What a `git pull` never carries (host state)
 
 A pull updates **one directory**: the clone at `~/busduct-cloud-edge`. Everything
