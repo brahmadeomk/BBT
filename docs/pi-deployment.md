@@ -991,6 +991,49 @@ a flow re-import (§6) — no configuration:
 
 ---
 
+### 12i. Floating on-screen keyboard (onboard)
+
+The panels run **onboard** for touch text entry. Docked, it claims the bottom
+of the screen and pushes the settings tables up; the operator wants it floating.
+Onboard supports that natively — it is a per-user dconf setting, so it lives in
+`pi`'s profile, **not in git** (it is in the host-state table below).
+
+Run as the kiosk user; `dbus-launch` gives `gsettings` a session bus over SSH:
+
+```bash
+G='sudo -u pi dbus-launch gsettings'
+$G set org.onboard.window docking-enabled false          # float instead of dock
+$G set org.onboard.window force-to-top true              # stay above the fullscreen kiosk
+$G set org.onboard.window window-state-sticky true       # on every workspace (default, but pin it)
+$G set org.onboard.auto-show enabled true                # appear when a text field takes focus
+$G set org.onboard.auto-show reposition-method-floating prevent-occlusion   # move off the field it would cover
+$G set org.onboard.window inactive-transparency 50.0     # fade when nothing is focused (default)
+
+# optional: where it lands on a landscape panel - adjust to the display
+$G set org.onboard.window.landscape x 100
+$G set org.onboard.window.landscape y 50
+$G set org.onboard.window.landscape width 700
+$G set org.onboard.window.landscape height 205
+
+sudo -u pi DISPLAY=:0 sh -c 'pkill onboard; setsid onboard >/dev/null 2>&1 &'   # or reboot
+```
+
+Verify: `$G get org.onboard.window docking-enabled` → `false`, then tap a field
+on Modbus Settings — the keyboard should appear as a draggable window, not a
+bottom strip. Drag it by its handle bar; the new position is remembered.
+
+**`force-to-top` is the one that matters on a kiosk.** Without it a floating
+onboard sits *behind* the fullscreen Chromium window and looks like it never
+opened. **Do not** add `--force-renderer-accessibility` to the browser to "help"
+auto-show: it already works (the keyboard appears today), and that flag makes
+Chromium build an accessibility tree for the whole dashboard — CPU §12 spent
+weeks recovering.
+
+Key names above are taken from onboard's own `org.onboard.gschema.xml`, not
+from memory. `docking-enabled` defaults to **false** upstream, so a panel that
+docks was set that way somewhere (Pi OS image or a previous hand); this
+overrides it either way.
+
 ## Updating later
 
 Whenever this repo changes (new commits pushed):
@@ -1128,6 +1171,7 @@ means recreating it from the sections above:
 | `EnvironmentFile=/etc/busduct/nodered.env` on the service | `systemctl edit nodered` drop-in | §11 |
 | Dashboard/kiosk PINs, `BUSDUCT_UHUBCTL_BUS*`, `BUSDUCT_CERT_ROTATION` | `/etc/busduct/nodered.env` | §11 |
 | Kiosk overrides (`BUSDUCT_KIOSK_SCALE`, `…_INCOGNITO`) | `/etc/busduct/kiosk.env` | §12f |
+| On-screen keyboard floating/docked, position (onboard) | `pi`'s dconf (`~pi/.config/dconf/user`) | §12i |
 | The applied configuration — including **`inter_frame_ms`**, the single biggest HMI-speed lever | `/var/busduct/cfg/` | §12g |
 | Node-RED's running flow | `$NR_HOME/flows_<hostname>.json` | §6 (re-import) |
 | AWS operational cert + key | paths in `/etc/busduct/edge-config.yaml` | §8 |
