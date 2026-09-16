@@ -162,3 +162,53 @@ describe('config sweep - refuses to act on absent information', () => {
     assert.deepEqual(sweepDecommissionedAlarms({ 'PROCESS|X|Y': null }, doc()), []);
   });
 });
+
+describe('config sweep - SYSTEM alarms scoped to an AMBIENT sensor (2026-09-16)', () => {
+  // Live report: unplugging the ambient raised its comm alarm, the sweep cleared
+  // it as "device no longer in configuration", ProcessLogic re-raised it on the
+  // next sample - a raise/auto-clear loop, with e-mails, for as long as the
+  // sensor stayed disconnected. The scope is ProcessLogic's `AMBIENT_<unit>`,
+  // which is neither a slave_id nor a joint_id, so the SYSTEM branch had nothing
+  // to match it against. (The PROCESS branch had skipped AMBIENT_ from day one.)
+  const ambientComm = (scope) => system_(scope, 'COMMUNICATION', {
+    joint_id: scope, alarm_type: 'COMMUNICATION', description: 'Sensor communication failure',
+  });
+
+  test('LEAVES a comm alarm for an ambient whose unit is still commissioned', () => {
+    // unit 101 is sl21 in the fixture
+    assert.deepEqual(sweepDecommissionedAlarms(byKey([ambientComm('AMBIENT_101')]), doc()), []);
+  });
+
+  test('matches by unit address, since the scope carries no slave_id', () => {
+    const d = doc();
+    d.modbus.slaves = d.modbus.slaves.map((s) => (s.slave_id === 'sl21' ? { ...s, slave_id: 'sl77' } : s));
+    assert.deepEqual(sweepDecommissionedAlarms(byKey([ambientComm('AMBIENT_101')]), d), []);
+  });
+
+  test('a multi-channel ambient (AMBIENT_<unit>_<ch>) is kept while the channel exists', () => {
+    const d = doc();
+    d.modbus.slaves.push({ slave_id: 'sl30', unit_address: 30, channels: 4 });
+    assert.deepEqual(sweepDecommissionedAlarms(byKey([ambientComm('AMBIENT_30_3')]), d), []);
+  });
+
+  test('but DOES sweep one whose ambient unit has been deleted from the configuration', () => {
+    // Not a blanket skip: a deleted ambient must still clear, or its alarm is
+    // stuck forever - the exact stuck-alarm class the sweep exists to fix.
+    const d = doc();
+    d.modbus.slaves = d.modbus.slaves.filter((s) => s.unit_address !== 101);
+    const out = sweepDecommissionedAlarms(byKey([ambientComm('AMBIENT_101')]), d);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].reason, 'CONFIG_REMOVED');
+  });
+
+  test('and a channel the unit no longer has', () => {
+    const d = doc();
+    d.modbus.slaves.push({ slave_id: 'sl30', unit_address: 30, channels: 2 });
+    assert.equal(sweepDecommissionedAlarms(byKey([ambientComm('AMBIENT_30_3')]), d).length, 1);
+  });
+
+  test('the sensor-fault key on an ambient is treated the same way', () => {
+    const fault = system_('AMBIENT_101', 'SENSOR_FAULT', { joint_id: 'AMBIENT_101' });
+    assert.deepEqual(sweepDecommissionedAlarms(byKey([fault]), doc()), []);
+  });
+});

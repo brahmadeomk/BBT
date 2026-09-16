@@ -7729,3 +7729,34 @@ A benchmark must assert it is measuring the path it claims to measure.
   Alarm Config tab, binding the zone to it and leaving a joint blank settles both
   at once — that is the check that proves zone-wise thresholds actually work,
   rather than that the plumbing renders.
+
+## 2026-09-16 — Disconnected ambient: alarm raised, auto-cleared as "configuration removed", raised again, forever
+
+**Live report.** Unplugging the ambient sensor raised its alarm, which then
+cleared with the *"device no longer in configuration"* reason while the sensor
+was still fully commissioned, then raised again — a raise/auto-clear loop, with
+an e-mail pair each cycle, for as long as the sensor stayed disconnected.
+
+**Root cause: a third id space the sweep did not know about.** ProcessLogic
+names an ambient reading `AMBIENT_<unit>` (channel 1) or
+`AMBIENT_<unit>_<ch>`, and the Alarm Manager keys per-sensor faults as
+`SYSTEM|{that name}|COMMUNICATION` / `|SENSOR_FAULT`. So the disconnected
+ambient raised `SYSTEM|AMBIENT_101|COMMUNICATION`. `sweepDecommissionedAlarms`
+matched a SYSTEM scope against slave ids **and** joint ids — the 2026-08-31 fix
+for exactly this shape of bug on joints — but `AMBIENT_101` is in neither, so
+it was swept as decommissioned. The PROCESS branch of the same function had
+skipped `AMBIENT_` from day one; the SYSTEM branch never got the same treatment.
+
+**Fix (`src/alarms/config-sweep.js`).** An `AMBIENT_<unit>[_<ch>]` scope is
+resolved against the applied slaves by **unit address and channel count**,
+rather than skipped wholesale: an ambient that has genuinely been deleted from
+the configuration must still sweep, or its alarm is stuck forever — the
+stuck-alarm class the sweep exists to fix. Six tests pin both directions.
+
+**Pattern, third occurrence.** "The scope segment of a SYSTEM key is not one
+namespace" was already in CLAUDE.md after the joint-scoped case. It is now
+three namespaces — slave_id, joint_id, ambient pseudo-joint — and a fourth
+would fail the same way. Anything that keys an alarm on something that is not
+a slave_id or joint_id needs a line in the sweep the day it is added.
+
+Deploy: `src/` change → `git pull` + **restart** Node-RED (not just Deploy).

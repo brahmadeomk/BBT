@@ -35,6 +35,33 @@
 const PANEL_SCOPES = new Set(['MODULE', 'PI', 'BUS1', 'BUS2', 'SYSTEM', 'PANEL']);
 
 /**
+ * The THIRD id space a SYSTEM scope can come from (2026-09-16, live report).
+ *
+ * ProcessLogic names an ambient reading `AMBIENT_<unit>` (channel 1) or
+ * `AMBIENT_<unit>_<ch>`, and the Alarm Manager keys per-sensor faults as
+ * `SYSTEM|{that name}|COMMUNICATION` / `|SENSOR_FAULT`. So a disconnected
+ * ambient raises `SYSTEM|AMBIENT_101|COMMUNICATION` - a scope that is neither a
+ * slave_id nor a joint_id, which this sweep read as "not in the configuration"
+ * and cleared on the next tick. ProcessLogic then re-raised it on the next
+ * sample, and the panel showed a raise/auto-clear pair, with e-mails, for as
+ * long as the sensor stayed unplugged. The PROCESS branch below had skipped
+ * `AMBIENT_` from the start; this branch never got the same treatment.
+ *
+ * Resolved against the applied slaves by UNIT ADDRESS and channel, not skipped
+ * wholesale: an ambient that has genuinely been deleted from the configuration
+ * must still sweep, or its alarm can never clear (gap 2 all over again).
+ */
+const AMBIENT_SCOPE = /^AMBIENT_(\d+)(?:_(\d+))?$/;
+
+function ambientStillConfigured(scope, slaves) {
+  const m = AMBIENT_SCOPE.exec(scope);
+  if (!m) return null; // not an ambient scope at all
+  const unit = Number(m[1]);
+  const channel = m[2] ? Number(m[2]) : 1;
+  return slaves.some((s) => s.unit_address === unit && channel <= (s.channels ?? 1));
+}
+
+/**
  * @param {object} activeAlarms - keyed by instanceId (global busbartherm.activeAlarms)
  * @param {object} doc - the APPLIED cfg/modbus+joints document
  * @returns {Array<{instanceId, joint_id, slave_id, reason, description}>} alarms to clear
@@ -70,6 +97,7 @@ function sweepDecommissionedAlarms(activeAlarms, doc) {
       // every blacklist probe cycle. Sweep only when the scope names nothing
       // that exists in EITHER id space.
       if (validSlaveIds.has(scope) || validJointIds.has(scope)) continue;
+      if (ambientStillConfigured(scope, slaves) === true) continue;
       out.push({
         instanceId: key,
         slave_id: scope,
@@ -96,4 +124,4 @@ function sweepDecommissionedAlarms(activeAlarms, doc) {
   return out;
 }
 
-module.exports = { sweepDecommissionedAlarms, PANEL_SCOPES };
+module.exports = { sweepDecommissionedAlarms, PANEL_SCOPES, AMBIENT_SCOPE };
