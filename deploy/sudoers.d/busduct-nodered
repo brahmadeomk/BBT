@@ -31,3 +31,14 @@ pi ALL=(root) NOPASSWD: /usr/sbin/uhubctl
 # passphrase on stdin, so it never lands in a world-readable /proc/<pid>/cmdline.
 # Install: docs/security-hardening.md §2b.
 pi ALL=(root) NOPASSWD: /usr/local/sbin/busduct-wifi
+
+# The on-screen keyboard helper (docs/pi-deployment.md §12i). Needed only where
+# Node-RED does NOT run as the kiosk user — it runs `sudo -n -u pi` to reach
+# that user's session bus, so this is a (pi -> pi) rule, not a root grant. Where
+# Node-RED already runs as root the sudo is a passthrough and where it runs as
+# pi the wrapper skips sudo entirely; the rule is here so the middle case (a
+# third service account) does not fail closed with a password prompt.
+#
+# The wrapper takes only show|hide|toggle|status and passes NOTHING to a shell,
+# so pinning the arguments adds nothing here.
+pi ALL=(pi) NOPASSWD: /usr/local/sbin/busduct-osk

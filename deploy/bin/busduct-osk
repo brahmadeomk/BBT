@@ -1,0 +1,90 @@
+#!/bin/sh
+# busduct-osk - show/hide the panel's on-screen keyboard (onboard) over D-Bus.
+#
+# Called by the flow's "OSK Command" exec nodes with a LITERAL argument; nothing
+# from the dashboard request ever reaches a shell here (see docs §12i).
+#
+# WHY A WRAPPER AND NOT `gdbus` STRAIGHT FROM THE EXEC NODE
+# ---------------------------------------------------------
+# Three environmental facts have to be got right and none of them belong in a
+# flow export:
+#
+#   1. onboard runs in the KIOSK USER's graphical session (pi), while Node-RED
+#      on these panels runs as root (see §4). A session-bus call has to be made
+#      as that user, not as the caller.
+#   2. The session bus is at /run/user/<uid>/bus, and $DBUS_SESSION_BUS_ADDRESS
+#      is not set in a systemd service's environment.
+#   3. onboard has to be RUNNING to answer. It is not D-Bus-activatable, so a
+#      call against a dead instance just fails. This starts it hidden and waits
+#      for the name to appear, which also means a crashed keyboard heals on the
+#      next tap instead of staying dead until someone notices.
+#
+# Usage: busduct-osk show|hide|toggle|status
+set -eu
+
+KIOSK_USER="${BUSDUCT_KIOSK_USER:-pi}"
+DEST=org.onboard.Onboard
+OBJ=/org/onboard/Onboard/Keyboard
+IFACE=org.onboard.Onboard.Keyboard
+
+ACTION="${1:-}"
+case "$ACTION" in
+  show|hide|toggle|status) ;;
+  *) echo "usage: $(basename "$0") show|hide|toggle|status" >&2; exit 2 ;;
+esac
+
+UID_K="$(id -u "$KIOSK_USER" 2>/dev/null)" || { echo "no such user: $KIOSK_USER" >&2; exit 3; }
+
+# Run a command inside the kiosk user's graphical session. Already that user
+# (Node-RED running as pi) -> run directly; `sudo -u pi` from pi would need a
+# sudoers rule for no reason and fails closed on panels that lack one.
+as_kiosk() {
+  if [ "$(id -u)" = "$UID_K" ]; then
+    DISPLAY="${DISPLAY:-:0}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$UID_K/bus" "$@"
+  else
+    sudo -n -u "$KIOSK_USER" \
+      DISPLAY="${DISPLAY:-:0}" \
+      DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$UID_K/bus" \
+      XDG_RUNTIME_DIR="/run/user/$UID_K" \
+      "$@"
+  fi
+}
+
+running() { as_kiosk gdbus call --session --dest "$DEST" --object-path "$OBJ" \
+              --method org.freedesktop.DBus.Peer.Ping >/dev/null 2>&1; }
+
+call() { as_kiosk gdbus call --session --dest "$DEST" --object-path "$OBJ" --method "$IFACE.$1" >/dev/null; }
+
+ensure_running() {
+  running && return 0
+  command -v onboard >/dev/null 2>&1 || { echo "onboard is not installed (apt-get install onboard)" >&2; exit 4; }
+  # setsid so it outlives this script and the exec node's process group.
+  as_kiosk setsid onboard >/dev/null 2>&1 &
+  # ~5 s: a cold start on a Pi 4 is about a second, and failing fast here would
+  # make the first tap of the day look broken.
+  i=0
+  while [ "$i" -lt 50 ]; do
+    running && return 0
+    sleep 0.1
+    i=$((i + 1))
+  done
+  echo "onboard did not register on the session bus within 5s" >&2
+  exit 5
+}
+
+case "$ACTION" in
+  status)
+    running || { echo "not running"; exit 0; }
+    v="$(as_kiosk gdbus call --session --dest "$DEST" --object-path "$OBJ" \
+          --method org.freedesktop.DBus.Properties.Get "$IFACE" Visible 2>/dev/null || echo '')"
+    case "$v" in *true*) echo visible ;; *false*) echo hidden ;; *) echo "running (state unknown)" ;; esac
+    ;;
+  hide)
+    # Nothing to hide if it never started - and starting it just to hide it
+    # would flash the keyboard on screen.
+    running || exit 0
+    call Hide
+    ;;
+  show)   ensure_running; call Show ;;
+  toggle) ensure_running; call ToggleVisible ;;
+esac

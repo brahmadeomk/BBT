@@ -314,6 +314,7 @@ cd ~/busduct-cloud-edge
 git pull
 
 sudo install -o root -g root -m 0755 deploy/bin/busduct-wifi /usr/local/sbin/busduct-wifi
+sudo install -o root -g root -m 0755 deploy/bin/busduct-osk  /usr/local/sbin/busduct-osk
 sudo cp deploy/sudoers.d/busduct-nodered /etc/sudoers.d/busduct-nodered
 sudo chmod 440 /etc/sudoers.d/busduct-nodered
 sudo visudo -cf /etc/sudoers.d/busduct-nodered      # must print "parsed OK"
@@ -1063,25 +1064,63 @@ strip; drag it by its handle and the position is remembered.
 onboard sits *behind* the fullscreen Chromium window and looks like it never
 opened.
 
-**Tap-to-open rather than auto-show, deliberately.** onboard's `auto-show`
-raises the keyboard when a text field takes focus, and it learns that through
-**AT-SPI** — which means Chromium has to expose an accessibility tree for the
-dashboard before it can work on a web page. That is the
-`--force-renderer-accessibility` cost §12 spent weeks recovering from, paid on
-every dashboard repaint, to save one tap. `org.onboard.icon-palette in-use true`
-gives a small floating icon the operator taps instead: no accessibility tree, no
-CPU, and it works on any page. Turn auto-show on only if the extra tap is
-genuinely unacceptable, and measure with `kiosk_cpu` (§12e step 0) either side:
+**Auto show/hide is driven by the DASHBOARD, not by onboard.** onboard's own
+`auto-show` finds focused text fields through AT-SPI, which for a web page means
+Chromium must build an accessibility tree for the whole dashboard
+(`--force-renderer-accessibility`) — paid on every repaint, on the panel §12
+spent weeks getting from 106 % to 23 % of a core, to save one tap. But the
+dashboard already knows exactly which element has focus: `focusin` tells it for
+free. So **leave onboard's auto-show off** and install the flow's watcher
+instead:
+
+```bash
+sudo install -o root -g root -m 0755 deploy/bin/busduct-osk /usr/local/sbin/busduct-osk
+sudo cp deploy/sudoers.d/busduct-nodered /etc/sudoers.d/busduct-nodered
+sudo chmod 440 /etc/sudoers.d/busduct-nodered
+sudo visudo -cf /etc/sudoers.d/busduct-nodered      # must print "parsed OK"
+
+# prove the helper works before wiring the dashboard to it
+sudo /usr/local/sbin/busduct-osk status     # "not running" is fine, it self-starts
+sudo /usr/local/sbin/busduct-osk show       # keyboard appears
+sudo /usr/local/sbin/busduct-osk hide
+```
+
+Then re-import `flows/flows_BBT.json` (§6). The **Device Health** tab gains an
+`ON-SCREEN KEYBOARD` group: a global `ui_template` that watches focus on every
+dashboard page, an `http in` on `POST /osk/:action`, and three `exec` nodes.
+
+| behaviour | how |
+|---|---|
+| raises when a text field takes focus | `focusin`, filtered by `isTextEntry` — a `SELECT`, a button, a read-only cell or a date picker raises nothing |
+| does **not** flap between fields | a blur only *arms* a hide 400 ms out; the next `focusin` cancels it |
+| hides when the operator is done | Enter, focus leaving for a button, or the page being hidden |
+| on demand | onboard's own icon palette, or `window.onBusductKeyboard()` from any `ui_template` — wire it to a button and it toggles |
+
+**The logic is `src/hmi/osk-policy.js` and it is unit-tested.** A global
+dashboard template cannot `require()`, so the module is embedded verbatim in the
+flow by `tools/sync-osk-policy.js`; `test/hmi/osk-policy.test.js` fails if the
+two ever differ, and also boots the generated bundle in a `vm` with a fake
+document to check the listeners still fire. Edit the module, re-run the tool,
+re-import the flow — never hand-edit the template.
+
+**Nothing from the request reaches a shell.** `:action` is compared against
+three literals and then discarded; each `exec` node carries a fixed command line
+with `addpay` off. Note the endpoint is unauthenticated on :1880 like the rest
+of the dashboard, so anyone on the LAN can raise or lower the panel's keyboard —
+noted rather than fixed, because it exposes nothing and reads nothing.
+
+If you would rather have the browser flag and onboard's own auto-show, it is two
+settings — but measure with `kiosk_cpu` (§12e step 0) either side before keeping
+it:
 
 ```bash
 $G set org.onboard.auto-show enabled true
 $G set org.onboard.auto-show reposition-method-floating prevent-occlusion
 ```
 
-(A previous revision of this section claimed auto-show already worked on the
-panel and told you not to add that flag. The first half was wrong — onboard was
-not installed, so whatever appeared on the settings page was not onboard. The
-advice about the flag stands, for the reason above.)
+(A previous revision claimed auto-show already worked on the panel. It did not —
+onboard was not installed, so whatever appeared on the settings page was not
+onboard.)
 
 Key names here are read from onboard's own `org.onboard.gschema.xml`, not from
 memory. All of this is **per-user dconf** in `pi`'s profile, so it is host state
@@ -1193,6 +1232,7 @@ Anything listed there means a host file below needs re-installing.
 | `/etc/systemd/system/busduct-kiosk.service` | `deploy/busduct-kiosk.service` | `sudo cp …` + `daemon-reload` |
 | `/etc/X11/xorg.conf.d/10-busduct-kiosk.conf` | `deploy/xorg.conf.d/10-busduct-kiosk.conf` | `sudo cp …` |
 | `/usr/local/sbin/busduct-wifi` | `deploy/bin/busduct-wifi` | `sudo install -m 0755 …` (§5c — note `sbin`, and it is called through sudo) |
+| `/usr/local/sbin/busduct-osk` | `deploy/bin/busduct-osk` | `sudo install -m 0755 …` (§12i) |
 
 The whole set, safe to re-run on a panel that already has them:
 
@@ -1200,6 +1240,7 @@ The whole set, safe to re-run on a panel that already has them:
 cd ~/busduct-cloud-edge
 sudo install -m 0755 deploy/bin/busduct-kiosk     /usr/local/bin/busduct-kiosk
 sudo install -o root -g root -m 0755 deploy/bin/busduct-wifi /usr/local/sbin/busduct-wifi
+sudo install -o root -g root -m 0755 deploy/bin/busduct-osk  /usr/local/sbin/busduct-osk
 sudo install -m 0440 deploy/sudoers.d/busduct-nodered /etc/sudoers.d/busduct-nodered
 sudo install -d /etc/X11/xorg.conf.d
 sudo cp deploy/xorg.conf.d/10-busduct-kiosk.conf  /etc/X11/xorg.conf.d/
