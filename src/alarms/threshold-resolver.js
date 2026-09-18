@@ -42,13 +42,17 @@ function isComplete(candidate) {
 }
 
 /** Just the three threshold groups, so callers cannot accidentally depend on profile metadata. */
-function pick(source, profileName, via) {
+function pick(source, profileName, via, requested) {
   return {
     deltaT: source.deltaT,
     ror: source.ror,
     persistence: source.persistence,
     profile: profileName,
     via,
+    // Only set when the chain did NOT give the joint what it asked for. Naming
+    // the missing profile is the difference between "why is this on default?"
+    // and "'hot_riser' is gone from cfg/alarms" - see describeProfile below.
+    ...(requested ? { requested } : {}),
   };
 }
 
@@ -84,7 +88,8 @@ function resolveThresholds(runtimeCfg, profileName) {
   //    independently: a profile can be removed from cfg/alarms while a joint
   //    still names it, and the panel must keep watching that joint.
   if (profiles && typeof profiles === 'object' && isComplete(profiles.default)) {
-    return pick(profiles.default, 'default', named && named !== 'default' ? 'fallback_default' : 'default');
+    const fell = Boolean(named) && named !== 'default';
+    return pick(profiles.default, 'default', fell ? 'fallback_default' : 'default', fell ? named : null);
   }
 
   // 3. The flat legacy shape. This is what every panel carried before profiles
@@ -92,7 +97,8 @@ function resolveThresholds(runtimeCfg, profileName) {
   //    and the operator's next alarm-config apply. Dropping to it costs the
   //    per-joint distinction, never the alarm.
   if (isComplete(runtimeCfg)) {
-    return pick(runtimeCfg, 'default', named && named !== 'default' ? 'fallback_flat' : 'flat');
+    const fell = Boolean(named) && named !== 'default';
+    return pick(runtimeCfg, 'default', fell ? 'fallback_flat' : 'flat', fell ? named : null);
   }
 
   return null;
@@ -162,8 +168,46 @@ function resolveSensorLimits(runtimeCfg) {
   };
 }
 
+/**
+ * The traceability suffix for a threshold-driven alarm description.
+ *
+ * WHY THIS EXISTS (2026-09-19, operator request, and the bug behind it). An
+ * alarm reading `J01: RoR 3.10 >= 2` does not say WHICH threshold set produced
+ * the 2, so an operator who has bound J01's zone to a profile cannot tell from
+ * the alarm whether that binding is actually in service. On ESBUSBBT06 it was
+ * not - the binding sat unapplied in the draft, the panel evaluated against
+ * `default`, and the expected alarm never fired. A suffix naming the profile
+ * makes the resolution self-evident on every surface the description reaches:
+ * the HMI tables, the e-mail subject and body, the CSV export, the alarm
+ * history and the cloud snapshot.
+ *
+ * The FALLBACK case is the one that earns its keep. `via: 'fallback_default'`
+ * means the joint asked for a profile that is not in cfg/alarms - A3 rejects a
+ * dangling reference at apply time, but the two domains version independently,
+ * so a profile can be deleted out from under a joint and the panel keeps
+ * watching it on `default`. That is invisible today and reads as a wrong
+ * threshold rather than a missing profile.
+ *
+ * Nothing keys on an alarm description - dedupe is by instanceId and historian
+ * matching by instanceId + raisedTs - so extending it is display-only, the same
+ * reasoning recorded for describeJoint().
+ *
+ * @param {object|null} resolved - a resolveThresholds() result
+ * @returns {string} '' when there is nothing to say, else a leading-space suffix
+ */
+function describeProfile(resolved) {
+  if (!resolved || typeof resolved !== 'object') return '';
+  const profile = typeof resolved.profile === 'string' ? resolved.profile : '';
+  if (!profile) return '';
+  // `requested` is present only when the joint did not get what it named.
+  return resolved.requested
+    ? ` [${profile} - '${resolved.requested}' not found]`
+    : ` [${profile}]`;
+}
+
 module.exports = {
   resolveThresholds,
+  describeProfile,
   buildRuntimeProfiles,
   resolveSensorLimits,
   DEFAULT_SENSOR_MAX_C,

@@ -171,3 +171,93 @@ test('sensor plausibility limits', async (t) => {
     assert.equal(r.minC, -40);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Traceability on the alarm description (2026-09-19, operator request).
+// ---------------------------------------------------------------------------
+const { describeProfile } = require('../../src/alarms/threshold-resolver');
+
+test('describeProfile - which threshold set produced this number', async (t) => {
+  const tag = (name, cfg = WITH_PROFILES) => describeProfile(resolveThresholds(cfg, name));
+
+  await t.test('a named profile is named', () => {
+    assert.strictEqual(tag('outdoor'), ' [outdoor]');
+  });
+
+  await t.test('an unset profile, and an explicit default, both read as default', () => {
+    // They resolve to the same thresholds and neither is anomalous, so the tag
+    // must not invite the operator to tell two spellings of normal apart.
+    assert.strictEqual(tag(null), ' [default]');
+    assert.strictEqual(tag('default'), ' [default]');
+  });
+
+  await t.test('a MISSING profile names what was asked for, not just what was used', () => {
+    // The case that earns this feature. A3 rejects a dangling reference at apply
+    // time, but cfg/alarms and cfg/joints version independently - a profile can
+    // be deleted out from under a joint and the panel keeps watching it on
+    // default. Until now that was invisible and read as a wrong threshold.
+    assert.strictEqual(tag('zone_1_alarm_profile'), " [default - 'zone_1_alarm_profile' not found]");
+  });
+
+  await t.test('the same holds when only the flat legacy shape is available', () => {
+    assert.strictEqual(tag('outdoor', FLAT), " [default - 'outdoor' not found]");
+    assert.strictEqual(tag(null, FLAT), ' [default]');
+  });
+
+  await t.test('nothing resolvable yields an empty suffix, never "undefined"', () => {
+    // resolveThresholds returns null when there is nothing usable; the Alarm
+    // Manager falls back to the panel-wide set and must still build a
+    // description rather than printing the word undefined at an operator.
+    for (const bad of [null, undefined, {}, { profile: '' }, 'nonsense']) {
+      assert.strictEqual(describeProfile(bad), '');
+    }
+  });
+
+  await t.test('`requested` is set ONLY on a fallback, so the ordinary case stays clean', () => {
+    assert.strictEqual('requested' in resolveThresholds(WITH_PROFILES, 'outdoor'), false);
+    assert.strictEqual('requested' in resolveThresholds(WITH_PROFILES, 'default'), false);
+    assert.strictEqual('requested' in resolveThresholds(WITH_PROFILES, null), false);
+    assert.strictEqual(resolveThresholds(WITH_PROFILES, 'gone').requested, 'gone');
+  });
+
+  await t.test('it composes onto a real description with no double spacing', () => {
+    assert.strictEqual(`J01: RoR 3.10 >= 2${tag('outdoor')}`, 'J01: RoR 3.10 >= 2 [outdoor]');
+  });
+});
+
+test('the Alarm Manager actually uses it', async (t) => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const mgr = () => {
+    const flows = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'flows', 'flows_BBT.json'), 'utf8'));
+    return flows.find((n) => n.id === 'de6fcc55794afd9e').func;
+  };
+  const count = (hay, needle) => hay.split(needle).length - 1;
+
+  await t.test('both threshold-driven descriptions carry the tag', () => {
+    const fn = mgr();
+    assert.ok(fn.includes('RoR ${d.ror.toFixed(2)} \u2265 ${L.th}`) + _profileTag'.replace('\\u2265', '\u2265')), 'RoR');
+    assert.strictEqual(count(fn, '+ _profileTag,'), 2, 'exactly the two threshold-driven raises');
+  });
+
+  await t.test('and the profile is carried as a FIELD too, not only inside the string', () => {
+    // So the CSV export, the cloud alarm message and any future consumer need
+    // not regex a display string - the precedent joint_name set on 2026-08-31.
+    assert.strictEqual(count(mgr(), 'threshold_profile: _profileName,'), 2);
+  });
+
+  await t.test('sensor-fault and comm alarms are NOT tagged', () => {
+    // They are not produced by a threshold set, so naming one would be noise -
+    // the same reasoning that leaves panel-scoped alarms unprefixed.
+    const fn = mgr();
+    const i = fn.indexOf('description: describeJoint(S.description)');
+    assert.ok(i > 0, 'the sensor-status raise is still there');
+    assert.ok(!fn.slice(i, i + 80).includes('_profileTag'));
+  });
+
+  await t.test('a failure to build the label can never stop an alarm', () => {
+    const fn = mgr();
+    const i = fn.indexOf('_profileTag = ');
+    assert.ok(fn.slice(i - 400, i + 400).includes('catch'), 'the resolve is inside a try/catch');
+  });
+});

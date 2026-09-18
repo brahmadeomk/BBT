@@ -390,6 +390,23 @@ column. Panel- and device-scoped alarms (`COMM_FAILURE`, `BLACKLIST`,
 `PI|POWER`) are deliberately **not** prefixed — they belong to no joint, and the
 blacklist alarm already names its device and affected joints.
 
+**Threshold-driven alarms name their profile (user request 2026-09-19):**
+`J01: RoR 3.10 ≥ 2 [zone_1_alarm_profile]`. The description carried the number
+but not which threshold set produced it, so an operator who had bound a zone to
+a profile could not tell from the alarm whether that binding was in service — on
+ESBUSBBT06 it was not, and the expected alarm simply never appeared. The suffix
+comes from `describeProfile()` (`src/alarms/threshold-resolver.js`), which reads
+the `profile`/`via` the resolver already computed and never surfaced. A joint
+whose profile has been **deleted** reads `[default - 'hot_riser' not found]`:
+A3 rejects a dangling reference at apply time, but `cfg/alarms` and `cfg/joints`
+version independently, so a profile can go missing under a live joint and the
+panel keeps watching it on `default`. **ΔT and RoR only** — a comm failure or a
+sensor fault is not produced by a threshold set. The resolved name is also a
+top-level `threshold_profile` field on the alarm, so the CSV, the cloud message
+and the HMI need not parse a display string (the `joint_name` precedent); an
+added optional field, so the wire contract stays `v: 1`. The whole thing is in a
+`try/catch` that defaults to no suffix — a label must never stop an alarm.
+
 **Joint ID format widened to 6 characters (user request 2026-08-31):**
 `joints[].joint_id` was `^J[0-9]{2,3}$` — a literal `J` plus 2-3 digits, so
 4 characters maximum. Sites name joints to their own convention (riser/floor
