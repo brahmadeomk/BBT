@@ -149,7 +149,26 @@ function buildProcessLogicJoints(doc, { labelFallback } = {}) {
  * @param {Array} draftRows - legacy `joint_master_zone_A` rows
  * @param {Array} appliedRows - buildProcessLogicJoints().joints
  */
-function diffDraftVsApplied(draftRows, appliedRows) {
+/** Blank/absent means "inherit"; a name means an explicit choice. */
+function profileOf(value) {
+  const name = typeof value === 'string' ? value.trim() : '';
+  return name === '' ? null : name;
+}
+
+/**
+ * The profile a DRAFT row would resolve to, by the same joint -> zone -> unset
+ * chain `buildProcessLogicJoints` applies to the applied document. A zone set
+ * to 'default' resolves to unset, because `applyJoints` deliberately stores no
+ * binding for it - an absent zone binding IS "no zone-level override".
+ */
+function draftEffectiveProfile(row, zoneProfiles) {
+  const own = profileOf(row.threshold_profile);
+  if (own !== null) return own;
+  const zone = zoneProfiles.get(String(row.zone_id || '').toLowerCase());
+  return zone == null || zone === 'default' ? null : zone;
+}
+
+function diffDraftVsApplied(draftRows, appliedRows, options = {}) {
   const draft = Array.isArray(draftRows) ? draftRows : [];
   const applied = Array.isArray(appliedRows) ? appliedRows : [];
   const appliedIds = new Set(applied.map((j) => j.joint_id));
@@ -159,10 +178,56 @@ function diffDraftVsApplied(draftRows, appliedRows) {
   const notApplied = [...draftIds].filter((id) => !appliedIds.has(id));
   const notInDraft = [...appliedIds].filter((id) => !draftIds.has(id));
 
+  /*
+   * CHANGED rows (2026-09-19, from a live report).
+   *
+   * Until now this compared joint_id MEMBERSHIP only, so a row that exists on
+   * both sides was "in sync" however much its content differed. The operator
+   * bound a zone to a threshold profile, never pressed APPLY, and the banner
+   * printed the green "configuration applied and in sync" line while the panel
+   * went on evaluating that joint against `default` - so the RoR alarm they
+   * were expecting never fired and nothing on the screen said why.
+   *
+   * Only fields that change WHAT IS MONITORED OR HOW IT ALARMS are compared:
+   *
+   *   - the ambient is left out on purpose. The legacy draft carries one flat
+   *     `ambientSlaveID` per joint, while the applied document resolves a
+   *     3-level joint -> zone -> panel chain, so the two legitimately differ on
+   *     a correctly-applied config and comparing them would cry wolf forever.
+   *   - the label is left out because `buildProcessLogicJoints` recovers it
+   *     FROM this same draft on documents applied before it was persisted, so
+   *     the comparison would be against itself.
+   */
+  const zoneProfiles = new Map(
+    (Array.isArray(options.draftZones) ? options.draftZones : [])
+      .filter((z) => z && z.zone_id)
+      .map((z) => [String(z.zone_id).toLowerCase(), profileOf(z.threshold_profile)])
+  );
+  const appliedById = new Map(applied.map((j) => [j.joint_id, j]));
+
+  const changed = [];
+  for (const row of draft) {
+    const live = appliedById.get(row.joint_id);
+    if (!live) continue;                       // already reported as notApplied
+    const fields = [];
+    // A field the draft row does not carry means "the draft does not say", not
+    // "the draft says something else" - comparing absent against present would
+    // make the banner cry wolf on any row written before that column existed.
+    // `threshold_profile` is exempt: absent there is MEANINGFUL (inherit), and
+    // skipping it is exactly the case this whole change exists to catch.
+    const stated = (v) => v !== undefined && v !== null && v !== '';
+    if (stated(row.slaveID) && Number(row.slaveID) !== Number(live.slaveID)) fields.push('slave');
+    if (Number(row.channel ?? 1) !== Number(live.channel ?? 1)) fields.push('channel');
+    if (stated(row.zone_id) && String(row.zone_id).toLowerCase() !== String(live.zone_id || '').toLowerCase()) fields.push('zone');
+    if (draftEffectiveProfile(row, zoneProfiles) !== (live.threshold_profile ?? null)) fields.push('alarm profile');
+    if (fields.length) changed.push({ joint_id: row.joint_id, fields });
+  }
+
   return {
     notApplied,
     notInDraft,
-    inSync: notApplied.length === 0 && notInDraft.length === 0,
+    changed,
+    inSync: notApplied.length === 0 && notInDraft.length === 0 && changed.length === 0,
   };
 }
 

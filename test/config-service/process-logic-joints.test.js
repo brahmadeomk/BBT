@@ -302,3 +302,106 @@ test('zone-wise thresholds: joint -> zone -> unset (2026-09-10)', async (t) => {
     assert.equal(buildProcessLogicJoints(d).joints[0].threshold_profile, 'default');
   });
 });
+
+describe('drift detection sees CHANGED rows, not just added and removed (2026-09-19)', () => {
+  // Live report from ESBUSBBT06: the operator bound Zone1 to a threshold profile
+  // and J02 to another, the tables showed both, no RoR alarm ever fired, and the
+  // Configuration Status banner printed the GREEN "applied and in sync" line the
+  // whole time. The diff compared joint_id MEMBERSHIP only, so a row present on
+  // both sides was "in sync" however much its content differed - and the tables
+  // render the DRAFT while the panel runs on the APPLIED document.
+  const draft = (over = {}) => ({ joint_id: 'J01', slaveID: 1, channel: 1, zone_id: 'Z1', threshold_profile: '', ...over });
+  const live = (over = {}) => ({ joint_id: 'J01', slaveID: 1, channel: 1, zone_id: 'z1', threshold_profile: null, ...over });
+  const zones = (p) => [{ zone_id: 'Z1', threshold_profile: p }];
+
+  test('the panel case: a zone bound to a profile that was never applied', () => {
+    const d = diffDraftVsApplied([draft()], [live()], { draftZones: zones('zone_1_alarm_profile') });
+    assert.equal(d.inSync, false, 'the banner must NOT say in sync');
+    assert.deepEqual(d.changed, [{ joint_id: 'J01', fields: ['alarm profile'] }]);
+  });
+
+  test('and reports in sync once it HAS been applied', () => {
+    const d = diffDraftVsApplied([draft()], [live({ threshold_profile: 'zone_1_alarm_profile' })], { draftZones: zones('zone_1_alarm_profile') });
+    assert.equal(d.inSync, true);
+    assert.deepEqual(d.changed, []);
+  });
+
+  test("a joint's own profile is compared too", () => {
+    const d = diffDraftVsApplied([draft({ threshold_profile: 'joint_profile' })], [live()], { draftZones: zones(null) });
+    assert.deepEqual(d.changed, [{ joint_id: 'J01', fields: ['alarm profile'] }]);
+  });
+
+  test('a joint override beats its zone on the draft side, exactly as on the applied side', () => {
+    const d = diffDraftVsApplied(
+      [draft({ threshold_profile: 'joint_profile' })],
+      [live({ threshold_profile: 'joint_profile' })],
+      { draftZones: zones('zone_1_alarm_profile') }
+    );
+    assert.equal(d.inSync, true, 'the zone must not make an overridden joint look changed');
+  });
+
+  test("a zone set to 'default' is NOT a binding, so it is not drift", () => {
+    // applyJoints deliberately stores nothing for a zone on 'default'; the draft
+    // side has to resolve it the same way or every such zone reads as changed.
+    const d = diffDraftVsApplied([draft()], [live()], { draftZones: zones('default') });
+    assert.equal(d.inSync, true);
+  });
+
+  test('slave, channel and zone changes are caught as well', () => {
+    assert.deepEqual(diffDraftVsApplied([draft({ slaveID: 7 })], [live()]).changed, [{ joint_id: 'J01', fields: ['slave'] }]);
+    assert.deepEqual(diffDraftVsApplied([draft({ channel: 3 })], [live()]).changed, [{ joint_id: 'J01', fields: ['channel'] }]);
+    assert.deepEqual(diffDraftVsApplied([draft({ zone_id: 'Z2' })], [live()]).changed, [{ joint_id: 'J01', fields: ['zone'] }]);
+  });
+
+  test('several fields on one row are listed together', () => {
+    const d = diffDraftVsApplied([draft({ slaveID: 7, channel: 2 })], [live()]);
+    assert.deepEqual(d.changed[0].fields, ['slave', 'channel']);
+  });
+
+  test('zone ids compare case-insensitively, since apply lowercases them', () => {
+    assert.equal(diffDraftVsApplied([draft({ zone_id: 'Z1' })], [live({ zone_id: 'z1' })]).inSync, true);
+  });
+
+  test('a row that is not applied at all is reported once, as notApplied', () => {
+    const d = diffDraftVsApplied([draft({ joint_id: 'J09' })], [live()]);
+    assert.deepEqual(d.notApplied, ['J09']);
+    assert.deepEqual(d.changed, [], 'not double-reported as changed');
+  });
+
+  test('the ambient is deliberately NOT compared', () => {
+    // The legacy draft carries one flat ambientSlaveID per joint while the
+    // applied document resolves a joint -> zone -> panel chain, so the two
+    // legitimately differ on a correctly-applied config.
+    const d = diffDraftVsApplied([draft({ ambientSlaveID: 101 })], [live({ ambientKey: '999:1' })]);
+    assert.equal(d.inSync, true);
+  });
+
+  test('no zone draft at all does not invent drift for inheriting joints', () => {
+    assert.equal(diffDraftVsApplied([draft()], [live()]).inSync, true);
+  });
+});
+
+describe('drift: an absent draft field is not a difference', () => {
+  // Caught by an older test in this file when `changed` was added: a row that
+  // does not carry `slaveID` was compared as NaN !== 1 and flagged. Absent means
+  // the draft does not say, not that it says something else - and a draft row
+  // written before a column existed would otherwise light the banner forever.
+  const live = { joint_id: 'J01', slaveID: 1, channel: 1, zone_id: 'z1', threshold_profile: null };
+
+  test('a row carrying only an id is not "changed"', () => {
+    assert.deepEqual(diffDraftVsApplied([{ joint_id: 'J01' }], [live]).changed, []);
+  });
+
+  test('a row with no channel is read as channel 1, the documented default', () => {
+    assert.deepEqual(diffDraftVsApplied([{ joint_id: 'J01', slaveID: 1, zone_id: 'z1' }], [live]).changed, []);
+    assert.deepEqual(diffDraftVsApplied([{ joint_id: 'J01', slaveID: 1, zone_id: 'z1' }], [{ ...live, channel: 2 }]).changed,
+      [{ joint_id: 'J01', fields: ['channel'] }]);
+  });
+
+  test('but an absent PROFILE is still compared - absent there means inherit', () => {
+    assert.deepEqual(
+      diffDraftVsApplied([{ joint_id: 'J01' }], [{ ...live, threshold_profile: 'hot_riser' }]).changed,
+      [{ joint_id: 'J01', fields: ['alarm profile'] }]
+    );
+  });
+});

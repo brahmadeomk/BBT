@@ -7760,3 +7760,51 @@ would fail the same way. Anything that keys an alarm on something that is not
 a slave_id or joint_id needs a line in the sweep the day it is added.
 
 Deploy: `src/` change → `git pull` + **restart** Node-RED (not just Deploy).
+
+## 2026-09-19 — A zone profile bound but never applied, and a banner that said "in sync"
+
+**Live report (ESBUSBBT06).** J01's RoR ran to ~60 °C/hr and held above 20 for
+several minutes. Zone1 was bound to `zone_1_alarm_profile` (RoR 10/20/50,
+persistence 3/2/1 min) and J01 was set to *(inherit from zone)*, so a WATCH and
+a WARNING were due. Neither fired.
+
+**The tell was on the Threshold Profiles screen, not the trend.** All three
+profiles showed **Used by: —**, including the one Zone1 names and the one J02
+names. `profilesForUi` computes that column from the **applied**
+`cfg/modbus+joints` document, while the joint and zone tables render the legacy
+**draft**. An empty Used-by column against populated tables means one thing: the
+bindings existed only in the draft. Evaluated against `default` (RoR watch 15,
+persistence **30 min**) the observed excursion — ~10 minutes above 15 — correctly
+raises nothing. The panel was right; the configuration was not in service.
+
+**Why nothing said so.** `diffDraftVsApplied` compared joint_id **membership**
+only, so a row present on both sides was "in sync" however much its content
+differed. The Configuration Status banner therefore printed the green
+*"configuration applied and in sync"* line over an unapplied threshold change.
+The one surface built to catch exactly this class of problem was blind to it.
+
+**Fix.** The diff now reports **changed** rows — slave, channel, zone and
+effective alarm profile — resolving the draft side's joint → zone → unset chain
+the same way `buildProcessLogicJoints` resolves the applied side (so an
+overridden joint, or a zone on `default`, is not false drift). The banner gains
+an amber "EDITED BUT NOT APPLIED" block naming each joint and field, and the
+green line is now gated on it.
+
+Deliberately **not** compared: the ambient (the legacy draft carries one flat
+`ambientSlaveID` while the applied document resolves a 3-level chain, so they
+differ on a correct config) and the label (`buildProcessLogicJoints` recovers it
+from this same draft, so the comparison would be against itself).
+
+An older test in the file caught a robustness bug in the first cut: a draft row
+carrying only `{joint_id}` compared as `NaN !== 1` and read as changed. Absent
+means *the draft does not say*, not *says something else* — so slave/channel/zone
+are skipped when unstated, while `threshold_profile` is exempt because absent
+there is meaningful (inherit) and is the whole point.
+
+**Pattern.** Third time the draft/applied split has produced a silent wrong
+answer (2026-08-31 alarm sweep, 2026-09-01 ProcessLogic repoint, this). Any new
+field the joint or zone table edits needs a line in this diff the day it is
+added, or it becomes invisible drift.
+
+Deploy: `src/` change → `git pull` + **restart** Node-RED, **and** re-import the
+flow (the banner and the publisher node both changed).
