@@ -7808,3 +7808,47 @@ added, or it becomes invisible drift.
 
 Deploy: `src/` change → `git pull` + **restart** Node-RED, **and** re-import the
 flow (the banner and the publisher node both changed).
+
+### Live-verified 2026-09-18: zone-wise thresholds, and the profile in the description
+
+Active Alarms on the panel, once `APPLY CONFIG` had been pressed:
+
+```
+2  18/9 16:25:42  J01  CRITICAL  J01: RoR 118.89 ≥ 50 [zone_1_alarm_profile]
+3  18/9 16:26:17  J01  WARNING   J01: RoR 106.34 ≥ 20 [zone_1_alarm_profile]
+4  18/9 16:26:22  J01  WATCH     J01: RoR 104.40 ≥ 10 [zone_1_alarm_profile]
+5  18/9 16:30:17  J02  CRITICAL  J02: RoR 156.87 ≥ 55 [joint_profile]
+1  16/9 14:50:20  J42  WARNING   J42: Sensor value out of valid range
+```
+
+Four things this settles at once:
+
+- **Zone inheritance is live.** J01 carries *(inherit from zone)*; the three
+  thresholds it fired on — 10 / 20 / 50 — are `zone_1_alarm_profile`'s RoR
+  ladder exactly. This is the check that was outstanding since 2026-09-12.
+- **A joint override beats its zone.** J02 sits in the same Zone1 and fired on
+  `joint_profile`'s 55.
+- **The profile suffix reads correctly** on every threshold-driven alarm.
+- **And is correctly absent** from the SENSOR_FAULT row — a sensor fault is not
+  produced by a threshold set, which is the scoping decision made when the
+  suffix was added.
+
+**The ladder fires high-to-low, and that is correct.** CRITICAL proved at
+16:25:42, WARNING 35 s later, WATCH 5 s after that. It looks backwards until you
+read the persistence column: this profile is 3 / 2 / 1 min for watch / warning /
+critical, so on a fast ramp the level with the *shortest* persistence proves
+first. Deliberate — a genuine fast excursion should not wait three minutes to
+announce itself at CRITICAL.
+
+**Two observations, neither acted on:**
+
+1. One event produced three rows for J01, one per level, each separately
+   ACK-able. That is by construction (`PROCESS|{joint}|{type}|{level}` is the
+   instanceId, so the levels are distinct alarms) and it is what makes the
+   ladder auditable — but an operator sees three lines for one excursion.
+   Whether a higher level should supersede the lower ones on the *display* is a
+   design-chat question, not an implementation detail.
+2. `J42` has a SENSOR_FAULT active since 16/9 while the joint table on this
+   panel shows J01–J05. If J42 is not in the applied `joints[]`,
+   `sweepDecommissionedAlarms` should have cleared it and has not — worth
+   checking with `tools/config-edit.js show` before assuming either way.
