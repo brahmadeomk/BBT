@@ -1046,6 +1046,8 @@ run overwrites everything set after it. What it applies:
 
 | setting | why |
 |---|---|
+| `layout Phone`, `theme Droid` | the house look — large touch keys, no function-key row, high contrast. Stored as **bare names**, so they resolve on a panel where onboard lives in `/usr/local` as well as `/usr` |
+| `system-theme-tracking-enabled false` | **the non-obvious half.** It defaults to *true*, and while it is on onboard picks its theme from the GTK theme and writes its choice back (`Config.remember_theme`) — so a panel whose desktop theme differs quietly ends up on a different keyboard, and onboard can overwrite what you just set |
 | `window docking-enabled false`, `force-to-top true` | float, and stay above the fullscreen kiosk — without `force-to-top` it opens *behind* Chromium and looks dead |
 | `icon-palette in-use false`, `show-status-icon false` | **no permanent furniture on the operator's screen** — the dashboard raises the keyboard by focus, so the floating logo just sits over the HMI all day |
 | `start-minimized true` | a session autostart can't flash the keyboard up at boot |
@@ -1055,6 +1057,23 @@ run overwrites everything set after it. What it applies:
 
 Touch handles stay **on** deliberately — they are how a floating keyboard gets
 dragged on a touchscreen, and the operator has to be able to move it off a field.
+Window **geometry** is deliberately *not* in the policy: panels differ in screen
+size, a width pinned to one lands wrong on the next, and onboard already
+remembers where the operator dragged it per device.
+
+Override the look per site without editing the script:
+
+```bash
+sudo BUSDUCT_OSK_LAYOUT=Compact BUSDUCT_OSK_THEME='Classic Onboard' \
+     /usr/local/sbin/busduct-osk setup
+```
+
+**A missing layout or theme does not error in onboard** — it logs a line and
+falls back to Compact / Classic Onboard, which is precisely the "worked on one
+panel, not the next" failure. So `setup` checks the user dir, `/usr/local/share`
+and `/usr/share` first, leaves the current value alone if the file is absent,
+prints what *is* available, and **exits 6** so a provisioning run fails loudly
+instead of leaving one panel on a different keyboard from the rest of the fleet.
 
 #### Function keys
 
@@ -1087,6 +1106,12 @@ If the F-row is there and you want it removed, copy that file to
 upgrade, editing the packaged one does not. `disable-keys` is still worth
 keeping either way: it covers the combinations a *hardware* keyboard could send
 if one is ever plugged in.
+
+With the **Phone** layout there is no function-key row to begin with, so the
+entries match nothing and onboard logs one *"ignoring unrecognized key combination"*
+per entry at startup. That is noise, not a fault — and the entries stay, because
+they are what stops Alt+F4 the moment anyone switches layout or plugs in a
+keyboard.
 
 
 Verify: `$G get org.onboard.window docking-enabled` → `false`, then tap a field

@@ -23,6 +23,12 @@
 set -eu
 
 KIOSK_USER="${BUSDUCT_KIOSK_USER:-pi}"
+
+# House style for the panel HMI, overridable per site without editing this file.
+# "Phone" is a large-key touch layout with no function-key row; "Droid" is the
+# high-contrast dark theme that reads well on the panel's screen.
+OSK_LAYOUT="${BUSDUCT_OSK_LAYOUT:-Phone}"
+OSK_THEME="${BUSDUCT_OSK_THEME:-Droid}"
 DEST=org.onboard.Onboard
 OBJ=/org/onboard/Onboard/Keyboard
 IFACE=org.onboard.Onboard.Keyboard
@@ -79,6 +85,58 @@ ensure_running() {
 do_setup() {
   gset() { as_kiosk gsettings set "$@"; }
 
+  # LOOK AND FEEL - the same on every panel, which is the whole point of putting
+  # it here rather than in a runbook step somebody does by hand.
+  #
+  # Both are stored as BARE NAMES, not paths (Config.py get_layout_filename /
+  # _expand_theme_filename): onboard resolves <user dir>/layouts/<name>.onboard
+  # first, then <install dir>/layouts/<name>.onboard. A bare name is what makes
+  # this portable - a full path would break on a device where onboard lives in
+  # /usr/local instead of /usr, and would silently fall back to Compact.
+  #
+  # Missing files do NOT error: onboard logs a line and falls back (Compact /
+  # Classic Onboard). That is exactly the "worked on one panel, not the next"
+  # failure this is meant to prevent, so check and say so.
+  # Not $HOME: under `sudo -u pi` that is the CALLER's home unless sudoers sets
+  # always_set_home, so it would look in root's dotfiles and miss a site layout.
+  HOME_K="$(getent passwd "$KIOSK_USER" | cut -d: -f6)"
+  osk_have() {   # osk_have layouts Phone .onboard
+    for d in "${HOME_K:-/nonexistent}/.local/share/onboard" \
+             /usr/local/share/onboard /usr/share/onboard; do
+      [ -f "$d/$1/$2$3" ] && return 0
+    done
+    return 1
+  }
+
+  SKIPPED=""
+  if osk_have layouts "$OSK_LAYOUT" .onboard; then
+    gset org.onboard layout "$OSK_LAYOUT"
+  else
+    SKIPPED="$SKIPPED layout"
+    echo "WARNING: layout '$OSK_LAYOUT' not found - leaving the current one." >&2
+    echo "         available: $(ls /usr/share/onboard/layouts/*.onboard 2>/dev/null | xargs -rn1 basename | sed 's/\.onboard$//' | tr '\n' ' ')" >&2
+  fi
+
+  if osk_have themes "$OSK_THEME" .theme; then
+    gset org.onboard theme "$OSK_THEME"
+    # MUST accompany the theme. This defaults to TRUE, and when it is on onboard
+    # picks its theme from the GTK theme via system-theme-associations and
+    # writes its choice back (Config.remember_theme). A panel whose desktop
+    # theme differs would quietly end up on a different keyboard theme, and
+    # onboard could overwrite the value we just set. Pinning the theme means
+    # turning the tracking off; this is the non-obvious half.
+    gset org.onboard system-theme-tracking-enabled false
+  else
+    SKIPPED="$SKIPPED theme"
+    echo "WARNING: theme '$OSK_THEME' not found - leaving the current one." >&2
+    echo "         available: $(ls /usr/share/onboard/themes/*.theme 2>/dev/null | xargs -rn1 basename | sed 's/\.theme$//' | tr '\n' ' ')" >&2
+  fi
+
+  # Window GEOMETRY is deliberately NOT set. Panels differ in screen size and a
+  # width/height pinned to one of them lands wrong on the others; onboard
+  # remembers where the operator drags it, per device, which is the right
+  # behaviour for the one setting that is genuinely device-specific.
+
   # MUST BE FIRST. Its own schema says: "If true, get configuration from system
   # defaults first. This flag will be reset on first start." Set the keys below
   # before onboard has ever run and that first run overwrites them.
@@ -131,8 +189,14 @@ do_setup() {
   # Touch handles stay ON: they are how a floating keyboard gets dragged on a
   # touchscreen, and the operator has to be able to move it off a field.
 
-  echo "keyboard policy applied for user $KIOSK_USER"
   echo "restart the keyboard to pick it up:  $(basename "$0") hide; pkill onboard"
+  if [ -n "$SKIPPED" ]; then
+    # Non-zero so a provisioning run fails loudly rather than leaving one panel
+    # on a different keyboard from the rest of the fleet.
+    echo "keyboard policy applied for $KIOSK_USER WITH WARNINGS - skipped:$SKIPPED" >&2
+    return 6
+  fi
+  echo "keyboard policy applied for user $KIOSK_USER (layout $OSK_LAYOUT, theme $OSK_THEME)"
 }
 
 case "$ACTION" in
