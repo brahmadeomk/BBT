@@ -993,46 +993,99 @@ a flow re-import (§6) — no configuration:
 
 ### 12i. Floating on-screen keyboard (onboard)
 
-The panels run **onboard** for touch text entry. Docked, it claims the bottom
-of the screen and pushes the settings tables up; the operator wants it floating.
-Onboard supports that natively — it is a per-user dconf setting, so it lives in
-`pi`'s profile, **not in git** (it is in the host-state table below).
+The docked keyboard claims the bottom of the screen and pushes the settings
+tables up; the operator wants it floating. **onboard** is the keyboard that
+floats, and this section is what ESBUSBBT04 actually needed — the first cut of
+it assumed onboard was already installed, and it was not.
 
-Run as the kiosk user; `dbus-launch` gives `gsettings` a session bus over SSH:
+**What the panel reports (ESBUSBBT04, 2026-09-18).** Check yours before
+following any of this, because the answer decides the whole approach:
+
+```bash
+dpkg -l | grep -iE 'onboard|matchbox|squeekboard|wvkbd|florence' | awk '{print $2, $3}'
+ps -eo comm,args | grep -iE 'onboard|matchbox|squeekboard|wvkbd|florence' | grep -v grep
+echo "session: $XDG_SESSION_TYPE"
+gsettings list-schemas | grep -i onboard || echo "no onboard schema"
+```
+
+```
+onboard-common 1.4.1-10        <- DATA ONLY. The program is the `onboard` package.
+squeekboard 1.43.1-1+rpt1      <- Wayland-only; inert on this session
+wfplug-squeek 1.2              <- wayfire plugin for the above; also inert
+session: x11
+no onboard schema              <- why every gsettings call said "No such schema"
+```
+
+Two things to read out of that. `onboard-common` is the architecture-independent
+data package (layouts, themes) — it carries no binary and no GSettings schema,
+so having it installed does **not** mean onboard is. And the session is **x11**,
+which is what onboard needs: `squeekboard` is a Wayland layer-shell keyboard and
+cannot run here at all, so do not try to configure it.
+
+**Install the program, then configure it:**
+
+```bash
+sudo apt-get update && sudo apt-get install -y onboard
+gsettings list-schemas | grep -i onboard      # must now list org.onboard.window
+```
+
+The schema check is not ceremony — every command below fails with
+*"No such schema"* until it passes, which is exactly what happened on the first
+attempt.
 
 ```bash
 G='sudo -u pi dbus-launch gsettings'
+
+# FIRST, or the first launch overwrites everything set below. The schema says of
+# this key: "If true, get configuration from system defaults first. This flag
+# will be reset on first start."
+$G set org.onboard use-system-defaults false
+
 $G set org.onboard.window docking-enabled false          # float instead of dock
 $G set org.onboard.window force-to-top true              # stay above the fullscreen kiosk
-$G set org.onboard.window window-state-sticky true       # on every workspace (default, but pin it)
-$G set org.onboard.auto-show enabled true                # appear when a text field takes focus
-$G set org.onboard.auto-show reposition-method-floating prevent-occlusion   # move off the field it would cover
-$G set org.onboard.window inactive-transparency 50.0     # fade when nothing is focused (default)
+$G set org.onboard.window window-state-sticky true       # on every workspace
+$G set org.onboard.icon-palette in-use true              # floating tap-to-open icon (see below)
 
-# optional: where it lands on a landscape panel - adjust to the display
+# where it lands on a landscape panel - adjust to the display
 $G set org.onboard.window.landscape x 100
 $G set org.onboard.window.landscape y 50
 $G set org.onboard.window.landscape width 700
 $G set org.onboard.window.landscape height 205
 
-sudo -u pi DISPLAY=:0 sh -c 'pkill onboard; setsid onboard >/dev/null 2>&1 &'   # or reboot
+sudo -u pi DISPLAY=:0 sh -c 'pkill onboard; setsid onboard >/dev/null 2>&1 &'
 ```
 
 Verify: `$G get org.onboard.window docking-enabled` → `false`, then tap a field
-on Modbus Settings — the keyboard should appear as a draggable window, not a
-bottom strip. Drag it by its handle bar; the new position is remembered.
+on Modbus Settings. The keyboard should be a draggable window, not a bottom
+strip; drag it by its handle and the position is remembered.
 
 **`force-to-top` is the one that matters on a kiosk.** Without it a floating
 onboard sits *behind* the fullscreen Chromium window and looks like it never
-opened. **Do not** add `--force-renderer-accessibility` to the browser to "help"
-auto-show: it already works (the keyboard appears today), and that flag makes
-Chromium build an accessibility tree for the whole dashboard — CPU §12 spent
-weeks recovering.
+opened.
 
-Key names above are taken from onboard's own `org.onboard.gschema.xml`, not
-from memory. `docking-enabled` defaults to **false** upstream, so a panel that
-docks was set that way somewhere (Pi OS image or a previous hand); this
-overrides it either way.
+**Tap-to-open rather than auto-show, deliberately.** onboard's `auto-show`
+raises the keyboard when a text field takes focus, and it learns that through
+**AT-SPI** — which means Chromium has to expose an accessibility tree for the
+dashboard before it can work on a web page. That is the
+`--force-renderer-accessibility` cost §12 spent weeks recovering from, paid on
+every dashboard repaint, to save one tap. `org.onboard.icon-palette in-use true`
+gives a small floating icon the operator taps instead: no accessibility tree, no
+CPU, and it works on any page. Turn auto-show on only if the extra tap is
+genuinely unacceptable, and measure with `kiosk_cpu` (§12e step 0) either side:
+
+```bash
+$G set org.onboard.auto-show enabled true
+$G set org.onboard.auto-show reposition-method-floating prevent-occlusion
+```
+
+(A previous revision of this section claimed auto-show already worked on the
+panel and told you not to add that flag. The first half was wrong — onboard was
+not installed, so whatever appeared on the settings page was not onboard. The
+advice about the flag stands, for the reason above.)
+
+Key names here are read from onboard's own `org.onboard.gschema.xml`, not from
+memory. All of this is **per-user dconf** in `pi`'s profile, so it is host state
+that no `git pull` carries — it is in the table below.
 
 ## Updating later
 
