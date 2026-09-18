@@ -1035,26 +1035,59 @@ The schema check is not ceremony — every command below fails with
 attempt.
 
 ```bash
-G='sudo -u pi dbus-launch gsettings'
-
-# FIRST, or the first launch overwrites everything set below. The schema says of
-# this key: "If true, get configuration from system defaults first. This flag
-# will be reset on first start."
-$G set org.onboard use-system-defaults false
-
-$G set org.onboard.window docking-enabled false          # float instead of dock
-$G set org.onboard.window force-to-top true              # stay above the fullscreen kiosk
-$G set org.onboard.window window-state-sticky true       # on every workspace
-$G set org.onboard.icon-palette in-use true              # floating tap-to-open icon (see below)
-
-# where it lands on a landscape panel - adjust to the display
-$G set org.onboard.window.landscape x 100
-$G set org.onboard.window.landscape y 50
-$G set org.onboard.window.landscape width 700
-$G set org.onboard.window.landscape height 205
-
-sudo -u pi DISPLAY=:0 sh -c 'pkill onboard; setsid onboard >/dev/null 2>&1 &'
+sudo install -o root -g root -m 0755 deploy/bin/busduct-osk /usr/local/sbin/busduct-osk
+sudo /usr/local/sbin/busduct-osk setup      # the whole policy, idempotent
+sudo /usr/local/sbin/busduct-osk hide; sudo pkill onboard   # restart it to pick the policy up
 ```
+
+`setup` is one command rather than eleven `gsettings` lines because the order
+matters: `use-system-defaults` has to be cleared **first** or onboard's first
+run overwrites everything set after it. What it applies:
+
+| setting | why |
+|---|---|
+| `window docking-enabled false`, `force-to-top true` | float, and stay above the fullscreen kiosk — without `force-to-top` it opens *behind* Chromium and looks dead |
+| `icon-palette in-use false`, `show-status-icon false` | **no permanent furniture on the operator's screen** — the dashboard raises the keyboard by focus, so the floating logo just sits over the HMI all day |
+| `start-minimized true` | a session autostart can't flash the keyboard up at boot |
+| `auto-show enabled false` | the dashboard does this instead; see below |
+| `lockdown disable-keys …` | function keys inert, including **Alt+F4** |
+| `lockdown disable-quit`, `disable-preferences` | an operator can't quit the keyboard or open its settings from the panel |
+
+Touch handles stay **on** deliberately — they are how a floating keyboard gets
+dragged on a touchscreen, and the operator has to be able to move it off a field.
+
+#### Function keys
+
+`disable-keys` matches on **(key id, exact modifier mask)** — read from
+`Keyboard.py`, `create_disabled_keys_set()`. So one entry per modifier
+combination: listing plain `F[0-9]+` alone would still let Shift+F5 through, and
+onboard's shipped default disables only `CTRL+LALT+F[0-9]+`. `setup` writes
+plain, SHIFT, CTRL, LALT, RALT, CTRL+LALT and LWIN.
+
+**`LALT+F[0-9]+` is the one that matters for §12f.** Alt+F4 closes the kiosk
+window, and the Xorg lockdown there cannot stop it — that file disables VT
+switching and Ctrl+Alt+Backspace, which are X server bindings; Alt+F4 is a
+window-manager binding. An on-screen keyboard offering it hands the operator the
+way out that §12f exists to close.
+
+**These keys stay DRAWN.** onboard rejects the keystroke in `send_key_down`/
+`send_key_up`; it does not hide the key, so an F-row will still be on screen and
+still animate on touch — it simply sends nothing. To have them *gone*, change
+the layout instead. Check what yours has first:
+
+```bash
+ls /usr/share/onboard/layouts/            # Compact is the default
+gsettings get org.onboard layout
+grep -o 'id="F[0-9]*"' /usr/share/onboard/layouts/Compact.onboard | sort -u
+```
+
+If the F-row is there and you want it removed, copy that file to
+`~pi/.local/share/onboard/layouts/`, delete the key elements, and point
+`org.onboard layout` at the copy — a user-dir layout survives an onboard
+upgrade, editing the packaged one does not. `disable-keys` is still worth
+keeping either way: it covers the combinations a *hardware* keyboard could send
+if one is ever plugged in.
+
 
 Verify: `$G get org.onboard.window docking-enabled` → `false`, then tap a field
 on Modbus Settings. The keyboard should be a draggable window, not a bottom

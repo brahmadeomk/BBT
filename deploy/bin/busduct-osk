@@ -19,7 +19,7 @@
 #      for the name to appear, which also means a crashed keyboard heals on the
 #      next tap instead of staying dead until someone notices.
 #
-# Usage: busduct-osk show|hide|toggle|status
+# Usage: busduct-osk show|hide|toggle|status|setup
 set -eu
 
 KIOSK_USER="${BUSDUCT_KIOSK_USER:-pi}"
@@ -29,8 +29,8 @@ IFACE=org.onboard.Onboard.Keyboard
 
 ACTION="${1:-}"
 case "$ACTION" in
-  show|hide|toggle|status) ;;
-  *) echo "usage: $(basename "$0") show|hide|toggle|status" >&2; exit 2 ;;
+  show|hide|toggle|status|setup) ;;
+  *) echo "usage: $(basename "$0") show|hide|toggle|status|setup" >&2; exit 2 ;;
 esac
 
 UID_K="$(id -u "$KIOSK_USER" 2>/dev/null)" || { echo "no such user: $KIOSK_USER" >&2; exit 3; }
@@ -72,7 +72,71 @@ ensure_running() {
   exit 5
 }
 
+# ---------------------------------------------------------------- setup
+# Applies the panel's keyboard policy. Idempotent - safe to re-run, and the
+# thing to run on a new panel rather than pasting eight gsettings lines, one of
+# which has to come first (see use-system-defaults below).
+do_setup() {
+  gset() { as_kiosk gsettings set "$@"; }
+
+  # MUST BE FIRST. Its own schema says: "If true, get configuration from system
+  # defaults first. This flag will be reset on first start." Set the keys below
+  # before onboard has ever run and that first run overwrites them.
+  gset org.onboard use-system-defaults false
+
+  # Float, and stay above the fullscreen kiosk. Without force-to-top a floating
+  # onboard sits BEHIND Chromium and looks like it never opened.
+  gset org.onboard.window docking-enabled false
+  gset org.onboard.window force-to-top true
+  gset org.onboard.window window-state-sticky true
+
+  # No permanent furniture on the operator's screen. The dashboard raises and
+  # lowers the keyboard by focus, so the floating logo and the tray icon are
+  # both redundant - and the logo sits over the HMI all day.
+  gset org.onboard.icon-palette in-use false
+  gset org.onboard show-status-icon false
+
+  # Start hidden, so a session autostart cannot flash the keyboard up at boot
+  # or leave it parked over the dashboard before anyone has touched a field.
+  gset org.onboard start-minimized true
+
+  # onboard's own auto-show stays OFF: it finds focused fields through AT-SPI,
+  # which for a web page needs Chromium's accessibility tree. The dashboard
+  # already knows where focus is. See docs/pi-deployment.md 12i.
+  gset org.onboard.auto-show enabled false
+
+  # FUNCTION KEYS INERT.
+  #
+  # `disable-keys` matches on (key id, EXACT modifier mask) - verified in
+  # onboard's Keyboard.py, create_disabled_keys_set(). So one entry per modifier
+  # combination; listing plain F[0-9]+ alone would still let Shift+F5 through.
+  # The shipped default is only [["CTRL","LALT","F[0-9]+"]].
+  #
+  # LALT+F[0-9]+ is the one that matters for 12f: Alt+F4 closes the kiosk
+  # window, and the Xorg lockdown cannot stop it because it is a window-manager
+  # binding, not a VT switch. CTRL+LALT+F[0-9]+ is belt-and-braces over the
+  # DontVTSwitch already set there.
+  #
+  # NOTE: these keys are still DRAWN and still animate on touch - onboard
+  # rejects the keystroke in send_key_down/up, it does not hide the key. To have
+  # them gone from the layout entirely, see 12i.
+  gset org.onboard.lockdown disable-keys "[['F[0-9]+'],['SHIFT','F[0-9]+'],['CTRL','F[0-9]+'],['LALT','F[0-9]+'],['RALT','F[0-9]+'],['CTRL','LALT','F[0-9]+'],['LWIN','F[0-9]+']]"
+
+  # An operator cannot quit the keyboard or open its preferences from the panel.
+  # Same reasoning as the kiosk PIN gate: leaving a way out of the appliance on
+  # the appliance's own screen defeats it.
+  gset org.onboard.lockdown disable-quit true
+  gset org.onboard.lockdown disable-preferences true
+
+  # Touch handles stay ON: they are how a floating keyboard gets dragged on a
+  # touchscreen, and the operator has to be able to move it off a field.
+
+  echo "keyboard policy applied for user $KIOSK_USER"
+  echo "restart the keyboard to pick it up:  $(basename "$0") hide; pkill onboard"
+}
+
 case "$ACTION" in
+  setup) do_setup; exit 0 ;;
   status)
     running || { echo "not running"; exit 0; }
     v="$(as_kiosk gdbus call --session --dest "$DEST" --object-path "$OBJ" \

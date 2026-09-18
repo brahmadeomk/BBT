@@ -32,13 +32,20 @@ pi ALL=(root) NOPASSWD: /usr/sbin/uhubctl
 # Install: docs/security-hardening.md §2b.
 pi ALL=(root) NOPASSWD: /usr/local/sbin/busduct-wifi
 
-# The on-screen keyboard helper (docs/pi-deployment.md §12i). Needed only where
-# Node-RED does NOT run as the kiosk user — it runs `sudo -n -u pi` to reach
-# that user's session bus, so this is a (pi -> pi) rule, not a root grant. Where
-# Node-RED already runs as root the sudo is a passthrough and where it runs as
-# pi the wrapper skips sudo entirely; the rule is here so the middle case (a
-# third service account) does not fail closed with a password prompt.
+# The on-screen keyboard helper (docs/pi-deployment.md 12i).
 #
-# The wrapper takes only show|hide|toggle|status and passes NOTHING to a shell,
-# so pinning the arguments adds nothing here.
-pi ALL=(pi) NOPASSWD: /usr/local/sbin/busduct-osk
+# NOT NEEDED on either normal layout, and the flow's exec nodes call the wrapper
+# with NO sudo for that reason. The wrapper works out for itself whether it has
+# to cross into the kiosk user's graphical session:
+#   Node-RED as root  -> it runs `sudo -u pi` internally; root needs no rule.
+#   Node-RED as pi    -> it is already the kiosk user and runs gdbus directly.
+#
+# The rule below covers only the third case - Node-RED under a dedicated service
+# account that is neither root nor the kiosk user. That also needs the exec
+# nodes changed to `sudo -n -u pi /usr/local/sbin/busduct-osk <action>`, so it
+# is a deliberate change, not something that starts working by installing this.
+# Substitute that account for `pi` on the left.
+#
+# The wrapper takes only show|hide|toggle|status|setup and passes NOTHING to a
+# shell, so pinning the arguments would add nothing.
+#pi ALL=(pi) NOPASSWD: /usr/local/sbin/busduct-osk
