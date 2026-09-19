@@ -961,3 +961,65 @@ describe('the config tables load themselves and keep their dropdown options (202
     assert.equal((t.match(/<th>/g) || []).length, (t.match(/<td>/g) || []).length);
   });
 });
+
+describe('config tables: a width for every column (2026-09-19)', () => {
+  // Two live reports, opposite directions, same root cause - a width list that
+  // did not match the columns.
+  //
+  //  2026-09-12: 8 nth-child widths, 9 columns, table-layout:fixed. The unlisted
+  //              column (Actions) got zero width and EDIT/DELETE became
+  //              unreachable.
+  //  2026-09-19: the fix for that swung to width:max-content + min-width:100% +
+  //              table-layout:auto, so with short content ("J96") the slack was
+  //              handed out across every column and a six-character id took a
+  //              fifth of the screen.
+  //
+  // Fixed layout with a width for EVERY column summing to 100% is stable in both
+  // directions - but only while the two lists agree, which is what this pins.
+  // Adding a column to either table must add its width, and the percentages must
+  // still total 100.
+  const TABLES = ['JointMasterUI', 'ZoneMasterUI'];
+
+  const flows = () => JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+  const template = (name) => {
+    const node = flows().find((n) => n.name === name);
+    assert.ok(node, `${name} must exist`);
+    return node.format;
+  };
+
+  for (const name of TABLES) {
+    test(`${name}: one width rule per column`, () => {
+      const t = template(name);
+      const headers = (t.match(/<th>/g) || []).length;
+      const widths = (t.match(/th:nth-child\(\d+\), \.bms-table td:nth-child\(\d+\) \{ width:/g) || []).length;
+      assert.ok(headers > 0, 'the table must have headers');
+      assert.equal(widths, headers,
+        `${headers} columns but ${widths} width rules - a column without a width gets zero under table-layout:fixed`);
+    });
+
+    test(`${name}: the widths total 100%`, () => {
+      const total = [...template(name).matchAll(/width: (\d+)%; \}/g)]
+        .map((m) => Number(m[1]))
+        .reduce((a, b) => a + b, 0);
+      assert.equal(total, 100, 'under- or over-shooting leaves slack to be distributed, or overflows the row');
+    });
+
+    test(`${name}: cells wrap rather than widening their column`, () => {
+      const t = template(name);
+      assert.ok(/white-space: normal/.test(t), 'nowrap forces a long value to stretch its column');
+      assert.ok(/overflow-wrap: anywhere/.test(t), 'and an unbroken token would still overflow');
+    });
+  }
+
+  test('free-text cells render a wrapping div when the row is not being edited', () => {
+    // An <input> never wraps - it scrolls. So the read-only state has to be a
+    // real block element; this is the pattern the Diagnostics table already
+    // uses, and it also drops an NgModelController per cell per idle row.
+    const t = template('JointMasterUI');
+    for (const field of ['j.joint_name', 'j.joint_id']) {
+      assert.ok(t.includes(`<input class="bms-input" ng-model="${field}" ng-if="j.editing">`), `${field} input`);
+      assert.ok(t.includes(`<div class="bms-cell" ng-if="!j.editing">{{${field}}}</div>`), `${field} read-only cell`);
+    }
+    assert.ok(template('ZoneMasterUI').includes('<div class="bms-cell" ng-if="!z.editing">{{z.zone_name}}</div>'));
+  });
+});
