@@ -1004,7 +1004,16 @@ describe('config tables: a width for every column (2026-09-19)', () => {
       // fixed layout it hands the slack back out to every column, which is the
       // bloat this replaced.
       const t = template(name);
-      assert.ok(/\.bms-table \{ width: max-content;/.test(t), 'the table is the sum of its columns');
+      // A DEFINITE width, in pixels. `table-layout: fixed` has nothing to lay
+      // out against otherwise: `max-content` is an intrinsic keyword, so the
+      // browser sizes from content instead and the per-column rules below
+      // become advisory - a column declared 40px rendered several times that.
+      const declared = /\.bms-table \{ width: (\d+)px;/.exec(t);
+      assert.ok(declared, 'the table must declare a pixel width');
+      const sum = [...t.matchAll(/\{ width: (\d+)px; \}  \/\* .+? \*\//g)]
+        .map((m) => Number(m[1])).reduce((a, b) => a + b, 0);
+      assert.equal(Number(declared[1]), sum,
+        'the declared table width must equal the sum of its columns, or fixed layout redistributes the difference');
       assert.ok(!/\.bms-table \{[^}]*min-width: 100%/.test(t), 'min-width:100% re-introduces slack distribution');
       assert.equal((t.match(/td:nth-child\(\d+\) \{ width: \d+%/g) || []).length, 0, 'no percentage widths');
     });
