@@ -1009,6 +1009,17 @@ describe('config tables: a width for every column (2026-09-19)', () => {
       assert.equal((t.match(/td:nth-child\(\d+\) \{ width: \d+%/g) || []).length, 0, 'no percentage widths');
     });
 
+    test(`${name}: numeric cells carry no spin buttons`, () => {
+      // Chromium draws a ~15px inner spin button inside every input[type=number]
+      // and reveals it on hover, so the Slave ID and Ch columns could not be
+      // sized to their real maxima (3 and 2 characters) without clipping the
+      // digits. It is useless here too: nobody steps a unit address one at a
+      // time, and the arrows are untappable on a touchscreen.
+      const t = template(name);
+      assert.ok(/-webkit-inner-spin-button \{ -webkit-appearance: none/.test(t), 'Chromium');
+      assert.ok(/\[type=number\] \{ -moz-appearance: textfield/.test(t), 'Firefox');
+    });
+
     test(`${name}: the Actions column is pinned to the right edge`, () => {
       // It scrolls out of reach otherwise, which is exactly what the operator
       // reported twice - once as unreachable, once as "not visible clearly".
