@@ -997,11 +997,25 @@ describe('config tables: a width for every column (2026-09-19)', () => {
         `${headers} columns but ${widths} width rules - a column without a width gets zero under table-layout:fixed`);
     });
 
-    test(`${name}: the widths total 100%`, () => {
-      const total = [...template(name).matchAll(/width: (\d+)%; \}/g)]
-        .map((m) => Number(m[1]))
-        .reduce((a, b) => a + b, 0);
-      assert.equal(total, 100, 'under- or over-shooting leaves slack to be distributed, or overflows the row');
+    test(`${name}: widths are in PIXELS, and the table never claims 100%`, () => {
+      // Percentages capped the table at its container, so there was nothing to
+      // scroll horizontally and Actions had to shrink with everything else.
+      // `min-width: 100%` is the specific thing that must not come back: under
+      // fixed layout it hands the slack back out to every column, which is the
+      // bloat this replaced.
+      const t = template(name);
+      assert.ok(/\.bms-table \{ width: max-content;/.test(t), 'the table is the sum of its columns');
+      assert.ok(!/\.bms-table \{[^}]*min-width: 100%/.test(t), 'min-width:100% re-introduces slack distribution');
+      assert.equal((t.match(/td:nth-child\(\d+\) \{ width: \d+%/g) || []).length, 0, 'no percentage widths');
+    });
+
+    test(`${name}: the Actions column is pinned to the right edge`, () => {
+      // It scrolls out of reach otherwise, which is exactly what the operator
+      // reported twice - once as unreachable, once as "not visible clearly".
+      const t = template(name);
+      assert.ok(/td:last-child \{[\s\S]*?position: sticky; right: 0;/.test(t), 'sticky');
+      assert.ok(/td:last-child \{[\s\S]*?white-space: nowrap;/.test(t), 'buttons must not stack');
+      assert.ok(/td:last-child \{[\s\S]*?background: #141a24;/.test(t), 'opaque, or cells show through it');
     });
 
     test(`${name}: cells wrap rather than widening their column`, () => {
