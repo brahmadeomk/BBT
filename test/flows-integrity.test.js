@@ -1009,6 +1009,12 @@ describe('config tables: a width for every column (2026-09-19)', () => {
       assert.equal((t.match(/td:nth-child\(\d+\) \{ width: \d+%/g) || []).length, 0, 'no percentage widths');
     });
 
+    test(`${name}: headings are centred over their column`, () => {
+      // They were left-aligned while the values below were centred, so on a
+      // narrow column the heading read as belonging to the column to its left.
+      assert.ok(/\.bms-table th \{ text-align: center; \}/.test(template(name)));
+    });
+
     test(`${name}: numeric cells carry no spin buttons`, () => {
       // Chromium draws a ~15px inner spin button inside every input[type=number]
       // and reveals it on hover, so the Slave ID and Ch columns could not be
