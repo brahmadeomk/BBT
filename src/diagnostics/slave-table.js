@@ -121,8 +121,13 @@ function buildSlaveRows(doc, cache, { nowMs = Date.now(), staleMs = DEFAULT_STAL
         Add: channelAddress(slave, ch),
         Data: r && r.val != null ? r.val : null,
         Status: statusFor(r, nowMs, staleMs),
-        // Additions - present in the data, not yet rendered.
         Ch: ch,
+        // Rendered as the Diagnostics "Bus" column (2026-09-19). Comes from the
+        // APPLIED config, not from the reading that happened to arrive: a
+        // commissioned channel that has never reported still has to say which
+        // segment it is on - that is the row an engineer opens this page to
+        // find. The reading's own tag is only a fallback, for a device that
+        // answers on a bus the config does not place it on.
         Bus: slave.bus_id ?? (r && r.bus_id) ?? null,
         SlaveId: slave.slave_id ?? null,
         AgeSec: r ? Math.round((nowMs - r.ts) / 1000) : null,

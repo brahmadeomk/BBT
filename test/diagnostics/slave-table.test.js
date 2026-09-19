@@ -334,3 +334,81 @@ describe('the Diagnostics template stays cheap to render (2026-09-08)', () => {
     assert.equal(depth, 0);
   });
 });
+
+describe('the Bus column (2026-09-19)', () => {
+  // `Bus` was computed from the start and marked "present in the data, not yet
+  // rendered". The operator asked for it on the Diagnostics table, so these pin
+  // both halves: the value, and the fact that the template actually binds it.
+  const twoBusDoc = () => ({
+    modbus: {
+      buses: [{ bus_id: 'bus1' }, { bus_id: 'bus2' }],
+      slaves: [
+        { slave_id: 'sl01', bus_id: 'bus1', unit_address: 1, channels: 1, registers: { temp_base_addr: 3 } },
+        { slave_id: 'sl09', bus_id: 'bus2', unit_address: 9, channels: 2, registers: { temp_base_addr: 3, channel_addrs: [3, 4] } },
+      ],
+    },
+    joints: [],
+  });
+
+  test('every row names the segment its slave is commissioned on', () => {
+    const { rows } = buildSlaveRows(twoBusDoc(), {});
+    assert.deepEqual(rows.map((r) => [r.ID, r.Ch, r.Bus]), [[1, 1, 'bus1'], [9, 1, 'bus2'], [9, 2, 'bus2']]);
+  });
+
+  test('a channel that has NEVER reported still names its bus', () => {
+    // The whole point of building rows from the config: the row an engineer
+    // opens this page to find is the dead one, and "which segment" is the first
+    // thing they need from it.
+    const { rows } = buildSlaveRows(twoBusDoc(), {});
+    const dark = rows.find((r) => r.ID === 9 && r.Ch === 2);
+    assert.equal(dark.Status, 'No Data');
+    assert.equal(dark.Bus, 'bus2');
+  });
+
+  test('the reading tag is only a fallback, never an override', () => {
+    // A device answering on a bus the config does not place it on is a wiring
+    // fault; the table must show what was COMMISSIONED, or the page agrees with
+    // the mistake instead of exposing it.
+    const cache = {};
+    recordReading(cache, { payload: { id: 1, val: 30, st: 'ok' }, bus_id: 'bus2' }, 1000);
+    const { rows } = buildSlaveRows(twoBusDoc(), cache, { nowMs: 1000 });
+    assert.equal(rows.find((r) => r.ID === 1).Bus, 'bus1', 'the applied config wins');
+  });
+
+  test('a slave with no bus_id at all yields null, not a guess', () => {
+    const doc = { modbus: { slaves: [{ slave_id: 'sl01', unit_address: 1, channels: 1, registers: { temp_base_addr: 3 } }] }, joints: [] };
+    assert.equal(buildSlaveRows(doc, {}).rows[0].Bus, null);
+  });
+});
+
+describe('the Diagnostics template renders it', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const template = () => {
+    const flows = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'flows', 'flows_BBT.json'), 'utf8'));
+    const node = flows.find((n) => n.id === 'db41c2b5077e83fc');
+    assert.ok(node, 'the "modbus data" ui_template must exist');
+    return node.format;
+  };
+
+  test('there is a Bus header and a cell bound to RawData.Bus', () => {
+    const t = template();
+    assert.ok(t.includes('<th>Bus</th>'), 'header');
+    assert.ok(/\{\{RawData\.Bus \|\|/.test(t), 'cell bound to the row field');
+  });
+
+  test('headers and body cells stay the same length', () => {
+    // A column added to one and not the other silently shifts every value one
+    // place right - the kind of thing that reads as a data bug, not a markup one.
+    const t = template();
+    const table = t.slice(t.indexOf('<thead>'), t.indexOf('</tbody>'));
+    const headers = (table.match(/<th>/g) || []).length;
+    const cells = (table.match(/<td>|<td><div/g) || []).length;
+    assert.equal(headers, 8);
+    assert.equal(cells, headers, `${headers} headers vs ${cells} cells`);
+  });
+
+  test('a row with no bus shows an em dash rather than blank or "null"', () => {
+    assert.ok(/RawData\.Bus \|\| '—'/.test(template()));
+  });
+});
