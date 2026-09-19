@@ -126,3 +126,64 @@ describe('wifi status', () => {
     assert.equal(r.active[0].state, 'activated');
   });
 });
+
+describe('the Wi-Fi screen cannot scan itself in a loop (2026-09-19)', () => {
+  // Live report: the network dropdown refreshed constantly and the selection
+  // changed while the operator was typing the password.
+  //
+  // WifiUI had fwdInMessages ("Pass through messages from input to output") ON,
+  // and its output wires to the backend that feeds it. So the backend's
+  // {networks} reply was echoed straight back to the backend, which saw no
+  // action, fell through to its default - a scan - and replied again. An
+  // unbounded loop running nmcli as fast as it completed, from boot onwards,
+  // which also disturbs the very association it is reporting on.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const flows = () => JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'flows', 'flows_BBT.json'), 'utf8'));
+  const node = (id) => {
+    const n = flows().find((x) => x.id === id);
+    assert.ok(n, `node ${id} must exist`);
+    return n;
+  };
+  const UI = 'n3701c0000000002';
+  const BACKEND = 'n3701c0000000003';
+  const BOOT = 'n3701c0000000004';
+
+  test('the template does NOT pass its input through to its output', () => {
+    // This is the fix. It must stay off for any template wired back to the node
+    // that feeds it, or the echo loop returns.
+    assert.equal(node(UI).fwdInMessages, false);
+  });
+
+  test('the loop it would close is still present, so the flag is what prevents it', () => {
+    // If the wiring is ever changed so the two no longer point at each other,
+    // this test should be re-read rather than deleted - it documents WHY the
+    // flag matters here specifically.
+    assert.ok(node(UI).wires.flat().includes(BACKEND), 'template feeds the backend');
+    assert.ok(node(BACKEND).wires.flat().includes(UI), 'backend feeds the template');
+  });
+
+  test('the backend acts only on an action it recognises', () => {
+    // Defence in depth: "no action" used to fall through to a scan, which is
+    // what turned an accidental echo into a scan storm rather than a no-op.
+    const fn = node(BACKEND).func;
+    assert.ok(/if \(action !== 'scan'\)/.test(fn), 'unknown actions are rejected');
+    assert.ok(fn.indexOf("if (action !== 'scan')") < fn.indexOf('svc.wifi.scan()'),
+      'the guard comes BEFORE the scan, or it guards nothing');
+  });
+
+  test('the boot inject names its action instead of relying on a fallthrough', () => {
+    const b = node(BOOT);
+    assert.equal(b.payloadType, 'json');
+    assert.deepEqual(JSON.parse(b.payload), { action: 'scan' });
+    assert.equal(b.repeat, '', 'boot only - a repeat here would be a slow version of the same bug');
+  });
+
+  test('a refresh keeps the operator\'s selection', () => {
+    const t = node(UI).format;
+    assert.ok(/const keep = scope\.sel && p\.networks\.find/.test(t),
+      'the rebuild must look for the current choice before replacing it');
+    assert.ok(/no longer in range/.test(t),
+      'and say so when the chosen network has genuinely gone');
+  });
+});

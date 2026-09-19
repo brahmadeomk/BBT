@@ -7852,3 +7852,45 @@ announce itself at CRITICAL.
    panel shows J01–J05. If J42 is not in the applied `joints[]`,
    `sweepDecommissionedAlarms` should have cleared it and has not — worth
    checking with `tools/config-edit.js show` before assuming either way.
+
+## 2026-09-19 — The Wi-Fi screen was scanning itself in a loop
+
+**Live report.** The network dropdown refreshed constantly and the selection
+changed under the operator while they were entering the password.
+
+**Root cause: an echo loop, not a timer.** `WifiUI` had **`fwdInMessages`**
+("Pass through messages from input to output") set, and its output wires to
+`WifiBackEndNode` — the very node that feeds it. So the backend's `{networks}`
+reply was passed straight back to the backend, which saw `payload.action ===
+undefined`, fell through to its **default branch — a scan** — and replied again.
+An unbounded loop running `nmcli device wifi list` as fast as it completed, from
+the boot inject onwards.
+
+Worth noting what that cost beyond the dropdown: a Wi-Fi scan briefly disturbs
+the association, so the screen was degrading the very link it exists to report
+on, continuously, on every panel — visible only if someone happened to open the
+page.
+
+**Three changes, each needed:**
+
+1. **`fwdInMessages: false`.** The fix. That flag must never be on for a
+   template wired back to the node that feeds it.
+2. **The backend acts only on an action it recognises.** The fallthrough to
+   scan is what turned an accidental echo into a scan storm instead of a no-op.
+   The boot inject now names `{action:'scan'}` for itself rather than relying on
+   a bare timestamp landing in the default branch.
+3. **A refresh keeps the operator's selection.** Even with the loop gone,
+   pressing SCAN mid-password reassigned `scope.sel` unconditionally, so CONNECT
+   would have targeted a different SSID than the one on screen. The rebuild now
+   looks for the current choice first and only auto-selects when nothing is
+   chosen or the chosen network has genuinely gone off the air — and says so
+   when it has.
+
+**Pattern, fourth time.** A rebuild discarding live user state: the joint
+table's dropped edits (`$watch` overwriting an in-progress row), the
+`profile_names` the rebuild threw away, the threshold drift the banner could not
+see, and now this. Anything that repaints from a server message must merge with
+what the operator is holding, never replace it.
+
+Deploy: flow-only change → `git pull` + **re-import the flow**. No restart
+needed (`src/network/wifi.js` is unchanged).
