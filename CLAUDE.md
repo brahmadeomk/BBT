@@ -424,6 +424,29 @@ downstream consumers at 6 chars: MGate `cmdName`/`bacnetDescription` peak at 26
 of 39/40, and keyed telemetry grows ~300 B per interval at 100 joints against a
 4800 B budget that already chunks.
 
+**Active checkbox — take a joint out of service without deleting it (user
+request 2026-09-22).** The joint table's first column is a checkbox bound to
+`joints[].enabled`. Unticked, the joint keeps its mapping, its zone and its
+profile but is not monitored and raises no alarms. `enabled` was already in the
+schema and `buildProcessLogicJoints` already dropped `enabled === false`; three
+things were missing. (1) `applyJoints` **hardcoded `enabled: true`** — the same
+line-shape as the `threshold_profile: 'default'` bug of 2026-09-11, so every
+apply would have silently switched a joint back on. (2) `buildLegacyDrafts` did
+not carry it back, so a remote push or a draft rebuild would re-enable
+everything. (3) The **alarm sweep** counted a disabled joint as configured, so
+an alarm it held when switched off could never clear — `sweepDecommissionedAlarms`
+now sweeps it with reason `CONFIG_DISABLED` ("switched off in the
+configuration"), distinct from `CONFIG_REMOVED` because one is reversible from
+the table and the other is not. **Absent means MONITORED** everywhere (schema
+default), normalised on the way into the handler: an absent value renders as an
+unticked box, which would read as off and apply as off on every panel
+commissioned before the column existed. Changing it needs EDIT/SAVE/APPLY like
+any other cell — switching off a joint stops it being watched, which no stray
+tap on a touchscreen should do. **R1–R17 are untouched**: a disabled joint still
+reserves its (slave, channel) under R7 and still resolves an ambient under R9,
+so re-enabling it can never fail validation — re-mapping that sensor to a
+different joint is still a delete.
+
 **Joint channel mapping (user requirement 2026-07-14):** the joint
 table has a `Ch` column — each joint maps one dedicated channel of a
 slave (`joints[].channel`; drafts predating the column default to 1).

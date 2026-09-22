@@ -16,7 +16,7 @@ function findZone(zones, id) {
 }
 
 // A new row inherits from its zone - '' is the dropdown's inherit option.
-const EMPTY_ROW = () => ({ joint_name: '', joint_id: '', slaveID: '', channel: 1, ambientSlaveID: '', zone_id: '', threshold_profile: '', editing: true });
+const EMPTY_ROW = () => ({ joint_name: '', joint_id: '', slaveID: '', channel: 1, ambientSlaveID: '', zone_id: '', threshold_profile: '', enabled: true, editing: true });
 
 /**
  * A profile selection from a draft row, or `null` for "inherit".
@@ -114,7 +114,26 @@ function availableProfileNames(store) {
  *   actually differs from what's currently applied (see nano-compiler.js's nanoJobsEqual) - a
  *   joint/zone-only edit leaves modbus.slaves/buses untouched, so it does NOT trigger a resend
  */
+/**
+ * `enabled` is ABSENT on every draft row written before the Active column
+ * existed, and an absent value renders as an unticked checkbox - which reads as
+ * "this joint is switched off" and, worse, would APPLY as off on the next save.
+ * Normalising on the way in means every reply carries a real boolean, whatever
+ * wrote the draft: the dashboard, a remote push, or a rebuild from the applied
+ * document. Absent means MONITORED, matching the schema default and
+ * buildProcessLogicJoints' `enabled !== false`.
+ */
+function normaliseEnabled(joints) {
+  if (!Array.isArray(joints)) return joints;
+  for (const j of joints) {
+    if (j && typeof j === 'object') j.enabled = j.enabled !== false;
+  }
+  return joints;
+}
+
 function handleJointMasterMessage(msg, deps) {
+  normaliseEnabled(deps && deps.joints);
+  normaliseEnabled(msg && msg.payload && msg.payload.joints);
   const out = handleJointMasterMessageInner(msg, deps);
   if (out && out.msg && out.msg.payload && typeof out.msg.payload === 'object') {
     out.msg.payload.profile_names = availableProfileNames(deps?.store);
@@ -331,7 +350,11 @@ function applyJoints(msg, joints, zones, slaveList, store, user) {
     slave_id: slavesByAddress.get(Number(j.slaveID)).slave_id,
     channel: rowChannel(j),
     zone_id: j.zone_id.toLowerCase(),
-    enabled: true,
+    // Carried, not hardcoded. This line used to read `enabled: true`, which is
+    // exactly the shape of the `threshold_profile: 'default'` bug of
+    // 2026-09-11: every apply silently re-enabled a joint the operator had
+    // taken out of service, and nothing said so.
+    enabled: j.enabled !== false,
   }));
 
   // The profile is attached separately because "inherit from the zone" is the

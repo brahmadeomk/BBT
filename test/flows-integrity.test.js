@@ -1051,6 +1051,17 @@ describe('config tables: a width for every column (2026-09-19)', () => {
     });
   }
 
+  test('the joint table has an Active checkbox, and it needs EDIT like every other cell', () => {
+    // Switching a joint off stops it being monitored, so it must not be doable
+    // with a stray tap on a touchscreen - it goes through EDIT/SAVE/APPLY like
+    // any other change to the row.
+    const t = template('JointMasterUI');
+    assert.ok(t.includes('<th>Active</th>'), 'header');
+    assert.ok(/<input type="checkbox" class="bms-chk" ng-model="j\.enabled" ng-disabled="!j\.editing"/.test(t),
+      'bound to j.enabled and gated on j.editing');
+    assert.ok(/\.bms-chk \{[^}]*width: 20px/.test(t), 'sized for a finger, not stretched to the cell');
+  });
+
   test('free-text cells render a wrapping div when the row is not being edited', () => {
     // An <input> never wraps - it scrolls. So the read-only state has to be a
     // real block element; this is the pattern the Diagnostics table already

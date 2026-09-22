@@ -76,7 +76,15 @@ function sweepDecommissionedAlarms(activeAlarms, doc) {
   // every alarm on the panel is far worse than leaving a stale one.
   if (!joints || joints.length === 0) return [];
 
-  const validJointIds = new Set(joints.map((j) => j.joint_id));
+  // MONITORED, not merely present (2026-09-22, with the Active checkbox).
+  // `buildProcessLogicJoints` drops `enabled === false` joints, so a joint
+  // switched off in the table gets no further samples - and therefore can never
+  // clear an alarm it was holding when it was switched off. Treating it as
+  // decommissioned for sweeping purposes is the same judgement the sweep
+  // already makes for a deleted joint: it is not being watched, so an alarm
+  // saying it is unhealthy is stale rather than informative.
+  const validJointIds = new Set(joints.filter((j) => j.enabled !== false).map((j) => j.joint_id));
+  const disabledJointIds = new Set(joints.filter((j) => j.enabled === false).map((j) => j.joint_id));
   const validSlaveIds = new Set((slaves || []).map((s) => s.slave_id));
 
   const out = [];
@@ -113,12 +121,16 @@ function sweepDecommissionedAlarms(activeAlarms, doc) {
     const jointId = alarm.joint_id;
     if (!jointId || String(jointId).startsWith('AMBIENT_')) continue;
     if (validJointIds.has(jointId)) continue;
+    const disabled = disabledJointIds.has(jointId);
     out.push({
       instanceId: key,
       joint_id: jointId,
       slave_id: alarm.slave_id ?? null,
-      reason: 'CONFIG_REMOVED',
-      description: `${alarm.description || key} (auto-cleared: joint no longer in configuration)`,
+      // Distinct reasons: one of these is reversible from the table and the
+      // other is not, and an operator reading the cleared-alarm history should
+      // not have to guess which happened.
+      reason: disabled ? 'CONFIG_DISABLED' : 'CONFIG_REMOVED',
+      description: `${alarm.description || key} (auto-cleared: joint ${disabled ? 'switched off in the configuration' : 'no longer in configuration'})`,
     });
   }
   return out;

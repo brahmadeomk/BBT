@@ -212,3 +212,54 @@ describe('config sweep - SYSTEM alarms scoped to an AMBIENT sensor (2026-09-16)'
     assert.deepEqual(sweepDecommissionedAlarms(byKey([fault]), doc()), []);
   });
 });
+
+describe('a joint switched off in the table (2026-09-22)', () => {
+  // The Active checkbox takes a joint out of service without deleting its row.
+  // buildProcessLogicJoints stops sampling it, so any alarm it was holding can
+  // never clear on its own - the same dead end as a deleted joint, and the same
+  // remedy.
+  const withDisabled = () => {
+    const d = doc();
+    d.joints = [{ ...d.joints[0] }, { ...d.joints[1], enabled: false }];
+    return d;
+  };
+
+  test('its PROCESS alarm is cleared rather than left hanging', () => {
+    const out = sweepDecommissionedAlarms(byKey([process_('J02')]), withDisabled());
+    assert.equal(out.length, 1);
+    assert.equal(out[0].joint_id, 'J02');
+  });
+
+  test('and says it was switched off, not deleted', () => {
+    // One is reversible from the table and the other is not; the cleared-alarm
+    // history should not make the operator guess which happened.
+    const [cleared] = sweepDecommissionedAlarms(byKey([process_('J02')]), withDisabled());
+    assert.equal(cleared.reason, 'CONFIG_DISABLED');
+    assert.match(cleared.description, /switched off/);
+  });
+
+  test('a deleted joint still reads as deleted', () => {
+    const d = withDisabled();
+    d.joints = [d.joints[0]];
+    const [cleared] = sweepDecommissionedAlarms(byKey([process_('J02')]), d);
+    assert.equal(cleared.reason, 'CONFIG_REMOVED');
+    assert.match(cleared.description, /no longer in configuration/);
+  });
+
+  test('its per-sensor comm alarm clears too', () => {
+    // Keyed SYSTEM|<joint_id>|COMMUNICATION. A joint that is not polled cannot
+    // produce the reading that would clear it.
+    const comm = system_('J02', 'COMMUNICATION', { joint_id: 'J02' });
+    assert.equal(sweepDecommissionedAlarms(byKey([comm]), withDisabled()).length, 1);
+  });
+
+  test('an ENABLED joint is untouched, however sick', () => {
+    assert.deepEqual(sweepDecommissionedAlarms(byKey([process_('J01')]), withDisabled()), []);
+  });
+
+  test('a joint with no `enabled` field at all is monitored, not swept', () => {
+    // Every document applied before the column existed. Absent means enabled -
+    // reading it as off would auto-clear every alarm on the panel at once.
+    assert.deepEqual(sweepDecommissionedAlarms(byKey([process_('J01'), process_('J02')]), doc()), []);
+  });
+});

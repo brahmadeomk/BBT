@@ -223,6 +223,10 @@ describe('buildLegacyDrafts', () => {
       // The fixture PINS this joint to 'default', so it round-trips as 'default'.
       // Only an ABSENT binding renders as '' (inherit) - see the zone above.
       threshold_profile: 'default',
+      // Joined 2026-09-22 with the Active checkbox. Absent means MONITORED
+      // (schema default), so only an explicit false unticks the box - otherwise
+      // a remote push would silently re-enable every joint taken out of service.
+      enabled: true,
       editing: false,
     });
     // multi-channel joint: channel label + panel-default ambient

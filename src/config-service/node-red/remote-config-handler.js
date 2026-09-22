@@ -280,6 +280,10 @@ function buildLegacyDrafts(doc) {
       // 'default' would pin every joint to the panel-wide set on the next apply
       // and silently disable the zone chain - the bug fixed on 2026-09-12.
       threshold_profile: j.threshold_profile ?? '',
+      // Absent means monitored (schema default), so only an explicit false
+      // unticks the Active box. Without this a remote push or a draft rebuild
+      // would silently re-enable every joint taken out of service.
+      enabled: j.enabled !== false,
       editing: false,
     };
   });

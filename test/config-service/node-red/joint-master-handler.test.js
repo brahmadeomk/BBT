@@ -526,3 +526,85 @@ describe('a lost draft rebuilds from the applied document (2026-09-12)', () => {
     assert.equal(out.msg.payload.joints.length, 1, 'just the added blank row');
   });
 });
+
+describe('the Active checkbox takes a joint out of service (2026-09-22)', () => {
+  // Operator request: switch a joint off without deleting its row, so the
+  // mapping survives. `joints[].enabled` was already in the schema and
+  // buildProcessLogicJoints already dropped `enabled === false` - what was
+  // missing was the apply path carrying it.
+  const apply = (over = {}) => {
+    const store = freshStore();
+    seedModbusJoints(store);
+    handleJointMasterMessage(
+      { payload: { action: 'apply' } },
+      {
+        store,
+        slaveList: legacySlaveList(),
+        zones: legacyZones(),
+        joints: [{ joint_name: 'J01', joint_id: 'J01', slaveID: 1, ambientSlaveID: 101, zone_id: 'Z1', editing: false, ...over }],
+      }
+    );
+    return store.readDomain('modbus_joints').doc.joints[0];
+  };
+
+  test('an unticked box is stored as enabled:false', () => {
+    assert.equal(apply({ enabled: false }).enabled, false);
+  });
+
+  test('a ticked box is stored as enabled:true', () => {
+    assert.equal(apply({ enabled: true }).enabled, true);
+  });
+
+  test('a row predating the column applies as ENABLED, never off', () => {
+    // The dangerous direction. Absent must mean monitored: reading it as off
+    // would silently stop watching every joint on an existing panel at the
+    // operator's next apply.
+    assert.equal(apply({}).enabled, true);
+    assert.equal(apply({ enabled: undefined }).enabled, true);
+  });
+
+  test('applying again does not silently switch it back on', () => {
+    // `enabled: true` used to be HARDCODED on this line - the same shape as the
+    // threshold_profile bug of 2026-09-11, where every apply wiped the
+    // operator's choice and nothing said so.
+    const store = freshStore();
+    seedModbusJoints(store);
+    const row = () => ({ joint_name: 'J01', joint_id: 'J01', slaveID: 1, ambientSlaveID: 101, zone_id: 'Z1', editing: false, enabled: false });
+    const deps = { store, slaveList: legacySlaveList(), zones: legacyZones(), joints: [row()] };
+    handleJointMasterMessage({ payload: { action: 'apply' } }, deps);
+    handleJointMasterMessage({ payload: { action: 'apply' } }, { ...deps, joints: [row()] });
+    assert.equal(store.readDomain('modbus_joints').doc.joints[0].enabled, false);
+  });
+
+  test('a disabled joint is not published for monitoring', () => {
+    // The whole point: it keeps its mapping and stops being watched.
+    const { buildProcessLogicJoints } = require('../../../src/config-service/process-logic-joints');
+    const store = freshStore();
+    seedModbusJoints(store);
+    handleJointMasterMessage(
+      { payload: { action: 'apply' } },
+      {
+        store, slaveList: legacySlaveList(), zones: legacyZones(),
+        joints: [
+          { joint_name: 'J01', joint_id: 'J01', slaveID: 1, ambientSlaveID: 101, zone_id: 'Z1', editing: false, enabled: false },
+          { joint_name: 'J02', joint_id: 'J02', slaveID: 2, ambientSlaveID: 101, zone_id: 'Z1', editing: false, enabled: true },
+        ],
+      }
+    );
+    const doc = store.readDomain('modbus_joints').doc;
+    assert.equal(doc.joints.length, 2, 'both rows survive in the configuration');
+    assert.deepEqual(buildProcessLogicJoints(doc).joints.map((j) => j.joint_id), ['J02']);
+  });
+
+  test('every reply carries a real boolean, whatever wrote the draft', () => {
+    // An absent value renders as an UNTICKED box, which reads as "switched off"
+    // and would apply as off. Normalised on the way in so no exit can leak it.
+    const store = freshStore();
+    seedModbusJoints(store);
+    const r = handleJointMasterMessage(
+      { payload: {} },
+      { store, slaveList: legacySlaveList(), zones: legacyZones(), joints: [{ joint_id: 'J01', slaveID: 1, zone_id: 'Z1' }] }
+    );
+    assert.equal(r.msg.payload.joints[0].enabled, true);
+  });
+});
