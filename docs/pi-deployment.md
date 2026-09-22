@@ -1220,6 +1220,10 @@ earlier import) while a newly added button does not.
 It goes through the **same** validators and the same `ConfigStore.applyIfValid`
 the dashboard uses, so a rejection here is the rejection the dashboard would
 give, with the same rule ids, the same audit entry and the same LKG snapshot.
+
+**Full command reference and recipes: `docs/config-edit.md`.** What follows is
+the deployment-side detail — where the store lives and what does not converge
+on its own.
 Writing `/var/busduct/cfg` by hand instead would bypass R1-R17 *and* the schema
 — the mistake the legacy commissioning screens were removed for.
 

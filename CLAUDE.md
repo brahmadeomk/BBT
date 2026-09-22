@@ -122,6 +122,7 @@ Per the workplan (§3), realigned from the original ad-hoc scaffolding:
 | Channel recovery in the decode path (incl. why `temp_scale` is report-only) | `docs/channel-decode-proposal.md` | steps 1-2 **built**, fan-out proposed (2026-09-01) |
 | Zone as the place both ambient and thresholds are set (declare, don't infer) | `docs/zone-ambient-proposal.md` | **PROPOSAL, not built** (2026-09-11) |
 | Edge device user manual (operator/technician HMI guide) | `docs/edge-user-manual.md` | present |
+| Editing the configuration from the command line (testing aid) | `docs/config-edit.md` | present (2026-09-22) |
 | Nano 33 IoT field-replacement runbook | `docs/nano-replacement.md` | present |
 | HIRA — sensor installation on busducts | `docs/hira-live-sensor-installation.md` | **DRAFT, needs competent-person sign-off** (2026-09-01) |
 
