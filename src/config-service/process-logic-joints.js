@@ -84,21 +84,13 @@ function buildProcessLogicJoints(doc, { labelFallback } = {}) {
     .slice()
     .sort((a, b) => (a.channel ?? 1) - (b.channel ?? 1));
 
-  // A device taken out of service in Modbus Settings is not polled at all, so a
-  // joint mapped to it would otherwise sit in the monitored set holding its last
-  // reading for ever - and an alarm raised before it was switched off could
-  // never clear. Same judgement as `enabled === false` on the joint itself.
-  const outOfService = new Set(
-    (doc?.modbus?.slaves ?? []).filter((s) => s.enabled === false).map((s) => s.slave_id)
-  );
-
   for (const j of ordered) {
     const unit = unitAddressOf(doc, j.slave_id);
     if (unit == null) {
       warnings.push(`${j.joint_id}: slave ${j.slave_id} is not commissioned - not monitored`);
       continue;
     }
-    if (outOfService.has(j.slave_id)) {
+    if (!isJointMonitored(doc, j)) {
       // A warning, not silence: the joint is configured and deliberately dark,
       // and the Configuration Status banner should say so.
       warnings.push(`${j.joint_id}: slave ${j.slave_id} is switched off - not monitored`);
@@ -163,6 +155,28 @@ function buildProcessLogicJoints(doc, { labelFallback } = {}) {
  * @param {Array} draftRows - legacy `joint_master_zone_A` rows
  * @param {Array} appliedRows - buildProcessLogicJoints().joints
  */
+/**
+ * Is the panel watching this joint?
+ *
+ * THE SINGLE DEFINITION (2026-09-24). Two switches answer this and they live in
+ * different documents: `joints[].enabled` (the joint's own Active box) and
+ * `slaves[].enabled` (the device's, which stops it being polled at all). Three
+ * consumers need the same answer - what ProcessLogic monitors, what
+ * `device_health` reports to the fleet, and what the BMS image presents as a
+ * live point - and each of them got it wrong in a different way when they
+ * worked it out for themselves.
+ *
+ * Absent means WATCHED, on both switches, matching the schema defaults.
+ *
+ * @param {object} doc - the APPLIED cfg/modbus+joints document
+ * @param {object} joint - one entry of doc.joints
+ */
+function isJointMonitored(doc, joint) {
+  if (!joint || joint.enabled === false) return false;
+  const slave = (doc?.modbus?.slaves ?? []).find((s) => s.slave_id === joint.slave_id);
+  return !!slave && slave.enabled !== false;
+}
+
 /** Blank/absent means "inherit"; a name means an explicit choice. */
 function profileOf(value) {
   const name = typeof value === 'string' ? value.trim() : '';
@@ -245,4 +259,4 @@ function diffDraftVsApplied(draftRows, appliedRows, options = {}) {
   };
 }
 
-module.exports = { buildProcessLogicJoints, diffDraftVsApplied };
+module.exports = { buildProcessLogicJoints, diffDraftVsApplied, isJointMonitored };

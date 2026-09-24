@@ -15,6 +15,7 @@
  * nodes just call ingest/refresh on the process singleton (node-red/index).
  */
 
+const { isJointMonitored } = require('../config-service/process-logic-joints');
 const { buildRegisterMap } = require('./register-map');
 const { computeRollup, WorstJointLatch } = require('./rollup');
 const { buildImage } = require('./holding-registers');
@@ -110,13 +111,20 @@ class BmsService {
     const out = [];
     for (const j of this.jointsDoc?.joints || []) {
       const kpi = this._joints[j.joint_id] || {};
+      // A joint the panel is not watching - its own Active box unticked, or its
+      // device switched off - stops being fed, and this loop would otherwise go
+      // on presenting its LAST temperature to the BMS as a LIVE point for ever.
+      // Its registers keep their addresses (the map is append-only), but they
+      // read NO_DATA, and the rollup counts LIVE joints only so it drops out of
+      // the panel maxima too.
+      const watched = isJointMonitored(this.jointsDoc, j);
       out.push({
         joint_id: j.joint_id,
         zone_id: j.zone_id ?? kpi.zone_id ?? null,
-        temp_c: kpi.temp_c ?? null,
-        deltaT: kpi.deltaT ?? null,
-        ror: kpi.ror ?? null,
-        state: this._jointStates[j.joint_id] || 'LIVE',
+        temp_c: watched ? (kpi.temp_c ?? null) : null,
+        deltaT: watched ? (kpi.deltaT ?? null) : null,
+        ror: watched ? (kpi.ror ?? null) : null,
+        state: watched ? (this._jointStates[j.joint_id] || 'LIVE') : 'OFFLINE',
       });
     }
     return out;

@@ -443,3 +443,37 @@ describe('a joint on a device switched off in Modbus Settings (2026-09-24)', () 
     );
   });
 });
+
+describe('isJointMonitored - one definition, three consumers (2026-09-24)', () => {
+  const { isJointMonitored } = require('../../src/config-service/process-logic-joints');
+  const d = () => ({
+    modbus: { slaves: [{ slave_id: 'sl01', unit_address: 1 }, { slave_id: 'sl02', unit_address: 2, enabled: false }] },
+    joints: [],
+  });
+  const j = (over = {}) => ({ joint_id: 'J01', slave_id: 'sl01', channel: 1, zone_id: 'z1', ...over });
+
+  test('watched when both switches are on, or absent', () => {
+    assert.equal(isJointMonitored(d(), j()), true);
+    assert.equal(isJointMonitored(d(), j({ enabled: true })), true);
+  });
+
+  test("not watched when the joint's own box is unticked", () => {
+    assert.equal(isJointMonitored(d(), j({ enabled: false })), false);
+  });
+
+  test('not watched when its DEVICE is switched off', () => {
+    // The gap this helper was extracted to close: device_health checked only
+    // the joint's own box, so a joint on a dark device was reported live.
+    assert.equal(isJointMonitored(d(), j({ slave_id: 'sl02' })), false);
+  });
+
+  test('not watched when its slave is not commissioned at all', () => {
+    assert.equal(isJointMonitored(d(), j({ slave_id: 'sl99' })), false);
+  });
+
+  test('a malformed joint or document is not watched, rather than throwing', () => {
+    assert.equal(isJointMonitored(d(), null), false);
+    assert.equal(isJointMonitored(null, j()), false);
+    assert.equal(isJointMonitored({}, j()), false);
+  });
+});

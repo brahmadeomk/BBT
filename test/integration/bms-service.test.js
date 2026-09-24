@@ -123,3 +123,30 @@ describe('BmsService.snapshot — read-only', () => {
     assert.equal(s.image[addr], 610);
   });
 });
+
+describe('an unwatched joint reads NO_DATA at the BMS (2026-09-24)', () => {
+  // Without this the service goes on presenting the joint's LAST temperature as
+  // a live point for ever - a BMS reading a stale number as current on a
+  // fire-safety point is worse than reading nothing.
+  const { isJointMonitored } = require('../../src/config-service/process-logic-joints');
+
+  test('the shared rule says it is not watched', () => {
+    const doc = {
+      modbus: { slaves: [{ slave_id: 'sl01', unit_address: 1, enabled: false }] },
+      joints: [{ joint_id: 'J01', slave_id: 'sl01', channel: 1, zone_id: 'z1' }],
+    };
+    assert.equal(isJointMonitored(doc, doc.joints[0]), false);
+  });
+
+  test('bms-service consults it rather than defaulting to LIVE', () => {
+    // Pinned as source, because building the whole service here would test the
+    // harness more than the behaviour: the failure mode was a literal
+    // `|| 'LIVE'` default that ignored configuration entirely.
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'integration', 'bms-service.js'), 'utf8');
+    assert.ok(/const watched = isJointMonitored\(this\.jointsDoc, j\)/.test(src));
+    assert.ok(/state: watched \? \(this\._jointStates\[j\.joint_id\] \|\| 'LIVE'\) : 'OFFLINE'/.test(src));
+    assert.ok(/temp_c: watched \? \(kpi\.temp_c \?\? null\) : null/.test(src));
+  });
+});

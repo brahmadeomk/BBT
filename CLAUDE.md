@@ -474,7 +474,15 @@ normalised at the handler entry — an absent value renders as an unticked box,
 which would stop the bus polling an entire existing panel at the next apply.
 **R1–R17 untouched**, including R16 bus loading, which still counts a disabled
 device: the warning then reflects the commissioned worst case, so re-enabling
-can never surprise you.
+can never surprise you. **One definition of "watched"**
+(`isJointMonitored(doc, joint)`, exported from `process-logic-joints.js`): two
+switches in two documents answer it, and the three consumers that need the
+answer each got it wrong differently when they worked it out for themselves —
+`device_health` reported a joint on a dark device as **live** to the fleet, and
+`bms-service` went on presenting that joint's **last temperature** as a LIVE
+point for ever, which is worse than presenting nothing on a fire-safety point.
+Both now call the shared rule; an unwatched joint reads NO_DATA and OFFLINE, and
+its registers keep their addresses because the map is append-only.
 
 **Joint channel mapping (user requirement 2026-07-14):** the joint
 table has a `Ch` column — each joint maps one dedicated channel of a

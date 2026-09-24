@@ -246,3 +246,38 @@ describe('publishDeviceHealth status is readable by an operator', () => {
     assert.equal(st.counts.joints_offline, 1);
   });
 });
+
+describe('joints_total counts what is actually watched (2026-09-24)', () => {
+  const { buildDeviceHealth } = require('../../src/cloud-gateway/device-health');
+  const doc = () => ({
+    modbus: { slaves: [{ slave_id: 'sl01', unit_address: 1 }, { slave_id: 'sl02', unit_address: 2 }] },
+    joints: [
+      { joint_id: 'J01', slave_id: 'sl01', channel: 1, zone_id: 'z1' },
+      { joint_id: 'J02', slave_id: 'sl02', channel: 1, zone_id: 'z1' },
+    ],
+  });
+  const total = (d) => buildDeviceHealth({ doc: d }).counts.joints_total;
+
+  test('both watched', () => {
+    assert.equal(total(doc()), 2);
+  });
+
+  test("a joint with its own box unticked drops out", () => {
+    const d = doc(); d.joints[1].enabled = false;
+    assert.equal(total(d), 1);
+  });
+
+  test('a joint on a DEVICE switched off drops out too', () => {
+    // The bug: this message exists to tell a fleet view whether the panel can
+    // still measure, so reporting a joint it has stopped polling as live is the
+    // one failure that actually matters.
+    const d = doc(); d.modbus.slaves[1].enabled = false;
+    assert.equal(total(d), 1);
+  });
+
+  test('and is not then counted as live', () => {
+    const d = doc(); d.modbus.slaves[1].enabled = false;
+    const c = buildDeviceHealth({ doc: d }).counts;
+    assert.equal(c.joints_live, 1);
+  });
+});

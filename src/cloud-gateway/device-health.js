@@ -1,5 +1,6 @@
 'use strict';
 
+const { isJointMonitored } = require('../config-service/process-logic-joints');
 const { MESSAGE_TYPES, SCHEMA_VERSION } = require('./message-types');
 
 /**
@@ -43,7 +44,11 @@ const DEFAULT_BUS_SILENCE_SEC = 30;
  */
 function buildDeviceHealth({ summary, doc, busSeen = {}, power, nowMs = Date.now(), busSilenceSec = DEFAULT_BUS_SILENCE_SEC } = {}) {
   const counts = summary?.counts ?? { blacklisted: 0, probing: 0, stale: 0, offline: 0 };
-  const jointsTotal = (doc?.joints ?? []).filter((j) => j.enabled !== false).length;
+  // Joints the panel is actually watching. This used to check only the joint's
+  // own Active box, so a joint on a DEVICE switched off in Modbus Settings was
+  // still reported to the fleet as live - the message exists to say whether the
+  // panel can still measure, so over-reporting is the one failure that matters.
+  const jointsTotal = (doc?.joints ?? []).filter((j) => isJointMonitored(doc, j)).length;
 
   return {
     type: MESSAGE_TYPES.DEVICE_HEALTH,
