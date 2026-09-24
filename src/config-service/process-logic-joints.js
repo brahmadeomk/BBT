@@ -29,6 +29,8 @@
  * resolve to `":1"`.
  */
 
+const { slaveDisplayName, impactFor } = require('./device-impact');
+
 /** Legacy draft rows use unit addresses; the schema uses slave_id. */
 function unitAddressOf(doc, slaveId) {
   const s = (doc?.modbus?.slaves ?? []).find((x) => x.slave_id === slaveId);
@@ -90,12 +92,10 @@ function buildProcessLogicJoints(doc, { labelFallback } = {}) {
       warnings.push(`${j.joint_id}: slave ${j.slave_id} is not commissioned - not monitored`);
       continue;
     }
-    if (!isJointMonitored(doc, j)) {
-      // A warning, not silence: the joint is configured and deliberately dark,
-      // and the Configuration Status banner should say so.
-      warnings.push(`${j.joint_id}: slave ${j.slave_id} is switched off - not monitored`);
-      continue;
-    }
+    // Deliberately dark. NOT warned about here: `warnDisabledDevices` below
+    // reports it once per DEVICE, so a 4-channel module switched off produces
+    // one line rather than four saying the same thing.
+    if (!isJointMonitored(doc, j)) continue;
     const channel = j.channel ?? 1;
     const key = `${unit}:${channel}`;
     // R7 already rejects a duplicate (slave, channel) pair at apply time, so
@@ -139,11 +139,35 @@ function buildProcessLogicJoints(doc, { labelFallback } = {}) {
     });
   }
 
+  warnings.push(...warnDisabledDevices(doc));
+
   return {
     joints: [...byChannel.values()],
     warnings,
     sourceVersion: doc?.config_version ?? doc?.version ?? null,
   };
+}
+
+/**
+ * One line per device switched off in the Modbus Settings table.
+ *
+ * WHY PER DEVICE, NOT PER JOINT (2026-09-24, from a live report). The warnings
+ * above are produced while walking `joints[]`, so a device carrying no joints
+ * produced no warning at all — and that is exactly what a dedicated AMBIENT
+ * sensor is. The operator switched unit 101 off, the panel stopped resolving ΔT
+ * for every joint referencing it, and the Configuration Status banner said
+ * nothing. Walking the SLAVES instead covers both cases and, as a bonus, a
+ * 4-channel module switched off costs one line rather than four.
+ *
+ * The wording comes from `impactFor`, the same function the blacklist alarm
+ * uses, so "switched off" and "blacklisted" describe an identical loss in
+ * identical words — including the ambient/carried distinction that a naive
+ * summary flattens into a misleading "no joints affected".
+ */
+function warnDisabledDevices(doc) {
+  return (doc?.modbus?.slaves ?? [])
+    .filter((s) => s.enabled === false)
+    .map((s) => `Sensor ${slaveDisplayName(doc, s.slave_id)} is switched off - ${impactFor(doc, s.slave_id).text}`);
 }
 
 /**
@@ -259,4 +283,4 @@ function diffDraftVsApplied(draftRows, appliedRows, options = {}) {
   };
 }
 
-module.exports = { buildProcessLogicJoints, diffDraftVsApplied, isJointMonitored };
+module.exports = { buildProcessLogicJoints, diffDraftVsApplied, isJointMonitored, warnDisabledDevices };

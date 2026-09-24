@@ -428,7 +428,31 @@ describe('a joint on a device switched off in Modbus Settings (2026-09-24)', () 
     // configured and deliberately dark must be distinguishable from one that
     // was never commissioned.
     const { warnings } = buildProcessLogicJoints(offDoc());
-    assert.ok(warnings.some((w) => /J01.*switched off/.test(w)), warnings.join(' | '));
+    assert.ok(warnings.some((w) => /switched off.*J01/.test(w)), warnings.join(' | '));
+  });
+
+  test('names the device the way the OPERATOR knows it, not by slave_id', () => {
+    // `sl01` is meaningless on the panel; "1 (Sensor1)" is what they typed into
+    // the Modbus Settings table. Same identification as the blacklist alarm.
+    const { warnings } = buildProcessLogicJoints(offDoc());
+    const w = warnings.find((x) => /switched off/.test(x));
+    assert.equal(w, 'Sensor 1 (Sensor1) is switched off - joint(s) J01 not measurable');
+  });
+
+  test('ONE line per device, not one per channel', () => {
+    // A 4-channel module carrying four joints used to produce four identical
+    // "not monitored" lines, which buried the ambient case below in the noise.
+    const d = doc();
+    d.modbus.slaves = d.modbus.slaves.map((s) => (s.slave_id === 'sl01' ? { ...s, channels: 4 } : s));
+    d.joints = [
+      { joint_id: 'J01', slave_id: 'sl01', channel: 1, zone_id: 'z1' },
+      { joint_id: 'J02', slave_id: 'sl01', channel: 2, zone_id: 'z1' },
+      { joint_id: 'J03', slave_id: 'sl01', channel: 3, zone_id: 'z1' },
+      { joint_id: 'J04', slave_id: 'sl01', channel: 4, zone_id: 'z1' },
+    ];
+    d.modbus.slaves = d.modbus.slaves.map((s) => (s.slave_id === 'sl01' ? { ...s, enabled: false } : s));
+    const off = buildProcessLogicJoints(d).warnings.filter((w) => /switched off/.test(w));
+    assert.deepEqual(off, ['Sensor 1 (Sensor1) is switched off - joint(s) J01, J02, J03, J04 not measurable']);
   });
 
   test('joints on devices that are still in service are unaffected', () => {
@@ -436,11 +460,68 @@ describe('a joint on a device switched off in Modbus Settings (2026-09-24)', () 
     assert.ok(ids.includes('J02'), 'J02 is on sl21, which is still on');
   });
 
-  test('absent `enabled` on a slave means in service', () => {
+  test('absent `enabled` on a slave means in service, and warns about nothing', () => {
+    const built = buildProcessLogicJoints(doc());
+    assert.deepEqual(built.joints.map((j) => j.joint_id).sort(), ['J01', 'J02']);
+    assert.deepEqual(built.warnings, [], 'a healthy panel shows a clean banner');
+  });
+});
+
+describe('a switched-off device carrying NO joints (2026-09-24, live report)', () => {
+  /*
+   * The gap this closes. The warnings above were produced while walking
+   * `joints[]`, so a device with no joints of its own produced NO warning - and
+   * that is exactly what a dedicated AMBIENT sensor is. The operator switched
+   * unit 101 off, every joint referencing it stopped resolving ΔT, and the
+   * Configuration Status banner said nothing at all.
+   */
+  const ambientOff = () => {
+    const d = doc();
+    // The OBJECT form, which is the only one `ambient_sensor_ref` allows - the
+    // shared fixture's bare `'sl21'` is a legacy draft shape that would not pass
+    // validation, and an applied document always carries {slave_id, channel}.
+    d.modbus.ambient_sensor = { slave_id: 'sl21', channel: 1 };
+    d.modbus.slaves = d.modbus.slaves.map((s) => (s.slave_id === 'sl21' ? { ...s, enabled: false } : s));
+    return d;
+  };
+
+  test('is warned about, although it carries no joints', () => {
+    const { warnings } = buildProcessLogicJoints(ambientOff());
+    assert.ok(warnings.some((w) => /101 \(AmbientPanel\).*switched off/.test(w)), warnings.join(' | '));
+  });
+
+  test('states the REAL impact - ΔT lost - not "no joints affected"', () => {
+    // The understatement this wording was written to fix once already, on the
+    // blacklist alarm. Both surfaces now share `impactFor`.
+    const { warnings } = buildProcessLogicJoints(ambientOff());
+    assert.equal(
+      warnings.find((w) => /switched off/.test(w)),
+      'Sensor 101 (AmbientPanel) is switched off - ambient reference for joint(s) J01, J02 - ΔT unavailable'
+    );
+  });
+
+  test('the joints themselves keep being monitored - they still read temperature', () => {
+    // Losing the ambient costs ΔT, not the joint. Over-reacting here would stop
+    // watching a joint whose absolute temperature is still perfectly readable.
     assert.deepEqual(
-      buildProcessLogicJoints(doc()).joints.map((j) => j.joint_id).sort(),
+      buildProcessLogicJoints(ambientOff()).joints.map((j) => j.joint_id).sort(),
       ['J01', 'J02']
     );
+  });
+
+  test('a spare with neither joints nor ambient references still reports', () => {
+    const d = doc();
+    d.modbus.slaves.push({ slave_id: 'sl30', unit_address: 7, enabled: false });
+    const { warnings } = buildProcessLogicJoints(d);
+    assert.deepEqual(warnings, ['Sensor 7 is switched off - no joints affected']);
+  });
+
+  test('every disabled device gets its own line', () => {
+    const d = doc();
+    d.modbus.slaves = d.modbus.slaves.map((s) =>
+      s.slave_id === 'sl01' || s.slave_id === 'sl21' ? { ...s, enabled: false } : s
+    );
+    assert.equal(buildProcessLogicJoints(d).warnings.filter((w) => /switched off/.test(w)).length, 2);
   });
 });
 

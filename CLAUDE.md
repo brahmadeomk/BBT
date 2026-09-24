@@ -484,6 +484,23 @@ point for ever, which is worse than presenting nothing on a fire-safety point.
 Both now call the shared rule; an unwatched joint reads NO_DATA and OFFLINE, and
 its registers keep their addresses because the map is append-only.
 
+**The banner warns per DEVICE, not per joint (user report 2026-09-24).** Switching
+off the *ambient* sensor produced no warning at all: `buildProcessLogicJoints`
+emits its warnings while walking `joints[]`, and a dedicated ambient module
+carries none — so the panel quietly stopped resolving ΔT for every joint
+referencing it and the Configuration Status banner stayed green. It now walks
+the **slaves** as well (`warnDisabledDevices`), which covers the ambient case and,
+as a bonus, costs a switched-off 4-channel module one line instead of four saying
+the same thing. The wording comes from **`impactFor`**, extracted verbatim into
+`src/config-service/device-impact.js` from the blacklist handler so "switched
+off" and "blacklisted" describe an identical loss in identical words — including
+the carried/ambient distinction (`Sensor 101 (AmbientPanel) is switched off -
+ambient reference for joint(s) J01, J02 - ΔT unavailable`) that a naive summary
+flattens into a misleading *"no joints affected"*. The joints themselves stay
+**monitored**: losing the ambient costs ΔT, not the joint, whose absolute
+temperature is still perfectly readable. No flow change — the banner already
+renders every string in `warnings`.
+
 **Joint channel mapping (user requirement 2026-07-14):** the joint
 table has a `Ch` column — each joint maps one dedicated channel of a
 slave (`joints[].channel`; drafts predating the column default to 1).

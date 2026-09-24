@@ -7894,3 +7894,64 @@ what the operator is holding, never replace it.
 
 Deploy: flow-only change → `git pull` + **re-import the flow**. No restart
 needed (`src/network/wifi.js` is unchanged).
+
+---
+
+## 2026-09-24 — The switched-off ambient sensor nobody was told about
+
+**Live report:** *"I did not see warning mentioning sensor not monitored as it
+is switched off for ambient sensor."*
+
+The Active checkbox added to the Modbus Settings table the same day works: a
+device switched off is not polled, its joints drop out of monitoring, and the
+Configuration Status banner names them. Except when the device carries no
+joints — which is exactly what a dedicated **ambient** sensor is.
+
+`buildProcessLogicJoints` produced every one of its warnings while walking
+`joints[]`. Unit 101 carries none, so the loop never reached it and emitted
+nothing. The operator switched it off, ΔT quietly stopped resolving for every
+joint that referenced it as their ambient, and the banner stayed green.
+
+**The fix is to walk the SLAVES too**, not just the joints — `warnDisabledDevices`
+emits one line per device with `enabled === false`, whether or not any joint sits
+on it.
+
+**What NOT to write is the interesting part.** A summary built from "joints this
+device carries" reports `no joints affected` for an ambient sensor, which is a
+lie about a fault that disables ΔT panel-wide. That exact understatement was
+already found and fixed once, on the blacklist alarm, on 2026-07-28 — the old
+text read `(none mapped) not measurable`. Rather than re-derive it, `impactFor`
+and its helpers were **extracted verbatim** into
+`src/config-service/device-impact.js` and the blacklist handler now requires
+them. Two surfaces, one sentence:
+
+- blacklisted: `Slave 101 (AmbientPanel) blacklisted - ambient reference for joint(s) J01, J02 - ΔT unavailable`
+- switched off: `Sensor 101 (AmbientPanel) is switched off - ambient reference for joint(s) J01, J02 - ΔT unavailable`
+
+A device that is *both* — carries joints and is the panel ambient — reports both
+halves and never lists a joint twice.
+
+**Two deliberate non-changes.**
+
+1. **The joints referencing a dark ambient stay monitored.** Losing the ambient
+   costs ΔT, not the joint: its absolute temperature is still perfectly
+   readable, and `resolveAmbient` already falls back to a zone/panel median or
+   declines to compute ΔT rather than fabricating one against 0. Dropping those
+   joints would have turned one operator decision into a much larger loss of
+   coverage than they asked for.
+2. **The per-JOINT "switched off" warning is gone**, replaced by the per-device
+   one. Keeping both would give a switched-off 4-channel module five lines
+   saying the same thing, and the ambient line this whole change exists to
+   surface would be buried in them.
+
+**A fixture caught lying.** The first test asserted the ambient text against the
+shared `doc()` fixture, whose `modbus.ambient_sensor` is the bare string
+`'sl21'` — and got `no joints affected`. That is not a bug in `impactFor`:
+`ambient_sensor_ref` requires `{slave_id, channel}` and a bare string would fail
+validation, so no applied document can carry one. (`resolveAmbientKey` tolerates
+it only because legacy *drafts* had a flat `ambientSlaveID`.) The fixture was
+corrected, not the shared function — changing it would have altered live
+blacklist alarm text to accommodate a shape the schema rejects.
+
+No flow change: the banner template already `ng-repeat`s every string in
+`warnings`. Deploy: `git pull` + **restart Node-RED** (`src/` changed).
