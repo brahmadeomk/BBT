@@ -501,6 +501,15 @@ flattens into a misleading *"no joints affected"*. The joints themselves stay
 temperature is still perfectly readable. No flow change — the banner already
 renders every string in `warnings`.
 
+**Modbus table column widths (user request 2026-09-24).** `#` 56→76px (the row
+number plus the `(off)` suffix the disabled-row rule appends), **Sensor Name**
+150→220px, **Unit Addr** 84→110px so the heading sits on one line. The table's
+declared width moves with them — under `table-layout: fixed` the per-column
+widths are only honoured against a **definite** table width, and
+`test/flows-integrity.test.js` pins `declared width == sum of columns` so a
+future edit cannot widen a column and quietly lose the sizing. The panel gains
+116px of horizontal scroll, which it already has (`overflow-x: auto`).
+
 **Joint channel mapping (user requirement 2026-07-14):** the joint
 table has a `Ch` column — each joint maps one dedicated channel of a
 slave (`joints[].channel`; drafts predating the column default to 1).
