@@ -1051,6 +1051,40 @@ describe('config tables: a width for every column (2026-09-19)', () => {
     });
   }
 
+  test('both Modbus tables size every column, and declare their own width', () => {
+    // Live report: "Sensor...", "U...", "1..." - twelve columns shared one
+    // width under table-layout:fixed with no per-column rules, and
+    // text-overflow:ellipsis hid whatever did not fit.
+    //
+    // The two tables share `.mbs-table` but have DIFFERENT columns (12 vs 9),
+    // so each width list is scoped to its own class; an unscoped nth-child list
+    // would size the buses table by the slave table's columns.
+    const flows = JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+    const t = flows.find((n) => n.name === 'ModbusSettingsUI').format;
+
+    for (const [cls, headerMatch] of [['mbs-slaves', '<th>#</th>'], ['mbs-buses', '<th>Port</th>']]) {
+      const header = t.split('\n').find((l) => l.includes(headerMatch) && l.includes('<th>'));
+      assert.ok(header, `${cls}: header row not found`);
+      const columns = (header.match(/<th>/g) || []).length;
+
+      const widths = [...t.matchAll(new RegExp(`\\.${cls} td:nth-child\\(\\d+\\) \\{ width: (\\d+)px`, 'g'))]
+        .map((m) => Number(m[1]));
+      assert.equal(widths.length, columns,
+        `${cls}: ${columns} columns but ${widths.length} width rules - an unsized column gets zero under table-layout:fixed`);
+
+      const declared = new RegExp(`\\.${cls}\\s+\\{ width: (\\d+)px`).exec(t);
+      assert.ok(declared, `${cls}: must declare a pixel width`);
+      assert.equal(Number(declared[1]), widths.reduce((a, b) => a + b, 0),
+        `${cls}: declared width must equal the sum of its columns`);
+    }
+  });
+
+  test('Modbus cells wrap instead of ellipsising the heading away', () => {
+    const t = JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8')).find((n) => n.name === 'ModbusSettingsUI').format;
+    assert.ok(/\.mbs-table th, \.mbs-table td \{[\s\S]*?white-space: normal/.test(t));
+    assert.equal(/text-overflow:\s*ellipsis/.test(t), false, 'a clipped heading is a guessing game');
+  });
+
   test('the Modbus Settings table has an Active checkbox too', () => {
     // Same gate as the joint table, and for a stronger reason: unticking this
     // one stops the bus polling the device, not merely the monitoring of it.
