@@ -59,7 +59,16 @@ function compileNanoJob(doc, { excludeSlaveIds = [], busId } = {}) {
 
   const exclude = new Set(excludeSlaveIds);
   // one read per slave ON THIS BUS - each Nano polls only its own segment
-  const slaves = doc.modbus.slaves.filter((s) => s.bus_id === bus.bus_id && !exclude.has(s.slave_id));
+  // `enabled === false` means the operator took this device out of service from
+  // the Modbus Settings table. It is omitted here, which is the whole mechanism:
+  // the Nano is never told to read it, so the bus stops talking to it entirely.
+  // Distinct from `excludeSlaveIds`, which is the blacklist tracker removing a
+  // device that is FAILING - one is a decision, the other a diagnosis, and they
+  // must not be conflated (a disabled device is not "recovering", so it must
+  // never be probed back into the scan).
+  const slaves = doc.modbus.slaves.filter(
+    (s) => s.bus_id === bus.bus_id && s.enabled !== false && !exclude.has(s.slave_id)
+  );
   // One contiguous read per slave. readSpan handles both layouts:
   // consecutive channels (channels * temp_word_count from base) and
   // sparse channel_addrs (min..max span, R15 guarantees min == base) -

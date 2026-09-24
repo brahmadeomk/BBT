@@ -1051,6 +1051,17 @@ describe('config tables: a width for every column (2026-09-19)', () => {
     });
   }
 
+  test('the Modbus Settings table has an Active checkbox too', () => {
+    // Same gate as the joint table, and for a stronger reason: unticking this
+    // one stops the bus polling the device, not merely the monitoring of it.
+    const flows = JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
+    const t = flows.find((n) => n.name === 'ModbusSettingsUI').format;
+    assert.ok(t.includes('<th>Active</th>'), 'header');
+    assert.ok(/<input type="checkbox" class="mbs-chk" ng-model="s\.enabled" ng-disabled="!s\.editing"/.test(t),
+      'bound to s.enabled and gated on s.editing');
+    assert.ok(/mbs-off/.test(t), 'an out-of-service row is visibly greyed, or 88 rows hide which are dark');
+  });
+
   test('the joint table has an Active checkbox, and it needs EDIT like every other cell', () => {
     // Switching a joint off stops it being monitored, so it must not be doable
     // with a stray tap on a touchscreen - it goes through EDIT/SAVE/APPLY like

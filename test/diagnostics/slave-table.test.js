@@ -4,7 +4,7 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   recordReading, buildSlaveRows, statusFor, channelAddress, channelName,
-  record, snapshot,
+  record, snapshot, annotateDevice,
 } = require('../../src/diagnostics/slave-table');
 
 const doc = (over = {}) => ({
@@ -410,5 +410,42 @@ describe('the Diagnostics template renders it', () => {
 
   test('a row with no bus shows an em dash rather than blank or "null"', () => {
     assert.ok(/RawData\.Bus \|\| '—'/.test(template()));
+  });
+});
+
+describe('a device switched off reads as out of service, not faulty (2026-09-24)', () => {
+  // "No Data" on a device nobody is polling would send an engineer looking for
+  // a wiring problem that does not exist.
+  const off = () => ({
+    modbus: { slaves: [{ slave_id: 'sl01', bus_id: 'bus1', unit_address: 1, channels: 1, enabled: false, registers: { temp_base_addr: 3 } }] },
+    joints: [],
+  });
+
+  test('Status is Disabled and Device is OUT OF SERVICE', () => {
+    const { rows } = buildSlaveRows(off(), {});
+    annotateDevice(rows, {});
+    assert.equal(rows[0].Status, 'Disabled');
+    assert.equal(rows[0].Device, 'OUT OF SERVICE');
+  });
+
+  test('a stale reading is not shown beside it', () => {
+    // Whatever it last said is no longer a measurement of anything.
+    const cache = {};
+    recordReading(cache, { payload: { id: 1, val: 31.4, st: 'ok' } }, 1000);
+    const { rows } = buildSlaveRows(off(), cache, { nowMs: 1000 });
+    assert.equal(rows[0].Data, null);
+  });
+
+  test('the row still appears - it is commissioned, just dark', () => {
+    assert.equal(buildSlaveRows(off(), {}).rows.length, 1);
+  });
+
+  test('a device in service is unaffected', () => {
+    const d = off();
+    delete d.modbus.slaves[0].enabled;
+    const { rows } = buildSlaveRows(d, {});
+    annotateDevice(rows, {});
+    assert.equal(rows[0].Status, 'No Data');
+    assert.equal(rows[0].Device, 'Unknown');
   });
 });

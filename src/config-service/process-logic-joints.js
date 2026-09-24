@@ -84,10 +84,24 @@ function buildProcessLogicJoints(doc, { labelFallback } = {}) {
     .slice()
     .sort((a, b) => (a.channel ?? 1) - (b.channel ?? 1));
 
+  // A device taken out of service in Modbus Settings is not polled at all, so a
+  // joint mapped to it would otherwise sit in the monitored set holding its last
+  // reading for ever - and an alarm raised before it was switched off could
+  // never clear. Same judgement as `enabled === false` on the joint itself.
+  const outOfService = new Set(
+    (doc?.modbus?.slaves ?? []).filter((s) => s.enabled === false).map((s) => s.slave_id)
+  );
+
   for (const j of ordered) {
     const unit = unitAddressOf(doc, j.slave_id);
     if (unit == null) {
       warnings.push(`${j.joint_id}: slave ${j.slave_id} is not commissioned - not monitored`);
+      continue;
+    }
+    if (outOfService.has(j.slave_id)) {
+      // A warning, not silence: the joint is configured and deliberately dark,
+      // and the Configuration Status banner should say so.
+      warnings.push(`${j.joint_id}: slave ${j.slave_id} is switched off - not monitored`);
       continue;
     }
     const channel = j.channel ?? 1;

@@ -405,3 +405,41 @@ describe('drift: an absent draft field is not a difference', () => {
     );
   });
 });
+
+describe('a joint on a device switched off in Modbus Settings (2026-09-24)', () => {
+  // The device is not polled at all, so the joint would otherwise sit in the
+  // monitored set holding its last reading for ever, and an alarm raised before
+  // it was switched off could never clear.
+  const offDoc = () => {
+    const d = doc();
+    d.modbus.slaves = d.modbus.slaves.map((s) => (s.slave_id === 'sl01' ? { ...s, enabled: false } : s));
+    return d;
+  };
+
+  test('it is not published for monitoring', () => {
+    const before = buildProcessLogicJoints(doc()).joints.map((j) => j.joint_id);
+    const after = buildProcessLogicJoints(offDoc()).joints.map((j) => j.joint_id);
+    assert.ok(before.includes('J01'));
+    assert.ok(!after.includes('J01'));
+  });
+
+  test('and says so, rather than vanishing silently', () => {
+    // The Configuration Status banner surfaces these warnings; a joint that is
+    // configured and deliberately dark must be distinguishable from one that
+    // was never commissioned.
+    const { warnings } = buildProcessLogicJoints(offDoc());
+    assert.ok(warnings.some((w) => /J01.*switched off/.test(w)), warnings.join(' | '));
+  });
+
+  test('joints on devices that are still in service are unaffected', () => {
+    const ids = buildProcessLogicJoints(offDoc()).joints.map((j) => j.joint_id);
+    assert.ok(ids.includes('J02'), 'J02 is on sl21, which is still on');
+  });
+
+  test('absent `enabled` on a slave means in service', () => {
+    assert.deepEqual(
+      buildProcessLogicJoints(doc()).joints.map((j) => j.joint_id).sort(),
+      ['J01', 'J02']
+    );
+  });
+});

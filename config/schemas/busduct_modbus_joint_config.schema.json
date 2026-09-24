@@ -4,143 +4,383 @@
   "title": "BusductTherMo — Modbus & Joint Configuration (cfg/modbus + cfg/joints)",
   "description": "Commissioning-time configuration describing physical wiring reality. Versioned independently from alarm thresholds. Applied atomically; edge validates schema AND cross-field rules (see x-edge-validation) before accepting.",
   "type": "object",
-  "required": ["config_domain_versions", "modbus", "joints"],
+  "required": [
+    "config_domain_versions",
+    "modbus",
+    "joints"
+  ],
   "additionalProperties": false,
-
   "definitions": {
     "ambient_sensor_ref": {
       "type": "object",
       "description": "Which slave/channel provides ambient T for delta-T computation. Resolution order when more than one level sets this: joints[].ambient_sensor, then zones[].ambient_sensor for the joint's zone, then modbus.ambient_sensor (panel-wide default) - see R9/R14.",
-      "required": ["slave_id", "channel"],
+      "required": [
+        "slave_id",
+        "channel"
+      ],
       "additionalProperties": false,
       "properties": {
-        "slave_id": { "type": "string", "pattern": "^sl[0-9]{2,3}$" },
-        "channel":  { "type": "integer", "minimum": 1, "maximum": 8 }
+        "slave_id": {
+          "type": "string",
+          "pattern": "^sl[0-9]{2,3}$"
+        },
+        "channel": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        }
       }
     }
   },
-
   "properties": {
-
     "config_domain_versions": {
       "type": "object",
       "description": "Monotonic version per domain. Edge rejects a push whose version is <= currently applied version for that domain.",
-      "required": ["modbus", "joints"],
+      "required": [
+        "modbus",
+        "joints"
+      ],
       "properties": {
-        "modbus": { "type": "integer", "minimum": 1 },
-        "joints": { "type": "integer", "minimum": 1 }
+        "modbus": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "joints": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
-
     "modbus": {
       "type": "object",
-      "required": ["buses", "slaves"],
+      "required": [
+        "buses",
+        "slaves"
+      ],
       "additionalProperties": false,
       "properties": {
-
         "buses": {
           "type": "array",
           "minItems": 1,
           "maxItems": 4,
           "items": {
             "type": "object",
-            "required": ["bus_id", "type"],
+            "required": [
+              "bus_id",
+              "type"
+            ],
             "additionalProperties": false,
             "properties": {
-              "bus_id":    { "type": "string", "pattern": "^bus[0-9]{1,2}$" },
-              "type":      { "enum": ["rtu", "tcp"] },
-              "port":      { "type": "string", "description": "RTU only, e.g. /dev/ttyS1" },
-              "baud":      { "enum": [9600, 19200, 38400, 57600, 115200] },
-              "parity":    { "enum": ["N", "E", "O"], "default": "N" },
-              "stop_bits": { "enum": [1, 2], "default": 1 },
-              "host":      { "type": "string", "format": "ipv4", "description": "TCP only" },
-              "tcp_port":  { "type": "integer", "minimum": 1, "maximum": 65535, "default": 502 },
-              "timeout_ms":       { "type": "integer", "minimum": 50, "maximum": 5000, "default": 500 },
-              "retries":          { "type": "integer", "minimum": 0, "maximum": 5, "default": 2 },
-              "rs485_max_devices": { "type": "integer", "minimum": 2, "maximum": 256, "default": 128, "description": "Electrical device ceiling for this segment, set by transceiver unit load: 32 (1 UL), 128 (1/4 UL, e.g. MAX487E family), 256 (1/8 UL). Enforced by R16." },
-              "inter_frame_ms":   { "type": "integer", "minimum": 0, "maximum": 500, "default": 20 }
+              "bus_id": {
+                "type": "string",
+                "pattern": "^bus[0-9]{1,2}$"
+              },
+              "type": {
+                "enum": [
+                  "rtu",
+                  "tcp"
+                ]
+              },
+              "port": {
+                "type": "string",
+                "description": "RTU only, e.g. /dev/ttyS1"
+              },
+              "baud": {
+                "enum": [
+                  9600,
+                  19200,
+                  38400,
+                  57600,
+                  115200
+                ]
+              },
+              "parity": {
+                "enum": [
+                  "N",
+                  "E",
+                  "O"
+                ],
+                "default": "N"
+              },
+              "stop_bits": {
+                "enum": [
+                  1,
+                  2
+                ],
+                "default": 1
+              },
+              "host": {
+                "type": "string",
+                "format": "ipv4",
+                "description": "TCP only"
+              },
+              "tcp_port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535,
+                "default": 502
+              },
+              "timeout_ms": {
+                "type": "integer",
+                "minimum": 50,
+                "maximum": 5000,
+                "default": 500
+              },
+              "retries": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 5,
+                "default": 2
+              },
+              "rs485_max_devices": {
+                "type": "integer",
+                "minimum": 2,
+                "maximum": 256,
+                "default": 128,
+                "description": "Electrical device ceiling for this segment, set by transceiver unit load: 32 (1 UL), 128 (1/4 UL, e.g. MAX487E family), 256 (1/8 UL). Enforced by R16."
+              },
+              "inter_frame_ms": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 500,
+                "default": 20
+              }
             }
           }
         },
-
         "slaves": {
           "type": "array",
           "minItems": 1,
           "maxItems": 128,
           "items": {
             "type": "object",
-            "required": ["slave_id", "bus_id", "unit_address", "model", "registers"],
+            "required": [
+              "slave_id",
+              "bus_id",
+              "unit_address",
+              "model",
+              "registers"
+            ],
             "additionalProperties": false,
             "properties": {
-              "slave_id":     { "type": "string", "pattern": "^sl[0-9]{2,3}$", "description": "Logical ID referenced by joints. Stable even if unit_address changes." },
-              "bus_id":       { "type": "string", "pattern": "^bus[0-9]{1,2}$" },
-              "unit_address": { "type": "integer", "minimum": 1, "maximum": 247 },
-              "model":        { "type": "string", "maxLength": 32, "description": "Sensor module model, e.g. BT-SCM-4" },
-              "label":        { "type": "string", "maxLength": 48, "description": "Display name shown on dashboards/alerts, e.g. 'Sensor7' (legacy parameterName)" },
-              "hw_serial":    { "type": "string", "maxLength": 32 },
-              "channels":     { "type": "integer", "minimum": 1, "maximum": 8, "default": 4, "description": "Number of temperature channels on this module" },
-              "poll_interval_s": { "type": "integer", "minimum": 5, "maximum": 300, "default": 30 },
+              "slave_id": {
+                "type": "string",
+                "pattern": "^sl[0-9]{2,3}$",
+                "description": "Logical ID referenced by joints. Stable even if unit_address changes."
+              },
+              "bus_id": {
+                "type": "string",
+                "pattern": "^bus[0-9]{1,2}$"
+              },
+              "unit_address": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 247
+              },
+              "model": {
+                "type": "string",
+                "maxLength": 32,
+                "description": "Sensor module model, e.g. BT-SCM-4"
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 48,
+                "description": "Display name shown on dashboards/alerts, e.g. 'Sensor7' (legacy parameterName)"
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "False takes this device OUT OF SERVICE without deleting its commissioning row: it is omitted from the compiled Nano read job, so the bus stops polling it, and joints mapped to it stop being monitored. It keeps its slave_id, unit address and channel map, so re-enabling restores it unchanged. Absent means enabled."
+              },
+              "hw_serial": {
+                "type": "string",
+                "maxLength": 32
+              },
+              "channels": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 8,
+                "default": 4,
+                "description": "Number of temperature channels on this module"
+              },
+              "poll_interval_s": {
+                "type": "integer",
+                "minimum": 5,
+                "maximum": 300,
+                "default": 30
+              },
               "registers": {
                 "type": "object",
-                "required": ["function_code", "temp_base_addr", "temp_scale"],
+                "required": [
+                  "function_code",
+                  "temp_base_addr",
+                  "temp_scale"
+                ],
                 "additionalProperties": false,
                 "properties": {
-                  "function_code":   { "enum": [3, 4], "description": "3 = holding, 4 = input registers" },
-                  "temp_base_addr":  { "type": "integer", "minimum": 0, "maximum": 65535 },
-                  "temp_word_count": { "type": "integer", "minimum": 1, "maximum": 2, "default": 1 },
-                  "channel_addrs":   { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "integer", "minimum": 0, "maximum": 65535 }, "description": "Per-channel start address (index k = channel k+1) for modules whose channels are not consecutive words from temp_base_addr. Length must equal channels, addresses unique and non-overlapping, min must equal temp_base_addr (R15). Absent = channels are consecutive: channel k at temp_base_addr + (k-1)*temp_word_count." },
-                  "channel_labels":  { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "maxLength": 48 }, "description": "Per-channel display name (index k = channel k+1), e.g. the probe location. Length must equal channels when present (R15)." },
-                  "temp_scale":      { "type": "number", "enum": [1, 0.1, 0.01], "description": "Multiplier raw->degC" },
-                  "temp_offset":     { "type": "number", "default": 0 },
-                  "byte_order":      { "enum": ["AB", "BA", "ABCD", "DCBA", "BADC", "CDAB"], "default": "AB" },
-                  "status_addr":     { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Optional module health register" }
+                  "function_code": {
+                    "enum": [
+                      3,
+                      4
+                    ],
+                    "description": "3 = holding, 4 = input registers"
+                  },
+                  "temp_base_addr": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535
+                  },
+                  "temp_word_count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2,
+                    "default": 1
+                  },
+                  "channel_addrs": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 8,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 65535
+                    },
+                    "description": "Per-channel start address (index k = channel k+1) for modules whose channels are not consecutive words from temp_base_addr. Length must equal channels, addresses unique and non-overlapping, min must equal temp_base_addr (R15). Absent = channels are consecutive: channel k at temp_base_addr + (k-1)*temp_word_count."
+                  },
+                  "channel_labels": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 8,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 48
+                    },
+                    "description": "Per-channel display name (index k = channel k+1), e.g. the probe location. Length must equal channels when present (R15)."
+                  },
+                  "temp_scale": {
+                    "type": "number",
+                    "enum": [
+                      1,
+                      0.1,
+                      0.01
+                    ],
+                    "description": "Multiplier raw->degC"
+                  },
+                  "temp_offset": {
+                    "type": "number",
+                    "default": 0
+                  },
+                  "byte_order": {
+                    "enum": [
+                      "AB",
+                      "BA",
+                      "ABCD",
+                      "DCBA",
+                      "BADC",
+                      "CDAB"
+                    ],
+                    "default": "AB"
+                  },
+                  "status_addr": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 65535,
+                    "description": "Optional module health register"
+                  }
                 }
               }
             }
           }
         },
-
-        "ambient_sensor": { "$ref": "#/definitions/ambient_sensor_ref" }
+        "ambient_sensor": {
+          "$ref": "#/definitions/ambient_sensor_ref"
+        }
       }
     },
-
     "joints": {
       "type": "array",
       "minItems": 1,
       "maxItems": 200,
       "items": {
         "type": "object",
-        "required": ["joint_id", "slave_id", "channel", "zone_id"],
+        "required": [
+          "joint_id",
+          "slave_id",
+          "channel",
+          "zone_id"
+        ],
         "additionalProperties": false,
         "properties": {
-          "joint_id":  { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_]{1,5}$", "description": "Display ID used on HMI, heat map, alarms, cloud payloads. 2-6 characters, letters/digits/underscore, not starting with underscore. Widened from ^J[0-9]{2,3}$ on 2026-08-31 so sites can use their own joint naming (e.g. TR1A01, BD101) instead of J01..J999. Hyphen is deliberately excluded: the MGate BACnet description field forbids it (manual v1.4 p61), so a hyphenated id would render differently on the BMS than on the HMI. Pipe is excluded because the alarm instanceId is PROCESS|{joint}|{type}|{level}." },
-          "slave_id":  { "type": "string", "pattern": "^sl[0-9]{2,3}$" },
-          "channel":   { "type": "integer", "minimum": 1, "maximum": 8 },
-          "zone_id":   { "type": "string", "pattern": "^z[0-9]{1,2}$" },
-          "label":     { "type": "string", "maxLength": 48, "description": "Human location, e.g. 'Riser bend, above ACB-8'" },
-          "enabled":   { "type": "boolean", "default": true },
-          "threshold_profile": { "type": "string", "default": "default", "description": "Optional per-joint override profile name defined in cfg/alarms; 'default' = panel-wide thresholds" },
-          "ambient_sensor": { "$ref": "#/definitions/ambient_sensor_ref", "description": "Optional per-joint override, for a joint whose local ambient differs from its zone's (e.g. right next to a vent/doorway). Falls back to the zone's ambient_sensor, then modbus.ambient_sensor." }
+          "joint_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_]{1,5}$",
+            "description": "Display ID used on HMI, heat map, alarms, cloud payloads. 2-6 characters, letters/digits/underscore, not starting with underscore. Widened from ^J[0-9]{2,3}$ on 2026-08-31 so sites can use their own joint naming (e.g. TR1A01, BD101) instead of J01..J999. Hyphen is deliberately excluded: the MGate BACnet description field forbids it (manual v1.4 p61), so a hyphenated id would render differently on the BMS than on the HMI. Pipe is excluded because the alarm instanceId is PROCESS|{joint}|{type}|{level}."
+          },
+          "slave_id": {
+            "type": "string",
+            "pattern": "^sl[0-9]{2,3}$"
+          },
+          "channel": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "zone_id": {
+            "type": "string",
+            "pattern": "^z[0-9]{1,2}$"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 48,
+            "description": "Human location, e.g. 'Riser bend, above ACB-8'"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "threshold_profile": {
+            "type": "string",
+            "default": "default",
+            "description": "Optional per-joint override profile name defined in cfg/alarms; 'default' = panel-wide thresholds"
+          },
+          "ambient_sensor": {
+            "$ref": "#/definitions/ambient_sensor_ref",
+            "description": "Optional per-joint override, for a joint whose local ambient differs from its zone's (e.g. right next to a vent/doorway). Falls back to the zone's ambient_sensor, then modbus.ambient_sensor."
+          }
         }
       }
     },
-
     "zones": {
       "type": "array",
       "maxItems": 50,
       "items": {
         "type": "object",
-        "required": ["zone_id", "name"],
+        "required": [
+          "zone_id",
+          "name"
+        ],
         "properties": {
-          "zone_id": { "type": "string", "pattern": "^z[0-9]{1,2}$" },
-          "name":    { "type": "string", "maxLength": 32 },
-          "ambient_sensor": { "$ref": "#/definitions/ambient_sensor_ref", "description": "Optional zone-level ambient reference override (e.g. this zone runs through an air-conditioned enclosure while others are open-air). Falls back to modbus.ambient_sensor when unset." },
-          "threshold_profile": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,23}$", "description": "Optional zone-level alarm profile, named in cfg/alarms.profiles. Every joint in this zone uses it unless the joint sets its own threshold_profile. Falls back to 'default' when unset. A NAME, never embedded thresholds - all numbers live in cfg/alarms, which is remotely tunable with no maintenance-mode gate (R12 applies to this domain, and thresholds are not wiring reality). Validated by A3." }
+          "zone_id": {
+            "type": "string",
+            "pattern": "^z[0-9]{1,2}$"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "ambient_sensor": {
+            "$ref": "#/definitions/ambient_sensor_ref",
+            "description": "Optional zone-level ambient reference override (e.g. this zone runs through an air-conditioned enclosure while others are open-air). Falls back to modbus.ambient_sensor when unset."
+          },
+          "threshold_profile": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,23}$",
+            "description": "Optional zone-level alarm profile, named in cfg/alarms.profiles. Every joint in this zone uses it unless the joint sets its own threshold_profile. Falls back to 'default' when unset. A NAME, never embedded thresholds - all numbers live in cfg/alarms, which is remotely tunable with no maintenance-mode gate (R12 applies to this domain, and thresholds are not wiring reality). Validated by A3."
+          }
         }
       }
     }
   },
-
   "x-edge-validation": {
     "description": "Cross-field rules the edge MUST enforce beyond JSON Schema. Any failure -> reject entire push atomically, report reason on cmd/../config/ack.",
     "rules": [
@@ -162,33 +402,138 @@
       "R16 RS-485 bus loading: the number of slaves assigned to any single bus must not exceed rs485_max_devices for that bus (default 128, the quarter-unit-load ceiling of the MAX487E-class transceiver). A bus loaded above 80% of that ceiling is accepted but reported as a warning, since it leaves no headroom for repeaters, diagnostic taps or growth."
     ]
   },
-
   "examples": [
     {
-      "config_domain_versions": { "modbus": 3, "joints": 5 },
+      "config_domain_versions": {
+        "modbus": 3,
+        "joints": 5
+      },
       "modbus": {
         "buses": [
-          { "bus_id": "bus1", "type": "rtu", "port": "/dev/ttyS1", "baud": 19200, "parity": "N", "stop_bits": 1, "timeout_ms": 500, "retries": 2, "inter_frame_ms": 20 }
+          {
+            "bus_id": "bus1",
+            "type": "rtu",
+            "port": "/dev/ttyS1",
+            "baud": 19200,
+            "parity": "N",
+            "stop_bits": 1,
+            "timeout_ms": 500,
+            "retries": 2,
+            "inter_frame_ms": 20
+          }
         ],
         "slaves": [
-          { "slave_id": "sl01", "bus_id": "bus1", "unit_address": 1, "model": "BT-SCM-4", "hw_serial": "SCM26-0091", "channels": 4, "poll_interval_s": 30,
-            "registers": { "function_code": 4, "temp_base_addr": 100, "temp_word_count": 1, "temp_scale": 0.1, "temp_offset": 0, "byte_order": "AB", "status_addr": 199 } },
-          { "slave_id": "sl02", "bus_id": "bus1", "unit_address": 2, "model": "BT-SCM-4", "hw_serial": "SCM26-0092", "channels": 4, "poll_interval_s": 30,
-            "registers": { "function_code": 4, "temp_base_addr": 100, "temp_word_count": 1, "temp_scale": 0.1, "byte_order": "AB" } },
-          { "slave_id": "sl03", "bus_id": "bus1", "unit_address": 3, "model": "BT-AMB-1", "hw_serial": "AMB26-0001", "channels": 1, "poll_interval_s": 30,
-            "registers": { "function_code": 4, "temp_base_addr": 100, "temp_word_count": 1, "temp_scale": 0.1, "byte_order": "AB" } }
+          {
+            "slave_id": "sl01",
+            "bus_id": "bus1",
+            "unit_address": 1,
+            "model": "BT-SCM-4",
+            "hw_serial": "SCM26-0091",
+            "channels": 4,
+            "poll_interval_s": 30,
+            "registers": {
+              "function_code": 4,
+              "temp_base_addr": 100,
+              "temp_word_count": 1,
+              "temp_scale": 0.1,
+              "temp_offset": 0,
+              "byte_order": "AB",
+              "status_addr": 199
+            }
+          },
+          {
+            "slave_id": "sl02",
+            "bus_id": "bus1",
+            "unit_address": 2,
+            "model": "BT-SCM-4",
+            "hw_serial": "SCM26-0092",
+            "channels": 4,
+            "poll_interval_s": 30,
+            "registers": {
+              "function_code": 4,
+              "temp_base_addr": 100,
+              "temp_word_count": 1,
+              "temp_scale": 0.1,
+              "byte_order": "AB"
+            }
+          },
+          {
+            "slave_id": "sl03",
+            "bus_id": "bus1",
+            "unit_address": 3,
+            "model": "BT-AMB-1",
+            "hw_serial": "AMB26-0001",
+            "channels": 1,
+            "poll_interval_s": 30,
+            "registers": {
+              "function_code": 4,
+              "temp_base_addr": 100,
+              "temp_word_count": 1,
+              "temp_scale": 0.1,
+              "byte_order": "AB"
+            }
+          }
         ],
-        "ambient_sensor": { "slave_id": "sl01", "channel": 4 }
+        "ambient_sensor": {
+          "slave_id": "sl01",
+          "channel": 4
+        }
       },
       "joints": [
-        { "joint_id": "J01", "slave_id": "sl01", "channel": 1, "zone_id": "z1", "label": "Riser bend above ACB-8", "enabled": true, "threshold_profile": "default" },
-        { "joint_id": "J02", "slave_id": "sl01", "channel": 2, "zone_id": "z1", "label": "Horizontal run joint 2", "enabled": true, "threshold_profile": "default" },
-        { "joint_id": "J03", "slave_id": "sl01", "channel": 3, "zone_id": "z1", "label": "Tap-off box TB-3, near AHU vent", "enabled": true, "threshold_profile": "default", "ambient_sensor": { "slave_id": "sl03", "channel": 1 } },
-        { "joint_id": "J04", "slave_id": "sl02", "channel": 1, "zone_id": "z2", "label": "Outdoor riser joint", "enabled": true, "threshold_profile": "default" }
+        {
+          "joint_id": "J01",
+          "slave_id": "sl01",
+          "channel": 1,
+          "zone_id": "z1",
+          "label": "Riser bend above ACB-8",
+          "enabled": true,
+          "threshold_profile": "default"
+        },
+        {
+          "joint_id": "J02",
+          "slave_id": "sl01",
+          "channel": 2,
+          "zone_id": "z1",
+          "label": "Horizontal run joint 2",
+          "enabled": true,
+          "threshold_profile": "default"
+        },
+        {
+          "joint_id": "J03",
+          "slave_id": "sl01",
+          "channel": 3,
+          "zone_id": "z1",
+          "label": "Tap-off box TB-3, near AHU vent",
+          "enabled": true,
+          "threshold_profile": "default",
+          "ambient_sensor": {
+            "slave_id": "sl03",
+            "channel": 1
+          }
+        },
+        {
+          "joint_id": "J04",
+          "slave_id": "sl02",
+          "channel": 1,
+          "zone_id": "z2",
+          "label": "Outdoor riser joint",
+          "enabled": true,
+          "threshold_profile": "default"
+        }
       ],
       "zones": [
-        { "zone_id": "z1", "name": "Zone-1 Substation LT (AC)" },
-        { "zone_id": "z2", "name": "Zone-2 Outdoor riser", "ambient_sensor": { "slave_id": "sl03", "channel": 1 } }
+        {
+          "zone_id": "z1",
+          "name": "Zone-1 Substation LT (AC)"
+        },
+        {
+          "zone_id": "z2",
+          "name": "Zone-2 Outdoor riser",
+          "ambient_sensor": {
+            "slave_id": "sl03",
+            "channel": 1
+          }
+        }
       ]
     }
   ]

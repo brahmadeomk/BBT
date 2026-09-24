@@ -212,3 +212,58 @@ describe('compileNanoJob - two-segment RS-485 (Slice 10)', () => {
     assert.equal(nanoJobsEqual(a, b, 'bus2'), false, 'bus2 job changed');
   });
 });
+
+describe('a device taken out of service is not polled (2026-09-24)', () => {
+  // The whole mechanism. `enabled === false` on a slave omits it from the
+  // compiled read job, so the Nano is never told to read it and the bus stops
+  // talking to it - as opposed to the joint checkbox, which only stops the
+  // MONITORING of an otherwise-polled channel.
+  const units = (d, opts) => {
+    const r = compileNanoJob(d, opts);
+    assert.ok(r.job, `expected a job, got ${JSON.stringify(r)}`);
+    return r.job.read.slice(1).map((t) => t[0]);
+  };
+
+  test('an enabled panel reads every device', () => {
+    assert.deepEqual(units(validModbusJointsDoc()), [1, 2]);
+  });
+
+  test('a disabled device is dropped from the read job', () => {
+    const d = validModbusJointsDoc();
+    d.modbus.slaves[1].enabled = false;
+    assert.deepEqual(units(d), [1]);
+  });
+
+  test('absent `enabled` means IN SERVICE', () => {
+    // The dangerous direction: reading absent as off would silently stop the
+    // bus polling an entire existing panel.
+    const d = validModbusJointsDoc();
+    delete d.modbus.slaves[0].enabled;
+    d.modbus.slaves[1].enabled = true;
+    assert.deepEqual(units(d), [1, 2]);
+  });
+
+  test('it is independent of the blacklist exclude set', () => {
+    // One is a decision, the other a diagnosis. A disabled device must never be
+    // probed back into the scan the way a blacklisted one is.
+    const d = validModbusJointsDoc();
+    d.modbus.slaves[0].enabled = false;
+    assert.deepEqual(units(d, { excludeSlaveIds: ['sl02'] }), [], 'both mechanisms apply');
+    assert.deepEqual(units(d, { excludeSlaveIds: [] }), [2]);
+  });
+
+  test('switching a device off changes the compiled job, so the Nano is resent', () => {
+    // resendNeeded rides on nanoJobsEqual - without this the Nano would keep
+    // polling a device the operator had just taken out of service.
+    const before = validModbusJointsDoc();
+    const after = validModbusJointsDoc();
+    after.modbus.slaves[1].enabled = false;
+    assert.equal(nanoJobsEqual(before, after), false);
+  });
+
+  test('a label edit on a disabled device still does not resend', () => {
+    const before = validModbusJointsDoc(); before.modbus.slaves[1].enabled = false;
+    const after = validModbusJointsDoc(); after.modbus.slaves[1].enabled = false; after.modbus.slaves[1].label = 'renamed';
+    assert.equal(nanoJobsEqual(before, after), true);
+  });
+});

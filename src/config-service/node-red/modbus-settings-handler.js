@@ -68,6 +68,9 @@ function handleModbusSettingsMessage(msg, deps) {
   const index = msg.payload?.index;
 
   const state = currentState(msg, draft, store, legacySlaveList);
+  // One place, before anything reads it: apply, the row bookkeeping, and every
+  // reply back to the table all see a real boolean whatever wrote the draft.
+  normaliseSlaveEnabled(state.slaves);
 
   if (action === 'apply') {
     return applyModbusSettings(msg, state, store, legacySlaveList, user);
@@ -184,6 +187,7 @@ const EMPTY_ROW = () => ({
   temp_word_count: 1,
   temp_scale: 0.1,
   poll_interval_s: 30,
+  enabled: true,
   editing: true,
 });
 
@@ -258,6 +262,9 @@ function stateFromApplied(store, legacySlaveList) {
         temp_word_count: wordCount,
         temp_scale: s.registers.temp_scale,
         poll_interval_s: s.poll_interval_s ?? 30,
+        // Slave-level, repeated on every channel row exactly like model and
+        // poll interval. Absent means in service (schema default).
+        enabled: s.enabled !== false,
         editing: false,
       });
     }
@@ -316,6 +323,21 @@ function busError(bus) {
  * already rejects the same address appearing on two buses, so an address
  * identifies exactly one physical unit panel-wide.
  */
+/**
+ * `enabled` is ABSENT on every row written before the Active column existed.
+ * An absent value renders as an unticked checkbox, which reads as "this device
+ * is out of service" and would APPLY as out of service - silently stopping the
+ * bus from polling a whole panel at the operator's next apply. Absent means IN
+ * SERVICE, matching the schema default and `compileNanoJob`'s `!== false`.
+ */
+function normaliseSlaveEnabled(rows) {
+  if (!Array.isArray(rows)) return rows;
+  for (const r of rows) {
+    if (r && typeof r === 'object') r.enabled = r.enabled !== false;
+  }
+  return rows;
+}
+
 function groupRowsIntoSlaves(rows) {
   const byAddress = new Map();
   for (const row of rows) {
@@ -353,6 +375,12 @@ function groupRowsIntoSlaves(rows) {
       if (Number(r.temp_scale) !== Number(first.temp_scale)) {
         return { error: `Unit ${ua}: scale must match across its channels` };
       }
+      // In service or not is a property of the DEVICE, not of one of its
+      // channels - the Nano reads all of a unit's channels in one transaction,
+      // so there is nothing to switch off per channel.
+      if ((r.enabled !== false) !== (first.enabled !== false)) {
+        return { error: `Unit ${ua}: Active must match across its channels - a device is polled as one transaction, so it is in service or out of it as a whole` };
+      }
       // One physical unit sits on one RS-485 segment - its channels can't
       // straddle two Nanos.
       if ((r.bus_id || 'bus1') !== (first.bus_id || 'bus1')) {
@@ -388,6 +416,10 @@ function groupRowsIntoSlaves(rows) {
       base_addr: sortedAddrs[0],
       channel_addrs: addrs,
       channel_labels: inChannelOrder.map((r) => String(r.label).trim()),
+      // Absent means IN SERVICE, matching the schema default. Reading an absent
+      // value as off would take every device on an existing panel out of
+      // service at the operator's next apply.
+      enabled: first.enabled !== false,
       _firstLabel: name(first),
     });
   }
@@ -515,6 +547,9 @@ function applyModbusSettings(msg, state, store, legacySlaveList, user) {
       // multi-channel slaves store explicit per-channel addresses/labels
       ...(singleChannel ? { label: g.channel_labels[0] } : {}),
       ...(existing?.hw_serial ? { hw_serial: existing.hw_serial } : {}),
+      // Written only when OFF, so an in-service panel's document is unchanged
+      // and a diff shows a device going out of service as one added line.
+      ...(g.enabled === false ? { enabled: false } : {}),
       channels: g.channels,
       poll_interval_s: g.poll_interval_s,
       registers: {

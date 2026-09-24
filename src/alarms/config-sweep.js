@@ -83,9 +83,18 @@ function sweepDecommissionedAlarms(activeAlarms, doc) {
   // decommissioned for sweeping purposes is the same judgement the sweep
   // already makes for a deleted joint: it is not being watched, so an alarm
   // saying it is unhealthy is stale rather than informative.
-  const validJointIds = new Set(joints.filter((j) => j.enabled !== false).map((j) => j.joint_id));
-  const disabledJointIds = new Set(joints.filter((j) => j.enabled === false).map((j) => j.joint_id));
-  const validSlaveIds = new Set((slaves || []).map((s) => s.slave_id));
+  // A device switched off in Modbus Settings is not polled, so everything
+  // hanging off it is in the same position as a joint switched off directly:
+  // no further samples, therefore no way to clear an alarm it was holding.
+  const offSlaveIds = new Set((slaves || []).filter((s) => s.enabled === false).map((s) => s.slave_id));
+  const monitored = (j) => j.enabled !== false && !offSlaveIds.has(j.slave_id);
+
+  const validJointIds = new Set(joints.filter(monitored).map((j) => j.joint_id));
+  const disabledJointIds = new Set(joints.filter((j) => !monitored(j)).map((j) => j.joint_id));
+  // Likewise its OWN alarms - a BLACKLIST or COMM alarm about a device nobody is
+  // talking to is stale, not informative, and the tracker can never clear it
+  // because a device that is not polled produces neither an ok nor an err.
+  const validSlaveIds = new Set((slaves || []).filter((s) => s.enabled !== false).map((s) => s.slave_id));
 
   const out = [];
   for (const [key, alarm] of Object.entries(alarms)) {

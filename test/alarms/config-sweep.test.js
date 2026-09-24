@@ -263,3 +263,43 @@ describe('a joint switched off in the table (2026-09-22)', () => {
     assert.deepEqual(sweepDecommissionedAlarms(byKey([process_('J01'), process_('J02')]), doc()), []);
   });
 });
+
+describe('a device switched off in Modbus Settings (2026-09-24)', () => {
+  // Nothing polls it, so neither its own alarms nor those of the joints mapped
+  // to it can ever clear on their own.
+  const offDoc = () => {
+    const d = doc();
+    d.modbus.slaves = d.modbus.slaves.map((s) => (s.slave_id === 'sl01' ? { ...s, enabled: false } : s));
+    return d;
+  };
+
+  test("its joints' PROCESS alarms clear, as switched off", () => {
+    const out = sweepDecommissionedAlarms(byKey([process_('J01')]), offDoc());
+    assert.equal(out.length, 1);
+    assert.equal(out[0].reason, 'CONFIG_DISABLED');
+  });
+
+  test('its own BLACKLIST alarm clears', () => {
+    // A device nobody is talking to produces neither an ok nor an err, so the
+    // tracker can never emit the `restored` that would clear this.
+    assert.equal(sweepDecommissionedAlarms(byKey([system_('sl01')]), offDoc()).length, 1);
+  });
+
+  test('a device still in service keeps its alarm', () => {
+    assert.deepEqual(sweepDecommissionedAlarms(byKey([system_('sl21')]), offDoc()), []);
+  });
+
+  test('EVERY joint on that device is swept, not just the first', () => {
+    // J01 and J02 are both on sl01 (channels 1 and 2) - switching the device
+    // off darkens the whole unit, since the Nano reads its channels in one
+    // transaction.
+    const out = sweepDecommissionedAlarms(byKey([process_('J01'), process_('J02')]), offDoc());
+    assert.deepEqual(out.map((c) => c.joint_id).sort(), ['J01', 'J02']);
+  });
+
+  test('a joint on a device still in service keeps its alarm', () => {
+    const d = offDoc();
+    d.joints = [...d.joints, { joint_id: 'J09', slave_id: 'sl21', channel: 1, zone_id: 'z1' }];
+    assert.deepEqual(sweepDecommissionedAlarms(byKey([process_('J09')]), d), []);
+  });
+});

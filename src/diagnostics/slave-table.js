@@ -113,14 +113,17 @@ function buildSlaveRows(doc, cache, { nowMs = Date.now(), staleMs = DEFAULT_STAL
     const channels = Math.max(1, slave.channels ?? 1);
     for (let ch = 1; ch <= channels; ch += 1) {
       const r = readings[readingKey(slave.unit_address, ch)];
+      // "No Data" on a device nobody is polling reads as a fault, and an
+      // engineer would go looking for a wiring problem that does not exist.
+      const off = slave.enabled === false;
       rows.push({
         // Field names match what the dashboard template already binds, so the
         // view did not have to change with the source.
         Name: channelName(slave, ch),
         ID: slave.unit_address,
         Add: channelAddress(slave, ch),
-        Data: r && r.val != null ? r.val : null,
-        Status: statusFor(r, nowMs, staleMs),
+        Data: off ? null : (r && r.val != null ? r.val : null),
+        Status: off ? 'Disabled' : statusFor(r, nowMs, staleMs),
         Ch: ch,
         // Rendered as the Diagnostics "Bus" column (2026-09-19). Comes from the
         // APPLIED config, not from the reading that happened to arrive: a
@@ -244,6 +247,10 @@ function annotateDevice(rows, byUnit) {
         ? ` ${b.next_probe_in_sec}s` : '';
       row.Device = (blacklisted ? 'BLACKLISTED' : 'PROBING') + retry;
       row.DeviceClass = blacklisted ? 'dev-blacklisted' : 'dev-probing';
+    } else if (row.Status === 'Disabled') {
+      // Deliberately out of service, which is neither healthy nor faulty.
+      row.Device = 'OUT OF SERVICE';
+      row.DeviceClass = 'dev-unknown';
     } else if (row.Status === 'Connected') {
       row.Device = 'Active';
       row.DeviceClass = 'dev-active';

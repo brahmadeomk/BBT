@@ -447,6 +447,35 @@ reserves its (slave, channel) under R7 and still resolves an ambient under R9,
 so re-enabling it can never fail validation — re-mapping that sensor to a
 different joint is still a delete.
 
+**Active checkbox on the MODBUS table too (user request 2026-09-24).** Same
+control, stronger meaning: `joints[].enabled` stops a joint being *monitored*,
+while **`slaves[].enabled` stops the device being *polled*** — `compileNanoJob`
+omits it, so the Nano is never told to read it and the bus goes quiet to it.
+Deliberately separate from the blacklist `excludeSlaveIds`: one is a decision
+and the other a diagnosis, and a disabled device must never be probed back into
+the scan the way a blacklisted one is. **Schema addition** (`slaves[].enabled`,
+boolean, default true — `additionalProperties: false` made it mandatory to
+declare; same authorisation path as `slaves[].label`). Four consumers had to
+follow or a disabled device would look broken rather than deliberately dark:
+`buildProcessLogicJoints` drops joints mapped to it (with a *"switched off"*
+warning, so the Configuration Status banner distinguishes them from
+never-commissioned ones); `sweepDecommissionedAlarms` clears both those joints'
+PROCESS alarms **and the device's own** BLACKLIST/COMM alarms as
+`CONFIG_DISABLED` — nothing polls it, so the tracker can never emit the
+`restored` that would clear them; the Diagnostics table reads **Disabled /
+OUT OF SERVICE** with no stale value beside it, rather than "No Data", which
+would send an engineer hunting a wiring fault that does not exist; and the row
+greys out so 88 rows show at a glance which are dark. It is a **slave-level**
+field like model/poll/words/scale — a mismatch across a unit's channel rows is a
+friendly apply error, because the firmware reads all of a unit's channels in one
+transaction. `resendNeeded` needs nothing new: the compiled job changes, so
+`nanoJobsEqual` fires the resend. **Absent means IN SERVICE** everywhere,
+normalised at the handler entry — an absent value renders as an unticked box,
+which would stop the bus polling an entire existing panel at the next apply.
+**R1–R17 untouched**, including R16 bus loading, which still counts a disabled
+device: the warning then reflects the commissioned worst case, so re-enabling
+can never surprise you.
+
 **Joint channel mapping (user requirement 2026-07-14):** the joint
 table has a `Ch` column — each joint maps one dedicated channel of a
 slave (`joints[].channel`; drafts predating the column default to 1).
