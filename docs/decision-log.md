@@ -7955,3 +7955,93 @@ blacklist alarm text to accommodate a shape the schema rejects.
 
 No flow change: the banner template already `ng-repeat`s every string in
 `warnings`. Deploy: `git pull` + **restart Node-RED** (`src/` changed).
+
+---
+
+## 2026-09-25 — A dark joint has no temperature
+
+**Question from the user:** when a joint sensor goes offline, hold the last
+value or send a non-readable placeholder?
+
+It turned out to be answered four different ways in the shipping code: cloud
+telemetry omitted the joint, the historian gapped, and both the BMS register
+image and the HMI Diagnostics table **held the last value** — one of them
+silently.
+
+**The industry answer is not "hold" or "placeholder", it is: a value never
+travels without its quality.** Every mature industrial data model encodes
+this — OPC UA's Value/Quality/Timestamp triple (with
+`Uncertain_LastUsableValue` existing *specifically* to mark a held value),
+IEC 61850's `q` attribute with its `oldData` and `failure` bits, BACnet's
+`Reliability` + `Status_Flags`, NAMUR NE 43's deliberate out-of-range sentinel
+on 4–20 mA. So holding is legitimate **only where the quality travels with it**,
+and the right choice per surface follows from whether the consumer can see a
+qualifier at all.
+
+### The BMS: withhold
+
+`docs/bms-register-map.md` already promised this, in the Tier 3 section:
+
+> A **STALE** joint (state 1) is holding its last alarm while its device is
+> dark — its measurement registers read the no-data sentinel, not a stale
+> value, so a gateway never mistakes a frozen reading for a live one.
+
+The code did the opposite. **So this was not a wire-contract change needing
+design-chat sign-off — it was a bug against the published contract**, and
+nothing is integrated yet to migrate.
+
+Why this surface is the strict one: **Modbus has no quality channel**, and the
+usual compensation — the gateway raising BACnet `Reliability` when its own poll
+times out — cannot work here, because **our Pi answers the gateway happily
+whether or not the RS-485 sensor behind it is alive**. The failure is one hop
+upstream of anything the MGate can detect; §3 of the MGate doc already records
+that no per-command `Reliability` field exists. The sentinel is the only path
+by which "I cannot see this joint" reaches the BMS, and a held value would
+satisfy a high-limit alarm on a fire-safety point.
+
+Fixed in `computeRollup`, not in the caller, and in the same loop that already
+excluded a dark joint from the panel and zone maxima — withholding the value and
+excluding it from the maxima are one rule, and splitting them across two files
+is how they drift. `absolute_temp` (the duplicate point offered for gateways
+wanting a distinct object) is covered too; a half-applied sentinel is worse than
+none, because it rewards whichever point the integrator happened to pick.
+
+The `state` register still says **why**. Deliberately as a *second* signal, not
+the only one: in real integrations the point engineer maps the temperature the
+customer asked for and routinely does not map the status point. The sentinel
+survives a lazy integration; a companion register does not.
+
+### The HMI: hold, but never silently
+
+The Diagnostics table showed the value in the same cell style as a live one
+beside a `No Data` status. The row said both "42.7" and "no data", and the
+number won — the stale-value-reads-as-current failure this project has now hit
+four times (the ambient `0 °C` zero sentinel, the frozen Status column, the
+stale exclude set, and now this) reintroduced one column over.
+
+Here the value is **kept**, because this is the page an engineer opens *because*
+something is wrong and "last seen 42.7, five minutes ago" is the diagnosis. It
+is greyed, italic, and captioned with its age. That is exactly the
+`Uncertain_LastUsableValue` / `oldData` case: holding is fine, holding silently
+is not.
+
+Two boundaries, both tested:
+
+- **`No Data` only.** An `Error` reading means the device answered *just now*
+  and reported a fault — that value is current, merely flagged, and captioning
+  it "5m ago" would be a lie in the other direction.
+- **A disabled device is never marked stale.** It has no value at all, and an
+  age beside it would imply the panel is waiting for one.
+
+`ageText` is coarse on purpose (`45s` / `5m` / `2h` / `2d`): a ticking seconds
+counter on 71 rows reads as activity, and the question a stale value raises is
+"minutes or hours?".
+
+### What was left alone
+
+Cloud telemetry (absent from the payload) and the historian (gapped) were
+already correct — in JSON, absence *is* a quality signal, and `device_health`
+carries the joint state explicitly.
+
+Deploy: `git pull` + **restart Node-RED** (`src/` changed) + **re-import the
+flow** (the Diagnostics template changed).

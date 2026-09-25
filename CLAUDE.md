@@ -510,6 +510,41 @@ widths are only honoured against a **definite** table width, and
 future edit cannot widen a column and quietly lose the sizing. The panel gains
 116px of horizontal scroll, which it already has (`overflow-x: auto`).
 
+**A dark joint's value is WITHHELD, not held (2026-09-25).** `docs/bms-register-map.md`
+has always promised that a non-LIVE joint's *"measurement registers read the
+no-data sentinel, not a stale value, so a gateway never mistakes a frozen
+reading for a live one"* — and `computeRollup` was doing the opposite, carrying
+a dark joint's last temperature into `perJoint` for `buildImage` to encode as a
+real reading. **Not a contract change: the code was failing the contract.** The
+rollup now nulls `temp`/`deltaT`/`ror` for any joint not `LIVE`, so the Tier-3
+registers (**including `absolute_temp`**, the duplicate point a gateway may map
+instead) read `-32768`. Enforced in `rollup.js`, in the same loop that already
+kept a dark joint out of the panel and zone maxima, so a caller cannot bypass
+it. Why it matters more here than elsewhere: **Modbus carries no quality
+channel**, and the Pi answers the gateway happily whether or not the RS-485
+sensor behind it is alive — so the MGate's own timeout detection cannot see this
+failure and no BACnet `Reliability` can be raised per command
+(`bms-mgate5217-integration.md` §3). The sentinel is the *only* path by which
+"I cannot see this joint" reaches the BMS, and a held value would satisfy a
+high-limit alarm on a fire-safety point. The `state` register still says **why**
+(1 = STALE, 2 = OFFLINE), deliberately as a second signal rather than the only
+one — a point engineer maps the temperature the customer asked for and routinely
+does not map the status point.
+
+**On the HMI the opposite rule applies: a held value is KEPT, but must look
+held.** The Diagnostics table rendered the value in the live cell style beside a
+`No Data` status, so the row said both *"42.7"* and *"no data"* and the number
+won — the same stale-reads-as-current failure one column over. It now renders
+greyed and italic with its age inline (`42.7 (5m ago)`, `Stale`/`DataAge` from
+`slave-table.js`). Keeping it is right *here*: this is the page an engineer
+opens **because** something is wrong, and "last seen 42.7, five minutes ago" is
+the diagnosis — the OPC UA `Uncertain_LastUsableValue` / IEC 61850 `oldData`
+case, where holding is fine and holding *silently* is not. **`No Data` only**:
+an `Error` reading means the device answered just now and reported a fault, so
+its value is current and captioning it with an age would be a lie in the other
+direction. A **disabled** device is never marked stale — it has no value at all,
+and an age would imply the panel is waiting for one.
+
 **Joint channel mapping (user requirement 2026-07-14):** the joint
 table has a `Ch` column — each joint maps one dedicated channel of a
 slave (`joints[].channel`; drafts predating the column default to 1).

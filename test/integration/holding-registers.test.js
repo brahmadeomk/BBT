@@ -84,3 +84,48 @@ describe('holding-registers — image from rollup', () => {
     assert.equal(wire[wjAddr], 0xffff, '-1 as unsigned 16-bit');
   });
 });
+
+describe('a dark joint reaches the wire as the no-data sentinel (2026-09-25)', () => {
+  /*
+   * The end-to-end proof of the rollup rule: what a Modbus/BACnet gateway
+   * actually reads out of a joint whose device has gone dark. The register map
+   * promises the sentinel here, and a BMS high-limit alarm on a fire-safety
+   * point is what a held value would silently defeat.
+   */
+  const map = buildRegisterMap(validIntegrationDoc({ exposure_tier: 3 }), jointsDocTwoZones());
+  const j01 = map.tier3.joints.find((j) => j.joint_id === 'J01');
+  const addr = (key) => j01.points.find((p) => p.key === key).addr;
+
+  const imageWith = (state) => buildImage(map, computeRollup([
+    { joint_id: 'J01', zone_id: 'Z1', temp_c: 42.7, deltaT: 12.1, ror: 0.4, state },
+    { joint_id: 'J02', zone_id: 'Z1', temp_c: 31.0, deltaT: 3.0, ror: 0.1, state: 'LIVE' },
+  ], [], new WorstJointLatch()), { heartbeat: 1 });
+
+  test('LIVE reads the real value, x10', () => {
+    assert.equal(imageWith('LIVE')[addr('temp')], 427);
+  });
+
+  for (const state of ['STALE', 'OFFLINE']) {
+    test(`${state}: every measurement point reads NO_DATA, including absolute_temp`, () => {
+      // absolute_temp is the DUPLICATE of temp offered for gateways wanting a
+      // distinct point - a gateway mapping that one instead must get the same
+      // answer, or the sentinel is only half applied.
+      const img = imageWith(state);
+      for (const key of ['temp', 'deltaT', 'ror', 'absolute_temp']) {
+        assert.equal(img[addr(key)], NO_DATA, `${state}: ${key} must be the sentinel`);
+      }
+    });
+  }
+
+  test('the state register still distinguishes STALE from OFFLINE', () => {
+    assert.equal(imageWith('STALE')[addr('state')], 1);
+    assert.equal(imageWith('OFFLINE')[addr('state')], 2);
+  });
+
+  test('the sentinel survives the unsigned wire conversion as 0x8000', () => {
+    // -32768 is only meaningful to the BMS if it arrives intact; a gateway
+    // reads unsigned 16-bit and reinterprets.
+    const regs = toWireRegisters(map, imageWith('OFFLINE'));
+    assert.equal(regs[addr('temp')], 0x8000);
+  });
+});

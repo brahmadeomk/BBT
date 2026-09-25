@@ -4,7 +4,7 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   recordReading, buildSlaveRows, statusFor, channelAddress, channelName,
-  record, snapshot, annotateDevice,
+  record, snapshot, annotateDevice, ageText,
 } = require('../../src/diagnostics/slave-table');
 
 const doc = (over = {}) => ({
@@ -447,5 +447,86 @@ describe('a device switched off reads as out of service, not faulty (2026-09-24)
     annotateDevice(rows, {});
     assert.equal(rows[0].Status, 'No Data');
     assert.equal(rows[0].Device, 'Unknown');
+  });
+});
+
+describe('a held value must look held (2026-09-25)', () => {
+  /*
+   * The value was rendered in the same cell style as a live one, beside a
+   * "No Data" status - so the row said both "42.7" and "no data", and the
+   * number won. That is the stale-value-reads-as-current failure this file's
+   * header was written about, reintroduced one column over.
+   *
+   * Kept rather than blanked: this is the page an engineer opens BECAUSE
+   * something is wrong, and "last seen 42.7, 5m ago" is the diagnosis. The
+   * machine-read surfaces (the BMS register image) withhold the value instead,
+   * because nothing there can render a qualifier.
+   */
+  const now = 10_000_000;
+  const row = (readingAgeMs, st = 'ok') => {
+    const cache = {};
+    recordReading(cache, msg(3, 1, 42.7, st), now - readingAgeMs);
+    return buildSlaveRows(doc(), cache, { nowMs: now }).rows[0];
+  };
+
+  test('a fresh reading is not marked', () => {
+    const r = row(1000);
+    assert.equal(r.Status, 'Connected');
+    assert.equal(r.Stale, false);
+    assert.equal(r.DataAge, null);
+  });
+
+  test('a held reading keeps its value AND is marked, with its age', () => {
+    const r = row(300_000);
+    assert.equal(r.Status, 'No Data');
+    assert.equal(r.Data, 42.7, 'the value is the diagnosis - do not blank it');
+    assert.equal(r.Stale, true);
+    assert.equal(r.DataAge, '5m ago');
+  });
+
+  test("an ERROR reading is current, not held - it is never captioned with an age", () => {
+    // The device answered just now and reported a fault. Its value is current,
+    // merely flagged; "5m ago" would be a lie in the other direction.
+    const r = row(1000, 'err');
+    assert.equal(r.Status, 'Error');
+    assert.equal(r.Stale, false);
+    assert.equal(r.DataAge, null);
+  });
+
+  test('a device that has never reported has nothing to mark', () => {
+    const r = buildSlaveRows(doc(), {}, { nowMs: now }).rows[0];
+    assert.equal(r.Data, null);
+    assert.equal(r.Stale, false);
+  });
+
+  test('a DISABLED device is never marked stale - it has no value at all', () => {
+    // "Switched off" and "we lost it" are different statements, and the row
+    // already says OUT OF SERVICE. An age beside it would imply we are waiting.
+    const d = doc();
+    d.modbus.slaves[0].enabled = false;
+    const cache = {};
+    recordReading(cache, msg(3, 1, 42.7, 'ok'), now - 300_000);
+    const r = buildSlaveRows(d, cache, { nowMs: now }).rows[0];
+    assert.equal(r.Status, 'Disabled');
+    assert.equal(r.Data, null);
+    assert.equal(r.Stale, false);
+  });
+});
+
+describe('ageText - coarse on purpose', () => {
+  // A ticking seconds counter on 71 rows reads as activity; the question a
+  // stale value actually raises is "minutes or hours?".
+  test('scales through the units', () => {
+    assert.equal(ageText(0), '0s ago');
+    assert.equal(ageText(45), '45s ago');
+    assert.equal(ageText(300), '5m ago');
+    assert.equal(ageText(7200), '2h ago');
+    assert.equal(ageText(172800), '2d ago');
+  });
+
+  test('a missing age yields no caption rather than "NaN ago"', () => {
+    assert.equal(ageText(null), null);
+    assert.equal(ageText(undefined), null);
+    assert.equal(ageText(NaN), null);
   });
 });

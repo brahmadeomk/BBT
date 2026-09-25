@@ -644,6 +644,17 @@ describe('table headers stay pinned while scrolling (2026-09-01)', () => {
     });
   }
 
+  test('the Diagnostics Data cell marks a held value, and captions its age', () => {
+    // The library computes Stale/DataAge (slave-table.test.js pins that); this
+    // is the half that can be lost silently, because the flow is hand-imported
+    // JSON and an unbound field renders as nothing at all. A value shown in the
+    // live cell style beside a "No Data" status is the whole bug.
+    const fmt = byId('db41c2b5077e83fc').format;
+    assert.match(fmt, /ng-class="\{'data-stale': RawData\.Stale\}"/, 'the value must be greyed when held');
+    assert.match(fmt, /ng-if="RawData\.Stale"[^>]*>\s*\(\{\{RawData\.DataAge\}\}\)/, 'and carry its age');
+    assert.match(fmt, /\.data-stale\s*\{[^}]*color:/, 'the class must actually be styled');
+  });
+
   test('a pinned header needs a bounded scroll container to move within', () => {
     // The panels carry overflow-x:auto, which per CSS makes them scroll
     // containers on BOTH axes - so without a max-height the sticky header binds

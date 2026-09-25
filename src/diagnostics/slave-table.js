@@ -99,6 +99,19 @@ function statusFor(reading, nowMs, staleMs) {
  * @param {object} [opts]
  * @returns {{rows: Array, available: boolean}}
  */
+/**
+ * How long ago a reading arrived, for display beside a value that is no longer
+ * current. Coarse on purpose - the question a stale value raises is "minutes or
+ * hours?", and a ticking seconds counter on 71 rows reads as activity.
+ */
+function ageText(sec) {
+  if (sec == null || !Number.isFinite(sec)) return null;
+  if (sec < 60) return `${Math.max(0, Math.round(sec))}s ago`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.round(sec / 3600)}h ago`;
+  return `${Math.round(sec / 86400)}d ago`;
+}
+
 function buildSlaveRows(doc, cache, { nowMs = Date.now(), staleMs = DEFAULT_STALE_MS } = {}) {
   const slaves = doc && doc.modbus && Array.isArray(doc.modbus.slaves) ? doc.modbus.slaves : null;
   // Refuse to act on absent information - the same rule the alarm sweep and
@@ -116,6 +129,27 @@ function buildSlaveRows(doc, cache, { nowMs = Date.now(), staleMs = DEFAULT_STAL
       // "No Data" on a device nobody is polling reads as a fault, and an
       // engineer would go looking for a wiring problem that does not exist.
       const off = slave.enabled === false;
+      const status = off ? 'Disabled' : statusFor(r, nowMs, staleMs);
+      const ageSec = r ? Math.round((nowMs - r.ts) / 1000) : null;
+      /*
+       * A HELD VALUE MUST LOOK HELD (2026-09-25).
+       *
+       * The value was rendered in the same cell style as a live one beside a
+       * "No Data" status, so the row said both "42.7" and "no data" and the
+       * number won - the exact stale-value-reads-as-current failure this file's
+       * header was written about, reintroduced one column over.
+       *
+       * Kept rather than blanked: this is the page an engineer opens BECAUSE
+       * something is wrong, and "last seen 42.7, 5m ago" is the diagnosis. That
+       * is the OPC UA `Uncertain_LastUsableValue` / IEC 61850 `oldData` case -
+       * holding is fine, holding silently is not. The machine-read surfaces
+       * (the BMS register image) withhold the value instead, because nothing
+       * there can render a qualifier.
+       */
+      // 'No Data' ONLY. 'Error' means the device answered just now and reported
+      // a fault - that value is current, merely flagged, and captioning it
+      // "5m ago" would be a lie in the other direction.
+      const stale = status === 'No Data' && r != null && r.val != null;
       rows.push({
         // Field names match what the dashboard template already binds, so the
         // view did not have to change with the source.
@@ -123,7 +157,11 @@ function buildSlaveRows(doc, cache, { nowMs = Date.now(), staleMs = DEFAULT_STAL
         ID: slave.unit_address,
         Add: channelAddress(slave, ch),
         Data: off ? null : (r && r.val != null ? r.val : null),
-        Status: off ? 'Disabled' : statusFor(r, nowMs, staleMs),
+        Status: status,
+        // Rendered greyed, with DataAge beside it, so the number cannot be read
+        // as current. Never true for a disabled device - that row has no value.
+        Stale: stale,
+        DataAge: stale ? ageText(ageSec) : null,
         Ch: ch,
         // Rendered as the Diagnostics "Bus" column (2026-09-19). Comes from the
         // APPLIED config, not from the reading that happened to arrive: a
@@ -133,7 +171,7 @@ function buildSlaveRows(doc, cache, { nowMs = Date.now(), staleMs = DEFAULT_STAL
         // answers on a bus the config does not place it on.
         Bus: slave.bus_id ?? (r && r.bus_id) ?? null,
         SlaveId: slave.slave_id ?? null,
-        AgeSec: r ? Math.round((nowMs - r.ts) / 1000) : null,
+        AgeSec: ageSec,
       });
     }
   }
@@ -321,5 +359,6 @@ module.exports = {
   channelAddress,
   channelName,
   statusFor,
+  ageText,
   DEFAULT_STALE_MS,
 };

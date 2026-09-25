@@ -153,7 +153,41 @@ function computeRollup(liveJoints, activeAlarms, latch, opts = {}) {
     const temp = num(j.temp_c);
     const dt = num(j.deltaT);
     const ror = num(j.ror);
-    perJoint[j.joint_id] = { level, state, temp, deltaT: dt, ror };
+    /*
+     * A NON-LIVE JOINT HAS NO MEASUREMENT (2026-09-25).
+     *
+     * Its last reading is held nowhere: `temp`/`deltaT`/`ror` go null, so
+     * `buildImage` encodes the documented no-data sentinel (-32768) into its
+     * Tier-3 registers. This is what `docs/bms-register-map.md` has always
+     * promised - "its measurement registers read the no-data sentinel, not a
+     * stale value, so a gateway never mistakes a frozen reading for a live
+     * one" - and the code was quietly doing the opposite, presenting the last
+     * temperature of a dark joint for ever.
+     *
+     * Modbus carries no quality channel, and our Pi answers the gateway
+     * happily whether or not the RS-485 sensor behind it is alive - so the
+     * MGate's own timeout detection cannot see this failure, and no BACnet
+     * `Reliability` can be raised per command (bms-mgate5217-integration.md
+     * §3). The sentinel is therefore the ONLY way "I cannot see this joint"
+     * reaches the BMS. A held value would read as a live one to a high-limit
+     * alarm on a fire-safety point.
+     *
+     * The `state` register still says WHY (1 = STALE, 2 = OFFLINE), but it is
+     * deliberately not the only signal: a point engineer maps the temperature
+     * the customer asked for and routinely does not map the status point.
+     *
+     * Enforced HERE rather than in the caller so it cannot be bypassed - the
+     * same rule, in the same loop, that already keeps a non-LIVE joint out of
+     * the panel and zone maxima below.
+     */
+    const live = state === 'LIVE';
+    perJoint[j.joint_id] = {
+      level,
+      state,
+      temp: live ? temp : null,
+      deltaT: live ? dt : null,
+      ror: live ? ror : null,
+    };
     if (state === 'LIVE') liveCount++;
 
     // Only measurable (LIVE) joints contribute to maxima — a stale/offline

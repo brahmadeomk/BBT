@@ -105,3 +105,70 @@ describe('computeRollup — panel/zone/joint aggregates + counts', () => {
     assert.equal(r.perZone.Z2.max_temp, 50);
   });
 });
+
+describe('a non-LIVE joint carries NO measurement (2026-09-25)', () => {
+  /*
+   * docs/bms-register-map.md has always promised this: "its measurement
+   * registers read the no-data sentinel, not a stale value, so a gateway never
+   * mistakes a frozen reading for a live one." The code did the opposite - it
+   * presented a dark joint's last temperature for ever.
+   *
+   * It matters because Modbus carries no quality channel and the Pi answers the
+   * gateway happily whether or not the sensor behind it is alive, so the
+   * gateway's own timeout detection cannot see this failure. The sentinel is
+   * the only way it reaches the BMS.
+   */
+  const dark = (state) => [
+    { joint_id: 'J01', zone_id: 'Z1', temp_c: 42.7, deltaT: 12.1, ror: 0.4, state },
+    ...liveJoints.slice(1),
+  ];
+
+  for (const state of ['STALE', 'OFFLINE']) {
+    test(`${state}: temp, deltaT and ror are all null`, () => {
+      const r = computeRollup(dark(state), [], new WorstJointLatch());
+      assert.deepEqual(
+        { temp: r.perJoint.J01.temp, deltaT: r.perJoint.J01.deltaT, ror: r.perJoint.J01.ror },
+        { temp: null, deltaT: null, ror: null }
+      );
+    });
+
+    test(`${state}: the state itself still says why`, () => {
+      // The value is withheld, not the diagnosis - a BMS that DID map the
+      // status point must still be able to tell STALE from OFFLINE.
+      assert.equal(computeRollup(dark(state), [], new WorstJointLatch()).perJoint.J01.state, state);
+    });
+  }
+
+  test('a LIVE joint is completely unaffected', () => {
+    const r = computeRollup(liveJoints, [], new WorstJointLatch());
+    assert.deepEqual(
+      { temp: r.perJoint.J01.temp, deltaT: r.perJoint.J01.deltaT, ror: r.perJoint.J01.ror },
+      { temp: 60, deltaT: 27, ror: 4 }
+    );
+  });
+
+  test('a real 0.0 C on a LIVE joint survives - it is not "no data"', () => {
+    // The distinction the sentinel exists to preserve. A null here would make
+    // a genuine zero indistinguishable from a dead sensor.
+    const r = computeRollup(
+      [{ joint_id: 'J01', zone_id: 'Z1', temp_c: 0, deltaT: 0, ror: 0, state: 'LIVE' }],
+      [], new WorstJointLatch()
+    );
+    assert.equal(r.perJoint.J01.temp, 0);
+    assert.equal(r.perJoint.J01.deltaT, 0);
+  });
+
+  test("a dark joint's last value never reaches the panel or zone maxima", () => {
+    // Already true before this change; pinned here because withholding the
+    // value and excluding it from the maxima are one rule, and a future edit
+    // that restored the value would have to defeat both.
+    const r = computeRollup(
+      [{ joint_id: 'J01', zone_id: 'Z1', temp_c: 999, deltaT: 999, ror: 999, state: 'OFFLINE' },
+       { joint_id: 'J02', zone_id: 'Z1', temp_c: 45, deltaT: 12, ror: 1, state: 'LIVE' }],
+      [], new WorstJointLatch()
+    );
+    assert.equal(r.panel_max_temp, 45);
+    assert.equal(r.perZone.Z1.max_temp, 45);
+    assert.equal(r.live_joint_count, 1);
+  });
+});
